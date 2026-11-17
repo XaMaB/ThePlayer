@@ -147,7 +147,7 @@ test('HTTP client retries, slices ignored range requests and aborts pending read
 
 const { compatibleVariants, alignRendition, segmentAt, switchBoundary } =
   await module('renditions');
-test('codec filtering accepts HE-AAC v1 and excludes HEVC and Dolby', () => {
+test('codec filtering accepts HE-AAC v1 and excludes unsupported Dolby combinations', () => {
   const variants = [
     { url: 'a', bandwidth: 1, codecs: 'avc1.64001f,mp4a.40.2' },
     { url: 'b', bandwidth: 2, codecs: 'avc1.64001f,mp4a.40.5' },
@@ -408,7 +408,36 @@ test('legacy decimal AVC profile/level metadata is normalized without changing t
   ];
   assert.deepEqual(
     compatibleVariants(input).map((v) => v.codecs),
-    ['mp4a.40.2,avc1.42001e'],
+    ['mp4a.40.2,avc1.42001e', 'mp4a.40.2,hvc1.1.6.L150.90'],
   );
   assert.equal(input[0].codecs, 'mp4a.40.2, avc1.66.30');
+});
+
+const { browserVariants } = await module('renditions');
+const { hevcCodec, hevcConfiguration } = await module('hevc');
+test('HEVC codec strings retain tier case and reverse compatibility bits', () => {
+  const config = new Uint8Array(23);
+  config.set([1, 1, 0x60, 0, 0, 0, 0x90, 0, 0, 0, 0, 0, 150]);
+  assert.equal(hevcCodec(config), 'hvc1.1.6.L150.90');
+  assert.equal(normalizeCodec(' HVC1.1.6.l150.90 '), 'hvc1.1.6.L150.90');
+  assert.throws(() => hevcCodec(config.slice(0, 12)), /Invalid/);
+  assert.throws(
+    () =>
+      hevcConfiguration(new Uint8Array(), new Uint8Array(), new Uint8Array()),
+    /Truncated/,
+  );
+});
+test('browser capability filters HEVC without losing standalone audio', () => {
+  const variants = [
+    { url: 'hevc', bandwidth: 1000000, codecs: 'hvc1.1.6.L150.90,mp4a.40.2' },
+    { url: 'audio', bandwidth: 64000, codecs: 'mp4a.40.2' },
+    { url: 'avc', bandwidth: 500000, codecs: 'avc1.640028,mp4a.40.2' },
+  ];
+  assert.deepEqual(
+    browserVariants(variants, (mime) => !mime.includes('hvc1')).map(
+      (v) => v.url,
+    ),
+    ['audio', 'avc'],
+  );
+  assert.equal(browserVariants(variants, () => true).length, 3);
 });

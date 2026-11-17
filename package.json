@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "0.4.0-alpha.1",
+  "version": "0.5.0-alpha.1",
   "private": true,
   "description": "Modular MoQ player with an original experimental HLS engine",
   "type": "module",
@@ -21,7 +21,7 @@
     "export": "node scripts/export.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
-    "test:hls": "node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs",
+    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs",
     "test:hls:public": "node tests/hls-public.mjs",
     "test:hls:mux": "node tests/hls-mux-audit.mjs"
   },

@@ -15,6 +15,8 @@ export interface PlaybackEngine extends EventTarget {
   readonly subtitleTracks: any[];
   readonly selectedAudioTrack: string;
   readonly isLive?: boolean;
+  readonly mediaMode?: 'video' | 'audio';
+  readonly availableMediaModes?: ('video' | 'audio')[];
   readonly qualityLevels?: any[];
   readonly selectedQuality?: number;
   readonly currentQuality?: number;
@@ -167,6 +169,24 @@ export class PlayerCore extends EventTarget {
   }
   get selectedAudioTrack() {
     return this.engine?.selectedAudioTrack ?? '';
+  }
+  get mediaMode() {
+    return this.engine?.mediaMode ?? 'video';
+  }
+  get availableMediaModes() {
+    return this.engine?.availableMediaModes ?? [];
+  }
+  async selectMediaMode(media: 'video' | 'audio') {
+    if (this.protocol !== 'hls' || !this.availableMediaModes.includes(media))
+      throw new Error('Media mode is unavailable');
+    if (this.mediaMode === media) return;
+    await this.load({
+      ...this.source,
+      media,
+      quality: 'auto',
+      startTime: this.isLive ? undefined : this.video.currentTime,
+      autoplay: !this.video.paused,
+    });
   }
   get qualityLevels() {
     return this.engine?.qualityLevels ?? [];

@@ -1,4 +1,6 @@
-/** Small ISO BMFF reader/writer for the AVC/AAC HLS baseline. */
+import { hevcCodec } from './hevc';
+
+/** ISO BMFF reader/writer for AVC, HEVC and AAC. */
 export const concat = (...parts: Uint8Array[]) => {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
@@ -59,6 +61,7 @@ export interface Track {
   height?: number;
   sps?: Uint8Array;
   pps?: Uint8Array;
+  hvcc?: Uint8Array;
   asc?: Uint8Array;
   channels?: number;
 }
@@ -168,13 +171,15 @@ export function inspectInit(data: Uint8Array): Track[] {
           Array.from(avcc.subarray(1, 4), (n) =>
             n.toString(16).padStart(2, '0'),
           ).join('');
+      } else if (entry.type === 'hvc1' || entry.type === 'hev1') {
+        codec = hevcCodec(child(entry.body.subarray(78), 'hvcC'), entry.type);
       } else if (entry.type === 'mp4a') {
         const esds = child(entry.body.subarray(28), 'esds');
         const objectType = audioObjectType(esds.subarray(4));
         codec = 'mp4a.40.' + objectType;
       } else
         throw new Error(
-          `Unsupported HLS sample entry ${entry.type}; baseline supports AVC/AAC`,
+          `Unsupported HLS sample entry ${entry.type}; supports AVC/HEVC/AAC`,
         );
       return {
         id: read32(tkhd, tkhd[0] === 1 ? 20 : 12),
@@ -205,17 +210,19 @@ function sampleEntry(t: Track): Uint8Array {
   if (t.kind === 'video') {
     const sps = t.sps!,
       pps = t.pps!;
-    const avcc = box(
-      'avcC',
-      new Uint8Array([1, sps[1], sps[2], sps[3], 255, 225]),
-      u16(sps.length),
-      sps,
-      new Uint8Array([1]),
-      u16(pps.length),
-      pps,
-    );
+    const avcc = t.hvcc
+      ? box('hvcC', t.hvcc)
+      : box(
+          'avcC',
+          new Uint8Array([1, sps[1], sps[2], sps[3], 255, 225]),
+          u16(sps.length),
+          sps,
+          new Uint8Array([1]),
+          u16(pps.length),
+          pps,
+        );
     return box(
-      'avc1',
+      t.hvcc ? 'hvc1' : 'avc1',
       zero(6),
       u16(1),
       zero(16),
@@ -345,7 +352,7 @@ export function initialization(tracks: Track[]): Uint8Array {
     ),
   );
   return concat(
-    box('ftyp', ascii('iso6'), u32(1), ascii('iso6isommp41avc1')),
+    box('ftyp', ascii('iso6'), u32(1), ascii('iso6isommp41')),
     box('moov', mvhd, ...traks, mvex),
   );
 }

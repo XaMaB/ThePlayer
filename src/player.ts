@@ -1,3 +1,4 @@
+export { VERSION } from './version';
 import { PlayerCore, type EngineRegistry } from './core/player';
 import type { HlsSource } from './engines/hls/engine';
 import { MoqEngine, type PlayerSource } from './engines/moq/engine';

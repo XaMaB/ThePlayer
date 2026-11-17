@@ -288,3 +288,121 @@ bframes/index.m3u8
 bframes-high/index.m3u8
 `,
 );
+
+// HEVC Main/Main10, including reordered pictures, and standalone AAC ladders.
+for (const depth of [8, 10]) {
+  const dir = path.join(root, 'hevc-' + depth);
+  await mkdir(dir, { recursive: true });
+  ffmpeg(
+    '-filter_threads',
+    '1',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x180:rate=25',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=660:sample_rate=48000',
+    '-t',
+    '8',
+    '-c:v',
+    'libx265',
+    '-preset',
+    'ultrafast',
+    '-threads',
+    '2',
+    '-x265-params',
+    'pools=1:frame-threads=1:keyint=50:min-keyint=50:scenecut=0:open-gop=0:log-level=error',
+    '-pix_fmt',
+    depth === 10 ? 'yuv420p10le' : 'yuv420p',
+    '-c:a',
+    'aac',
+    '-f',
+    'hls',
+    '-hls_time',
+    '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.ts'),
+    path.join(dir, 'index.m3u8'),
+  );
+  ffmpeg(
+    '-i',
+    path.join(dir, 'index.m3u8'),
+    '-c',
+    'copy',
+    '-bsf:a',
+    'aac_adtstoasc',
+    '-tag:v',
+    'hvc1',
+    '-f',
+    'hls',
+    '-hls_time',
+    '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_type',
+    'fmp4',
+    '-hls_fmp4_init_filename',
+    'init.mp4',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.m4s'),
+    path.join(dir, 'fmp4.m3u8'),
+  );
+}
+for (const rate of [64, 128]) {
+  const dir = path.join(root, 'audio-' + rate);
+  await mkdir(dir, { recursive: true });
+  ffmpeg(
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:sample_rate=48000',
+    '-t',
+    '18',
+    '-c:a',
+    'aac',
+    '-b:a',
+    rate + 'k',
+    '-f',
+    'hls',
+    '-hls_time',
+    rate === 128 ? '4' : '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.ts'),
+    path.join(dir, 'index.m3u8'),
+  );
+  ffmpeg(
+    '-i',
+    path.join(dir, 'index.m3u8'),
+    '-c',
+    'copy',
+    '-bsf:a',
+    'aac_adtstoasc',
+    '-f',
+    'hls',
+    '-hls_time',
+    rate === 128 ? '4' : '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_type',
+    'fmp4',
+    '-hls_fmp4_init_filename',
+    'init.mp4',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.m4s'),
+    path.join(dir, 'fmp4.m3u8'),
+  );
+}
+const audioLadder =
+  '#EXT-X-STREAM-INF:BANDWIDTH=72000,CODECS="mp4a.40.2"\naudio-64/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=140000,CODECS="mp4a.40.2"\naudio-128/index.m3u8\n';
+await writeFile(path.join(root, 'audio-only.m3u8'), '#EXTM3U\n' + audioLadder);
+await writeFile(
+  path.join(root, 'mixed-media.m3u8'),
+  '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=320x180,CODECS="avc1.42c00c,mp4a.40.2"\nts/index.m3u8\n' +
+    audioLadder,
+);

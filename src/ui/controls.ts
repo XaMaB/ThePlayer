@@ -1,3 +1,5 @@
+import { VERSION } from '../version';
+
 let keyboardOwner: HTMLElement | undefined;
 
 /** In-video controls shared by the playground and standalone embed. No timeline for live TV. */
@@ -10,6 +12,7 @@ export function mountControls(
   // The existing ThePlayer mark, inline so embeds do not need an asset URL.
   const brand =
     '<span class="player-brand"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M42 48h148v32h-58v128H98V80H42zM150 100l70 44-70 44z" fill="currentColor"/><path d="M42 112h28m-28 32h18m-18 32h28" stroke="currentColor" stroke-width="8" stroke-linecap="round" opacity=".55"/></svg><strong>ThePlayer</strong></span>';
+  const version = `<small class="player-version">v${VERSION}</small>`;
   const originalChildren = new Set(screen.children);
   const abort = new AbortController();
   const listen = (
@@ -42,6 +45,7 @@ export function mountControls(
     'beforeend',
     `
   <button id="live-button" hidden class="live-indicator" title="Return to live" aria-label="Return to live"><span></span>LIVE</button>
+  <div id="audio-only-label" class="audio-only-label" hidden>Audio only</div>
   <div class="center-controls" role="group" aria-label="Quick playback controls">
    <button id="skip-back" class="icon-button center-button" title="Back 10 seconds (←)" aria-label="Back 10 seconds">${svg('back')}</button>
    <button id="center-play" class="icon-button center-button center-play" title="Play / Pause (Space)" aria-label="Play">${svg('play')}</button>
@@ -62,9 +66,9 @@ export function mountControls(
   <div id="cc-menu" class="video-popup track-menu" hidden><strong>Subtitles</strong><select id="subtitle-select" hidden aria-hidden="true"><option value="">Off</option></select><div class="track-options" role="menu" aria-label="Subtitle tracks"></div></div>
   <div id="quality-menu" class="video-popup track-menu" hidden><strong>Quality</strong><div class="track-options" role="menu" aria-label="Quality levels"></div></div>
   <div id="audio-menu" class="video-popup track-menu" hidden><strong>Audio language</strong><div class="track-options" role="menu" aria-label="Audio tracks"></div></div>
-  <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><div class="context-brand">${brand}</div><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
+  <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><div class="context-brand">${brand}${version}</div><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
   <section id="stats-overlay" class="stats-overlay" aria-label="mediainfo" hidden>
-   <div class="stats-title">${brand}<span>mediainfo</span><button id="stats-close" aria-label="Close stats" title="Close stats">×</button></div>
+   <div class="stats-title">${brand}${version}<span>mediainfo</span><button id="stats-close" aria-label="Close stats" title="Close stats">×</button></div>
    <dl><dt>Quality</dt><dd id="stats-quality">—</dd><dt>Resolution</dt><dd id="stats-resolution">—</dd><dt>Frames / dropped</dt><dd><span id="frames">0</span> / <span id="dropped">0</span></dd>
    <dt>Buffer health</dt><dd><span id="buffer">0.00</span> s <span id="buffer-detail">· cache reserve</span></dd>
    <dt>Received payload</dt><dd><span id="bitrate">—</span> Mb/s</dd><dt>First picture</dt><dd id="stats-first-picture">—</dd><dt>4 s reserve ready</dt><dd id="stats-reserve-ready">—</dd><dt>Media objects</dt><dd id="stats-objects">0</dd>
@@ -345,6 +349,25 @@ export function mountControls(
           quality.focus();
         },
       );
+    for (const mode of p?.availableMediaModes ?? []) {
+      if (mode === p.mediaMode) continue;
+      option(
+        list,
+        'media-' + mode,
+        mode === 'audio' ? 'Audio only' : 'Video',
+        false,
+        async () => {
+          for (const button of list.querySelectorAll('button'))
+            button.disabled = true;
+          try {
+            await p.selectMediaMode(mode);
+          } catch (e: any) {
+            report(e.message);
+          }
+          closeMenus();
+        },
+      );
+    }
     qualityMenu.hidden = !open;
     quality.setAttribute('aria-expanded', String(open));
     showControls();
@@ -573,6 +596,7 @@ export function mountControls(
   };
   function syncQuality() {
     const p = getPlayer();
+    el('audio-only-label').hidden = p?.mediaMode !== 'audio';
     const qualityLabel = p?.qualityLevels?.length
       ? `${p.autoQuality ? 'Auto · ' : ''}${qualityName(p)}`
       : '—';
@@ -586,19 +610,21 @@ export function mountControls(
     const height =
       video.videoHeight || Number(level?.resolution?.split('x')[1]) || 0;
     el('quality-badge').textContent =
-      height >= 4320
-        ? '8K'
-        : height >= 2160
-          ? '4K'
-          : height >= 1440
-            ? 'QHD'
-            : height >= 1080
-              ? 'FHD'
-              : height >= 720
-                ? 'HD'
-                : height > 0
-                  ? 'SD'
-                  : '—';
+      p?.mediaMode === 'audio'
+        ? '♪'
+        : height >= 4320
+          ? '8K'
+          : height >= 2160
+            ? '4K'
+            : height >= 1440
+              ? 'QHD'
+              : height >= 1080
+                ? 'FHD'
+                : height >= 720
+                  ? 'HD'
+                  : height > 0
+                    ? 'SD'
+                    : '—';
     quality.title = `Quality: ${qualityLabel}`;
     const autoOption =
       qualityMenu.querySelector<HTMLElement>('[data-track="-1"]');
@@ -611,7 +637,8 @@ export function mountControls(
   }
   const statsTimer = setInterval(() => {
     (quality as HTMLButtonElement).disabled =
-      (getPlayer()?.qualityLevels?.length ?? 0) < 2;
+      (getPlayer()?.qualityLevels?.length ?? 0) < 2 &&
+      (getPlayer()?.availableMediaModes?.length ?? 0) < 2;
     (audio as HTMLButtonElement).disabled = !getPlayer()?.audioTracks?.length;
     const p = getPlayer(),
       q = video.getVideoPlaybackQuality(),
@@ -638,8 +665,12 @@ export function mountControls(
       el('playback-time').textContent =
         `${clock(video.currentTime)} / ${clock(Number.isFinite(video.duration) ? video.duration : 0)}`;
     }
-    el('frames').textContent = q.totalVideoFrames.toLocaleString('en-US');
-    el('dropped').textContent = String(q.droppedVideoFrames);
+    el('frames').textContent =
+      p?.mediaMode === 'audio'
+        ? '—'
+        : q.totalVideoFrames.toLocaleString('en-US');
+    el('dropped').textContent =
+      p?.mediaMode === 'audio' ? '—' : String(q.droppedVideoFrames);
     el('stats-resolution').textContent = video.videoWidth
       ? `${video.videoWidth} × ${video.videoHeight}`
       : '—';

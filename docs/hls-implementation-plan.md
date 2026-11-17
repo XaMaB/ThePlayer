@@ -1,6 +1,6 @@
 # HLS implementation plan
 
-Status: original experimental baseline, separate AAC audio and manual quality switching implemented. Auto ABR and default/automatic rendition selection are implemented. LL-HLS and TTML remain subsequent stages. See [current support](hls-support.md) and [architecture research](hls-research.md). The stages below describe the full intended scope, not the capabilities of the baseline.
+Status: original experimental baseline, separate AAC audio and manual quality switching implemented. Auto ABR and default/automatic rendition selection are implemented. Version 0.5.0-alpha.1 adds HEVC Main/Main10 remux and standalone AAC audio-only TS/fMP4, with browser codec capability filtering. LL-HLS and TTML remain subsequent stages. See [current support](hls-support.md) and [architecture research](hls-research.md). The stages below describe the full intended scope, not the capabilities of the baseline.
 
 ## Specification baseline
 

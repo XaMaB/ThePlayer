@@ -1,3 +1,4 @@
+import type { Track } from './mp4';
 import { selectRendition } from './selection';
 import { AbrController } from './abr';
 import { bufferedAhead, nextGapPosition } from './buffer';
@@ -13,7 +14,8 @@ import {
 import { ResourceClient, delay, type NetworkOptions } from './network';
 import { MediaLane, type PreparedSegment } from './media-lane';
 import {
-  compatibleVariants,
+  browserVariants,
+  hasVideo,
   alignRendition,
   segmentAt,
   switchBoundary,
@@ -28,6 +30,8 @@ export interface HlsSource {
   targetBuffer?: number;
   autoplay?: boolean;
   quality?: 'auto' | number;
+  media?: 'video' | 'audio';
+  startTime?: number;
   audioLanguage?: string;
   subtitleLanguage?: string;
   preferredLanguages?: string[];
@@ -52,6 +56,8 @@ export class HlsEngine extends EventTarget {
   };
   catalog: any = { profile: 'hls', tracks: [], subtitles: [] };
   isLive = false;
+  mediaMode: 'video' | 'audio' = 'video';
+  availableMediaModes: ('video' | 'audio')[] = [];
   audioTracks: any[] = [];
   subtitleTracks: any[] = [];
   selectedAudioTrack = '';
@@ -117,6 +123,13 @@ export class HlsEngine extends EventTarget {
         source.targetBuffer > 120)
     )
       throw new Error('HLS targetBuffer must be between 2 and 120 seconds');
+    if (source.media != null && !['video', 'audio'].includes(source.media))
+      throw new Error('Unknown HLS media mode');
+    if (
+      source.startTime != null &&
+      (!Number.isFinite(source.startTime) || source.startTime < 0)
+    )
+      throw new Error('Invalid HLS startTime');
     this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
     video.addEventListener('playing', () => this.state('playing'), {
       signal: this.abort.signal,
@@ -194,20 +207,22 @@ export class HlsEngine extends EventTarget {
     let p = await this.readPlaylist(this.source.url);
     if (p.variants.length) {
       this.master = p;
-      let usable = compatibleVariants(p.variants);
-      if (
-        p.variants.some(
-          (v) =>
-            v.resolution ||
-            /(?:^|,)\s*(?:avc[13]|hvc1|hev1|av01|vp0[89])\./i.test(
-              v.codecs ?? '',
-            ),
-        )
-      )
-        usable = usable.filter(
-          (v) => v.resolution || v.codecs?.includes('avc'),
+      let usable = browserVariants(p.variants, (mime) =>
+        MediaSource.isTypeSupported(mime),
+      );
+      this.availableMediaModes = [];
+      if (usable.some(hasVideo)) this.availableMediaModes.push('video');
+      if (usable.some((v) => !hasVideo(v)))
+        this.availableMediaModes.push('audio');
+      this.mediaMode =
+        this.source.media ?? (p.variants.some(hasVideo) ? 'video' : 'audio');
+      usable = usable.filter(
+        (v) => hasVideo(v) === (this.mediaMode === 'video'),
+      );
+      if (!usable.length)
+        throw new Error(
+          'No supported ' + this.mediaMode + ' rendition for this browser',
         );
-      if (!usable.length) throw new Error('No supported AVC/AAC rendition');
       usable.sort((a, b) => a.bandwidth - b.bandwidth);
       let variant = usable[0];
       // Restrict switches to one audio/subtitle group until cross-group transitions are implemented.
@@ -294,7 +309,7 @@ export class HlsEngine extends EventTarget {
     void this.run().catch((error) => this.fail(error));
   }
   private startIndex(p: Playlist) {
-    const offset = p.startOffset;
+    const offset = this.source.startTime ?? p.startOffset;
     const time =
       offset != null
         ? offset < 0
@@ -358,13 +373,19 @@ export class HlsEngine extends EventTarget {
       prepared.tracks.some((t) => t.kind === 'audio')
     )
       throw new Error('External audio requires a video-only main rendition');
+    if (
+      lane.role === 'main' &&
+      this.source.media === 'audio' &&
+      prepared.tracks.some((t) => t.kind === 'video')
+    )
+      throw new Error('Audio-only mode requires an audio-only rendition');
     const codecs = prepared.tracks.map((t) => t.codec).join(',');
     if (
       !MediaSource.isTypeSupported(
         `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codecs}"`,
       )
     )
-      throw new Error('Unsupported rendition codec');
+      throw new Error('Unsupported browser codec: ' + codecs);
   }
   private async appendPrepared(lane: MediaLane, prepared: PreparedSegment) {
     this.assertLayout(prepared, lane);
@@ -453,7 +474,18 @@ export class HlsEngine extends EventTarget {
             p.segments.at(-1)!.start + p.segments.at(-1)!.duration;
       }
       if (this.initial && this.video.buffered.length) {
-        this.video.currentTime = this.video.buffered.start(0) + 0.001;
+        this.video.currentTime = Math.max(
+          this.video.buffered.start(0) + 0.001,
+          Math.min(
+            this.source.startTime ?? 0,
+            this.video.buffered.end(0) - 0.001,
+          ),
+        );
+        this.mediaMode = this.main!.tracks.some((t) => t.kind === 'video')
+          ? 'video'
+          : 'audio';
+        if (!this.availableMediaModes.length)
+          this.availableMediaModes = [this.mediaMode];
         this.initial = false;
         if (this.source.autoplay !== false) void this.play();
       }
@@ -533,11 +565,12 @@ export class HlsEngine extends EventTarget {
     this.emit('catalog', this.catalog);
     if (!this.started) {
       this.started = true;
-      this.video.requestVideoFrameCallback(() => {
-        if (!this.abort.signal.aborted)
-          this.diagnostics.startup.firstFrameMs =
-            performance.now() - this.loadTime;
-      });
+      if (this.catalog.tracks.some((t: Track) => t.kind === 'video'))
+        this.video.requestVideoFrameCallback(() => {
+          if (!this.abort.signal.aborted)
+            this.diagnostics.startup.firstFrameMs =
+              performance.now() - this.loadTime;
+        });
     }
   }
   private enqueueSwitch(kind: 'audio' | 'quality', index: number) {
@@ -585,11 +618,26 @@ export class HlsEngine extends EventTarget {
         p,
         Math.max(
           this.video.currentTime,
-          Math.min(this.video.currentTime + lead, bufferedEnd - 0.16),
+          Math.min(this.video.currentTime + lead, bufferedEnd - 0.26),
         ),
       );
-      lane.next = segmentAt(p, boundary);
+      // Segment starts are rounded in playlists while AAC ends fall on frame
+      // boundaries. Never drop the old lane with an unfilled interval before
+      // the chosen switch, including switches across differently sized segments.
       const token = this.generation;
+      while (
+        old.next < old.playlist.segments.length &&
+        old.playlist.segments[old.next].start < boundary &&
+        this.video.currentTime + old.ahead(this.video.currentTime) <
+          boundary - 0.05
+      ) {
+        const bridge = await old.prepare();
+        if (token !== this.generation) break;
+        await this.appendPrepared(old, bridge);
+        old.next++;
+      }
+      if (token !== this.generation) continue;
+      lane.next = segmentAt(p, boundary);
       prepared = await lane.prepare();
       this.assertLayout(prepared, lane);
       if (

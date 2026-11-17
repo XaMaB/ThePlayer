@@ -115,6 +115,14 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['hevc-8/index.m3u8', 'fetch'],
+    ['hevc-8/fmp4.m3u8', 'fetch'],
+    ['hevc-10/index.m3u8', 'fetch'],
+    ['hevc-10/fmp4.m3u8', 'fetch'],
+    ['audio-only.m3u8', 'fetch'],
+    ['audio-64/index.m3u8', 'fetch'],
+    ['audio-64/fmp4.m3u8', 'xhr'],
+    ['mixed-media.m3u8', 'fetch'],
     ['renditions.m3u8', 'fetch'],
     ['ts-renditions.m3u8', 'fetch'],
     ['ts/index.m3u8', 'fetch'],
@@ -129,6 +137,12 @@ try {
     ['event.m3u8', 'fetch'],
     ['discontinuity.m3u8', 'fetch'],
   ]) {
+    if (
+      process.env.HLS_FIXTURE_FILTER &&
+      !source.includes(process.env.HLS_FIXTURE_FILTER)
+    )
+      continue;
+    const audioOnly = source.startsWith('audio-');
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -142,14 +156,129 @@ try {
         }),
     );
     try {
+      if (
+        source.startsWith('hevc-') &&
+        !(await page.evaluate(() =>
+          MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L93.B0"'),
+        ))
+      ) {
+        await page.waitForFunction(
+          () => window.player?.diagnostics?.state === 'error',
+        );
+        assert.ok(
+          await page.evaluate(() =>
+            window.__moq.diagnostics.errors.some((e) =>
+              String(e).includes('Unsupported browser codec'),
+            ),
+          ),
+        );
+        console.log(
+          'CAPABILITY REJECTION',
+          source,
+          'browser has no HEVC decoder; independent FFmpeg tests verify remux',
+        );
+        continue;
+      }
       await page.waitForFunction(
-        () =>
+        (audio) =>
           window.player?.diagnostics?.state === 'playing' &&
-          document.querySelector('video').getVideoPlaybackQuality()
-            .totalVideoFrames > 40,
-        null,
+          (audio
+            ? document.querySelector('video').currentTime > 1
+            : document.querySelector('video').getVideoPlaybackQuality()
+                .totalVideoFrames > 40),
+        audioOnly,
         { timeout: 25000 },
       );
+      if (audioOnly || source === 'mixed-media.m3u8') {
+        if (!audioOnly) {
+          await page.evaluate(() => document.querySelector('video').pause());
+          const position = await page.evaluate(
+            () => document.querySelector('video').currentTime,
+          );
+          await page.locator('#quality-toggle').click();
+          await page.locator('[data-track="media-audio"]').click();
+          await page.waitForFunction(
+            () =>
+              window.player.mediaMode === 'audio' &&
+              document.querySelector('video').readyState >= 2,
+          );
+          assert.equal(
+            await page.evaluate(() => document.querySelector('video').paused),
+            true,
+          );
+          assert.ok(
+            Math.abs(
+              (await page.evaluate(
+                () => document.querySelector('video').currentTime,
+              )) - position,
+            ) < 0.2,
+          );
+          await page.evaluate(() => window.player.play());
+        }
+        await page.waitForFunction(
+          () =>
+            window.player.catalog.tracks.length === 1 &&
+            window.player.catalog.tracks[0].role === 'audio',
+        );
+        await page.waitForFunction(
+          () => !document.querySelector('#audio-only-label').hidden,
+        );
+        const before = await page.evaluate(
+          () => document.querySelector('video').currentTime,
+        );
+        await page.waitForFunction(
+          (t) => document.querySelector('video').currentTime > t + 1,
+          before,
+        );
+        if (source === 'audio-only.m3u8') {
+          // Switch a paused, two-second buffer to a four-second-segment ladder.
+          // The scheduler must fill the old lane up to the new boundary.
+          await page.evaluate(() =>
+            window.player.load({
+              ...window.player.source,
+              quality: 0,
+              targetBuffer: 2,
+              autoplay: false,
+            }),
+          );
+          await page.waitForFunction(
+            () =>
+              document.querySelector('video').readyState >= 2 &&
+              window.player.catalog.tracks.length === 1,
+          );
+          await page.evaluate(() => window.player.selectQuality(1));
+          assert.equal(
+            await page.evaluate(() => window.player.selectedQuality),
+            1,
+          );
+          await page.evaluate(() => window.player.play());
+          await page.waitForFunction(
+            () => document.querySelector('video').currentTime > 5,
+          );
+          await page.evaluate(() => {
+            document.querySelector('video').currentTime = 12;
+          });
+          await page.waitForFunction(
+            () => document.querySelector('video').currentTime > 12.5,
+          );
+        }
+        if (!audioOnly) {
+          await page.evaluate(() => window.player.selectMediaMode('video'));
+          await page.waitForFunction(
+            () =>
+              document.querySelector('video').videoWidth === 320 &&
+              document.querySelector('video').getVideoPlaybackQuality()
+                .totalVideoFrames > 30,
+          );
+        }
+        assert.equal(
+          await page.locator('.stats-title .player-version').textContent(),
+          'v' +
+            JSON.parse(
+              await readFile(path.join(playerRoot, 'package.json'), 'utf8'),
+            ).version,
+        );
+      }
       if (source === 'event.m3u8')
         await page.waitForFunction(() => window.player.isLive === false, null, {
           timeout: 10000,

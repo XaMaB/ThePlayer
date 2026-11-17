@@ -31,7 +31,7 @@ flowchart LR
   Playlist --> Scheduler[Segment and reload scheduler]
   Scheduler --> HTTP[Fetch or XHR]
   HTTP --> Crypto[AES-128 when required]
-  Crypto --> TS[TS AVC/AAC demux and fMP4 writer]
+  Crypto --> TS[TS AVC/HEVC/AAC demux and fMP4 writer]
   Crypto --> MP4[fMP4 inspection]
   TS --> MSE[Serialized MediaSource appends]
   MP4 --> MSE
@@ -45,3 +45,5 @@ flowchart LR
 The baseline is a working vertical slice, not a replacement for mature engines on arbitrary streams. See [the support matrix](hls-support.md) before integration.
 
 Next stages: timestamp/PSI edge cases and external audio; quality selection and ABR; LL-HLS part scheduling with blocking and delta updates; IMSC1/TTML carriage and rendering; broader codecs, EME/DRM, steering and interstitials. Each requires deterministic fixtures and browser checks before it is advertised as supported. Reading a tag does not implement the feature it signals.
+
+HEVC configuration references: the [W3C HEVC codec registration](https://www.w3.org/TR/webcodecs-hevc-codec-registration/) identifies `hvc1`/`hev1` codec strings and the ISO/IEC 14496-15 HEVCDecoderConfigurationRecord. Our TS path parses HEVC parameter sets and builds that record; it does not import another player's HEVC parser. Browser support is checked with MSE against the advertised and actual codec configurations. Independent FFmpeg decoding validates the generated samples separately from browser availability.

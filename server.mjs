@@ -38,6 +38,7 @@ const server = await tlsServer(config, async (req, res) => {
     '/player.js': 'player.js',
     '/core.js': 'core.js',
     '/style.css': 'style.css',
+    '/version.json': 'version.json',
   };
   if (/^\/(?:chunks\/[a-zA-Z0-9_-]+|hls)\.js$/.test(u.pathname))
     return serveFile(res, path.join(here, 'dist', u.pathname.slice(1)));

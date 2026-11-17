@@ -1,3 +1,4 @@
+import { hevcConfiguration } from './hevc';
 import { sampleRates, aacConfiguration } from './aac';
 import {
   concat,
@@ -190,7 +191,7 @@ function demux(bytes: Uint8Array): Pes[] {
         for (; i + 5 <= end; ) {
           const type = payload[i],
             elementary = ((payload[i + 1] & 31) << 8) | payload[i + 2];
-          if (type === 0x1b || type === 0x0f) {
+          if (type === 0x1b || type === 0x24 || type === 0x0f) {
             if (
               Array.from(types).some(
                 ([pid, value]) => value === type && pid !== elementary,
@@ -200,8 +201,8 @@ function demux(bytes: Uint8Array): Pes[] {
                 'Multiple same-kind elementary streams are not yet supported',
               );
             types.set(elementary, type);
-          } else if ([0x24, 0x03, 0x04, 0x81, 0x87].includes(type))
-            throw new Error('TS baseline supports AVC/AAC only');
+          } else if ([0x03, 0x04, 0x81, 0x87].includes(type))
+            throw new Error('TS baseline supports AVC/HEVC/AAC only');
           i += 5 + ((payload[i + 3] & 15) << 8) + payload[i + 4];
         }
       }
@@ -216,7 +217,7 @@ function demux(bytes: Uint8Array): Pes[] {
   }
   for (const pid of pending.keys()) flush(pid);
   if (!packets.length)
-    throw new Error('No supported AVC/AAC elementary streams');
+    throw new Error('No supported AVC/HEVC/AAC elementary streams');
   return packets;
 }
 function nals(data: Uint8Array): Uint8Array[] {
@@ -237,6 +238,7 @@ function nals(data: Uint8Array): Uint8Array[] {
   return out.filter((n) => n.length);
 }
 export class TsTransmuxer {
+  private vps?: Uint8Array;
   private sps?: Uint8Array;
   private pps?: Uint8Array;
   private clock?: number;
@@ -247,7 +249,7 @@ export class TsTransmuxer {
   }
   transmux(bytes: Uint8Array, segmentDuration: number) {
     const pes = demux(bytes);
-    const first = pes.find((p) => p.type === 0x1b) ?? pes[0];
+    const first = pes.find((p) => p.type === 0x1b || p.type === 0x24) ?? pes[0];
     const reference = this.clock ?? first.dts;
     for (const p of pes) {
       p.dts = unwrap(p.dts, reference);
@@ -257,9 +259,59 @@ export class TsTransmuxer {
     const tracks: Track[] = [],
       media: Uint8Array[] = [];
     const starts: number[] = [];
+    const hevc = pes.some((p) => p.type === 0x24);
+    if (hevc && pes.some((p) => p.type === 0x1b))
+      throw new Error('Mixed AVC and HEVC elementary streams');
     const pictures: { sample: Sample; dts: number }[] = [];
-    for (const p of pes.filter((p) => p.type === 0x1b)) {
+    for (const p of pes.filter((p) => p.type === 0x1b || p.type === 0x24)) {
       const units = nals(p.data);
+      if (hevc) {
+        if (
+          units.some(
+            (n) => n.length < 2 || n[0] & 0x81 || n[1] & 0xf8 || !(n[1] & 7),
+          )
+        )
+          throw new Error('Invalid or unsupported multilayer HEVC NAL');
+        const type = (n: Uint8Array) => (n[0] >>> 1) & 63;
+        if (units.filter((n) => type(n) < 32 && n[2] & 128).length > 1)
+          throw new Error(
+            'Multiple HEVC access units per PES are not yet supported',
+          );
+        for (const unit of units) {
+          const previous =
+            type(unit) === 32
+              ? this.vps
+              : type(unit) === 33
+                ? this.sps
+                : type(unit) === 34
+                  ? this.pps
+                  : undefined;
+          if (
+            pictures.length &&
+            previous &&
+            (previous.length !== unit.length ||
+              previous.some((value, i) => value !== unit[i]))
+          )
+            throw new Error('HEVC parameter sets changed within a segment');
+          if (type(unit) === 32) this.vps = unit;
+          if (type(unit) === 33) this.sps = unit;
+          if (type(unit) === 34) this.pps = unit;
+        }
+        if (!units.some((n) => type(n) < 32)) continue;
+        const keep = units.filter(
+          (n) => ![32, 33, 34, 35, 38].includes(type(n)),
+        );
+        pictures.push({
+          dts: p.dts,
+          sample: {
+            data: concat(...keep.flatMap((n) => [u32(n.length), n])),
+            duration: 0,
+            cts: Math.round(p.pts - p.dts),
+            key: units.some((n) => type(n) >= 16 && type(n) <= 21),
+          },
+        });
+        continue;
+      }
       if (units.filter((n) => (n[0] & 31) === 9).length > 1)
         throw new Error(
           'Multiple AVC access units per PES are not yet supported',
@@ -282,7 +334,8 @@ export class TsTransmuxer {
       });
     }
     if (pictures.length) {
-      if (!this.sps || !this.pps) throw new Error('Missing AVC parameter sets');
+      if (!this.sps || !this.pps)
+        throw new Error('Missing video parameter sets');
       if (!pictures[0].sample.key)
         throw new Error('TS baseline needs independently decodable segments');
       const t: Track = {
@@ -296,7 +349,12 @@ export class TsTransmuxer {
           ).join(''),
         sps: this.sps,
         pps: this.pps,
-        ...dimensions(this.sps),
+        ...(hevc
+          ? (() => {
+              if (!this.vps) throw new Error('Missing HEVC VPS');
+              return hevcConfiguration(this.vps, this.sps!, this.pps!);
+            })()
+          : dimensions(this.sps)),
       };
       for (let i = 0; i < pictures.length; i++) {
         const duration = pictures[i + 1]

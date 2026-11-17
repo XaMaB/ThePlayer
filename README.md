@@ -27,11 +27,11 @@ ThePlayer brings multilingual audio, broadcast captions and live playback contro
 
 ## Protocols
 
-| Protocol              | Status                | Notes                                                                       |
-| --------------------- | --------------------- | --------------------------------------------------------------------------- |
-| MoQ over WebTransport | Implemented           | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile          |
-| HLS                   | Experimental baseline | Original TS/fMP4 AVC/AAC engine; [coverage and limits](docs/hls-support.md) |
-| MPEG-DASH             | Planned               | Engine API is in place; no DASH engine ships yet                            |
+| Protocol              | Status                | Notes                                                                            |
+| --------------------- | --------------------- | -------------------------------------------------------------------------------- |
+| MoQ over WebTransport | Implemented           | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile               |
+| HLS                   | Experimental baseline | Original TS/fMP4 AVC/HEVC/AAC engine; [coverage and limits](docs/hls-support.md) |
+| MPEG-DASH             | Planned               | Engine API is in place; no DASH engine ships yet                                 |
 
 MoQ defines transport behavior; applications still need a matching catalog and media profile. An arbitrary MoQ relay or publisher is not automatically interoperable with this player.
 
@@ -59,9 +59,11 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 
 ## Audio and video
 
+HLS supports AVC, HEVC Main/Main10 and AAC in TS/fMP4, including audio-only streams. HEVC playback requires browser/OS decoder support. Mixed masters expose Video / Audio only in the Quality menu. See the [HLS matrix](docs/hls-support.md) for tested formats and device-validation limits.
+
 The MoQ engine appends fragmented MP4 to Media Source Extensions. Playback depends on browser support for the advertised codecs; the player does not transcode. Multilingual audio tracks come from the media catalog. Track switching replaces the audio subscription and buffer while keeping the video connection and timeline.
 
-The current four-second reserve is a buffering policy, not a guaranteed end-to-end latency. Actual buffer health varies with fragment delivery and GOP structure. DRM and adaptive bitrate rendition switching are not implemented.
+The current four-second reserve is a buffering policy, not a guaranteed end-to-end latency. Actual buffer health varies with fragment delivery and GOP structure. The MoQ engine does not implement DRM or adaptive bitrate rendition switching. The HLS engine has Auto ABR and manual quality selection.
 
 A modular browser player for live video. The current engine uses **moq-dev/moq** over WebTransport and plays the `origin-cmaf-v1` media profile. An original experimental HLS engine now handles the tested baseline described in [HLS support](docs/hls-support.md). DASH remains planned.
 
@@ -197,3 +199,7 @@ Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE`, the included ups
 ### Playback shortcuts
 
 Space or K toggles play/pause; Left/Right seeks by ten seconds within the available timeline. The center controls offer the same actions. Live streams can seek only within their available DVR/buffer window. Shortcuts apply to the active player and leave text fields and menu selection keys alone. Unavailable audio/CC controls use an ordinary cursor, not a loading indicator.
+
+## Release identification
+
+Current prerelease: **0.5.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

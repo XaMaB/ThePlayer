@@ -4,30 +4,30 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 
 ## Current coverage
 
-| Area                             | Implementation                                                                           | Validation                                                   |
-| -------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Media and multivariant playlists | Original parser; compatible low-bandwidth startup; Auto ABR and manual quality selection | Unit tests and browser playback                              |
-| MPEG-TS                          | 188-byte packets, PAT/PMT, PES, AVC/H.264 and ADTS AAC-LC / declared HE-AAC v1 → fMP4    | Original synthetic fixtures; independent FFmpeg decode check |
-| Fragmented MP4                   | EXT-X-MAP, AVC/AAC initialization, fragment timing and MSE appends                       | Browser playback and seeking                                 |
-| Live                             | Sliding playlist refresh, sequence alignment, hold-back and LIVE indicator               | Local moving-window server                                   |
-| VOD                              | ENDLIST, finite duration, timeline, seek and playback completion                         | Browser seek tests                                           |
-| EVENT → ended                    | Playlist updates can remove live status on ENDLIST                                       | Local dynamic fixture                                        |
-| Requests                         | Fetch or XHR, abort, timeouts, bounded retry, relative URLs and redirects                | Browser Fetch/XHR; injected HTTP 503; teardown tests         |
-| Byte ranges                      | Explicit and implicit segment offsets; initialization ranges                             | Unit tests and HTTP range fixture                            |
-| AES-128                          | Identity keys, explicit or sequence IV, Web Crypto AES-CBC                               | FFmpeg-encrypted TS fixture                                  |
-| Discontinuities                  | Media timestamps rebased at a discontinuity                                              | Reset-timestamp TS fixture                                   |
-| WebVTT                           | Subtitle rendition selection, timestamp map, basic cue placement, Off                    | Parser and browser text-track tests                          |
-| Variables                        | NAME/VALUE, IMPORT and QUERYPARAM parsing                                                | Parser coverage; not an exhaustive conformance suite         |
+| Area                             | Implementation                                                                                    | Validation                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Media and multivariant playlists | Original parser; compatible low-bandwidth startup; Auto ABR and manual quality selection          | Unit tests and browser playback                              |
+| MPEG-TS                          | 188-byte packets, PAT/PMT, PES, AVC/H.264, HEVC/H.265 and ADTS AAC-LC / declared HE-AAC v1 → fMP4 | Original synthetic fixtures; independent FFmpeg decode check |
+| Fragmented MP4                   | EXT-X-MAP, AVC/HEVC/AAC initialization, fragment timing and MSE appends                           | Browser playback and seeking                                 |
+| Live                             | Sliding playlist refresh, sequence alignment, hold-back and LIVE indicator                        | Local moving-window server                                   |
+| VOD                              | ENDLIST, finite duration, timeline, seek and playback completion                                  | Browser seek tests                                           |
+| EVENT → ended                    | Playlist updates can remove live status on ENDLIST                                                | Local dynamic fixture                                        |
+| Requests                         | Fetch or XHR, abort, timeouts, bounded retry, relative URLs and redirects                         | Browser Fetch/XHR; injected HTTP 503; teardown tests         |
+| Byte ranges                      | Explicit and implicit segment offsets; initialization ranges                                      | Unit tests and HTTP range fixture                            |
+| AES-128                          | Identity keys, explicit or sequence IV, Web Crypto AES-CBC                                        | FFmpeg-encrypted TS fixture                                  |
+| Discontinuities                  | Media timestamps rebased at a discontinuity                                                       | Reset-timestamp TS fixture                                   |
+| WebVTT                           | Subtitle rendition selection, timestamp map, basic cue placement, Off                             | Parser and browser text-track tests                          |
+| Variables                        | NAME/VALUE, IMPORT and QUERYPARAM parsing                                                         | Parser coverage; not an exhaustive conformance suite         |
 
 ## Explicit limits
 
 - **No full protocol-version claim.** The parser recognizes version numbers through 13 and rejects higher versions. Acceptance of a version number does not certify all its optional features.
 - **LL-HLS is not implemented yet.** A playlist with complete segments can play using ordinary reloads. Partial-only playlists, blocking reload, delta merging, preload hints and rendition reports are not implemented. Delta playlists are rejected.
-- **Auto ABR and manual switching** support compatible AVC/AAC-LC/HE-AAC v1 variants in the same audio/subtitle groups. Switching takes effect at a future segment boundary.
+- **Auto ABR and manual switching** support browser-compatible AVC/HEVC/AAC-LC/HE-AAC v1 variants in the same audio/subtitle groups. Switching takes effect at a future segment boundary.
 - External AAC audio renditions have independent SourceBuffers and language selection. Audio and video must share a media clock; live playlists need matching sequence/discontinuity positions or PROGRAM-DATE-TIME anchors. Arbitrary timeline repair is not supported.
 - **No TTML/IMSC1, stpp, wvtt-in-MP4 or HLS CEA-608/708 rendering yet.** Existing CEA-708/P16 support belongs to the MoQ pipeline and does not automatically apply to HLS. WebVTT STYLE/REGION blocks and some cue settings are not rendered by this baseline.
-- TS assumes independently decodable segments, one video/audio stream, one AVC access unit per PES and a PSI section fitting in one packet. Multi-packet PSI, unusual PES boundaries, non-IDR segment starts and unsupported codecs fail explicitly. More broadcast edge-case testing is needed.
-- AVC/AAC is the current codec baseline. HEVC, AV1, Dolby codecs, packed audio, I-frame-only trick-play and image playlists are not supported.
+- TS assumes independently decodable segments, one video/audio stream, one AVC/HEVC access unit per PES and a PSI section fitting in one packet. Multi-packet PSI, unusual PES boundaries, non-random-access segment starts and unsupported codecs fail explicitly. More broadcast edge-case testing is needed.
+- AVC, HEVC Main/Main10 and AAC-LC/declared HE-AAC v1 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. AV1, Dolby audio, packed audio, I-frame-only trick-play and image playlists are not supported.
 - SAMPLE-AES, DRM/EME, session-key preloading, content steering, interstitials and timed metadata are not implemented.
 - GAP recovery and live resets without a shared sequence/timeline are not implemented. These require reconnecting.
 - The network client bounds individual resources at 64 MiB. No server proxy is provided; cross-origin resources need appropriate CORS headers.
@@ -113,4 +113,24 @@ The six passing Mux sources are available in the demo presets alongside Apple's 
 
 The demo includes the Unified Streaming Tears of Steel `.mp4/.m3u8` master. Its AVC entries use decimal profile/level aliases such as `avc1.66.30`, `avc1.77.31` and `avc1.100.40`; these are normalized for variant filtering. The actual decoder configuration still comes from the media SPS/avcC, not synthesized playlist flags. Apple's [archived HLS codec guidance](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/StreamingMediaGuide/FrequentlyAskedQuestions/FrequentlyAskedQuestions.html) documents the older spelling.
 
-The master advertises five AVC video variants, three HEVC video variants and two audio-only variants. The current AVC ladder excludes HEVC and does not treat audio-only renditions as video qualities. A video presentation with no supported video variant now fails explicitly instead of silently selecting audio only. This master does not advertise subtitle renditions. Run `HLS_PUBLIC_SOURCE=unified-tos npm run test:hls:public` for playback and transitions through all five AVC qualities.
+The master advertises five AVC video variants, three HEVC video variants and two audio-only variants. Video mode includes browser-supported AVC and HEVC profiles; audio-only profiles have a separate ladder. On a browser without HEVC, five AVC profiles remain. A video presentation with no supported video variant fails explicitly; audio mode can be requested separately. This master does not advertise subtitle renditions. Run `HLS_PUBLIC_SOURCE=unified-tos npm run test:hls:public` for playback and transitions through all five AVC qualities.
+
+## HEVC and audio-only (0.5.0-alpha.1)
+
+The TS demuxer reads stream type `0x24`, VPS/SPS/PPS, picture dimensions and profile/tier/level. It writes a four-byte-length-prefixed `hvc1` sample entry and `hvcC` decoder configuration, preserving composition offsets for reordered pictures. Existing fMP4 `hvc1` and `hev1` configurations pass through without transcoding. Original synthetic Main and Main10 fixtures each decode 200 frames and AAC audio using independent FFmpeg, and the first real Unified Streaming HEVC segment also decodes after our remux. The headless test Chromium has no HEVC decoder: its explicit capability rejection is tested, **not counted as HEVC playback**. Visual playback on HEVC-capable browser/OS combinations remains a device-validation requirement.
+
+Standalone AAC works in TS and fMP4, directly or through a multivariant audio-only playlist. Auto ABR, manual bitrate selection, seek, pause and live refresh use the same scheduler. In a mixed master, the Quality menu offers **Audio only** / **Video**. Changing media mode creates a new MSE session because the track count changes; VOD position and pause state are retained, while live mode rejoins the current live window. This transition can have a short interruption. Switching also fills any uncovered interval in the old lane before the new boundary, including audio ladders with different segment durations. Audio mode does not download the video renditions. It requires a standalone audio variant in the master; it does not extract audio from video variants.
+
+```js
+await player.load({ protocol: 'hls', url: masterUrl, media: 'audio' });
+// With a mixed master already loaded:
+await player.selectMediaMode('video');
+```
+
+The embed also accepts `&media=audio`. MP3, AC-3/E-AC-3 and packed ADTS/ID3 audio are not implemented in this release.
+
+## Apple AV1 sample audit
+
+The [Apple AV1 sample](https://devstreaming-cdn.apple.com/videos/streaming/examples/av1-sample/av1-sample.m3u8) advertises 10-bit AV1 (`av01`), several audio groups (AAC-LC, HE-AAC v1/v2, AC-3 and E-AC-3), description audio, and multilingual WebVTT renditions. This release explicitly rejects the AV1 variants; it does not claim playback of this sample. AV1 needs its own `av1C` initialization handling, codec metadata normalization, capability filtering and real playback tests. HEVC support does not add AV1 automatically.
+
+The live Unified Streaming audio-only URL was checked separately: the 64 kb/s variant decoded audio in Chromium. A later 128 kb/s switch encountered upstream HTTP 503 responses without CORS headers, surfaced by the browser as a fetch failure. Local 64/128 kb/s switching, including a two-second buffer switching to four-second segments, is covered by deterministic tests; this network failure is not reported as a successful public switch.

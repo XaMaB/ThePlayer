@@ -118,11 +118,11 @@ try {
       );
       if (source.id === 'mux-bbb' || source.id === 'unified-tos') {
         assert.equal(
-          levels.length,
+          levels.filter((v) => /avc[13]\./.test(v.codecs)).length,
           5,
           'All five supported AVC profiles must be available',
         );
-        for (const index of [2, 3, 4, 0]) {
+        for (const index of [...levels.slice(2).map((v) => v.id), 0]) {
           const beforeAudio = await page.evaluate(
             () => document.querySelector('video').webkitAudioDecodedByteCount,
           );
@@ -145,6 +145,29 @@ try {
             'Audio decoding must continue across AAC profiles',
           );
         }
+      }
+      if (source.id === 'unified-tos') {
+        await page.evaluate(() => window.player.selectMediaMode('audio'));
+        await page.waitForFunction(
+          () =>
+            window.player.catalog.tracks.length === 1 &&
+            window.player.catalog.tracks[0].role === 'audio',
+        );
+        assert.equal(
+          await page.evaluate(() => window.player.qualityLevels.length),
+          2,
+        );
+        await page.evaluate(() => window.player.selectQuality(1));
+        const boundary = await page.evaluate(
+          () =>
+            window.player.diagnostics.switches.at(-1)?.effectiveAt ??
+            document.querySelector('video').currentTime,
+        );
+        await page.waitForFunction(
+          (t) => document.querySelector('video').currentTime > t + 2,
+          boundary,
+          { timeout: 45000 },
+        );
       }
       const tracks = await page.evaluate(() => window.player.subtitleTracks);
       if (tracks.length) {

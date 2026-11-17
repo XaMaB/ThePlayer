@@ -6,13 +6,17 @@ import type { Playlist, Variant } from './playlist';
 export function normalizeCodec(value: string): string {
   const codec = value.trim().toLowerCase();
   const legacy = /^avc1\.(\d{1,3})\.(\d{1,3})$/.exec(codec);
-  if (!legacy) return codec;
+  if (!legacy) {
+    if (/^(hvc1|hev1)\./.test(codec))
+      return codec.slice(0, 5) + codec.slice(5).toUpperCase();
+    return codec;
+  }
   const profile = Number(legacy[1]),
     level = Number(legacy[2]);
   if (profile < 1 || profile > 255 || level < 1 || level > 255) return codec;
   return `avc1.${profile.toString(16).padStart(2, '0')}00${level.toString(16).padStart(2, '0')}`;
 }
-/** The demuxers currently support AVC, AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
+/** The demuxers currently support AVC, HEVC, AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
 export function compatibleVariants(variants: Variant[]): Variant[] {
   return variants
     .map((v) => ({
@@ -25,7 +29,9 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
         v.codecs
           .split(',')
           .every((codec) =>
-            /^(avc[13]\.[0-9a-f]{6}|mp4a\.40\.[25])$/.test(codec),
+            /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
+              codec,
+            ),
           ),
     );
 }
@@ -78,4 +84,22 @@ export function switchBoundary(p: Playlist, time: number): number {
   if (!segment)
     throw new Error('No future segment boundary available for switching');
   return segment.start;
+}
+
+export function hasVideo(variant: Variant): boolean {
+  return (
+    !!variant.resolution ||
+    /(?:^|,)\s*(?:avc[13]|hvc1|hev1|av01|vp0[89])\./i.test(variant.codecs ?? '')
+  );
+}
+/** Capability checks precede ABR so unsupported profiles never enter the ladder. */
+export function browserVariants(
+  variants: Variant[],
+  supports: (mime: string) => boolean,
+): Variant[] {
+  return compatibleVariants(variants).filter(
+    (v) =>
+      !v.codecs ||
+      supports(`${hasVideo(v) ? 'video' : 'audio'}/mp4; codecs="${v.codecs}"`),
+  );
 }

@@ -155,6 +155,7 @@ async function openChannel(next: any) {
             url: next.url,
             network: { transport: next.transport ?? 'fetch' },
             quality: next.quality ?? 'auto',
+            media: next.media,
           }
         : {
             relayUrl: next.relayUrl,
@@ -254,6 +255,7 @@ function sourceForm(next: any) {
       url: next.url,
       network: { transport: next.transport ?? 'fetch' },
       quality: next.quality ?? 'auto',
+      media: next.media,
     };
     text(
       'snippet',
@@ -419,6 +421,7 @@ if (query.has('src')) {
     protocol: 'hls',
     url: query.get('src'),
     transport: query.get('transport') ?? 'fetch',
+    media: query.get('media') ?? undefined,
     quality:
       query.has('quality') && query.get('quality') !== 'auto'
         ? Number(query.get('quality'))
