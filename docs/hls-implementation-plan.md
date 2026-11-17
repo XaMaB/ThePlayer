@@ -8,9 +8,9 @@ Status: original HLS engine with AVC/HEVC/AAC TS/fMP4, AV1 fMP4, audio-only, ABR
 | Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues        |
 | TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue |
 | ABR / buffer policy     | Emergency request abort, bounded fallback and temporary rendition quarantine implemented                                     |
-| LL-HLS                  | fMP4 parts, blocking/delta and bounded preloads implemented; expanded interoperability remains                               |
+| LL-HLS                  | fMP4 parts, blocking/delta, open-range/MAP preloads and encrypted parts implemented; expanded interoperability continues     |
 | Subtitles               | WebVTT, stpp/TTML, wvtt and fMP4 CEA-608 subsets implemented; broader CEA carriage and advanced text features pending        |
-| Protection / extensions | AES-128 implemented; sample encryption, EME, steering/interstitials/metadata pending                                         |
+| Protection / extensions | AES-128/GCM, sample encryption, EME and timed metadata implemented; steering/interstitials pending                           |
 | Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                        |
 
 ## Specification baseline
@@ -75,3 +75,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.21.0-alpha.1 adds AC-3 TS/packed and AC-3/E-AC-3 fMP4 with browser capability validation. Continue with E-AC-3 framing, protocol extensions and stabilization.
 
 0.22.0-alpha.1 adds single-substream E-AC-3 TS/packed and sample encryption. Continue with extended LL-HLS preloads, steering/interstitials and stabilization.
+
+0.23.0-alpha.1 extends LL-HLS with growing-response ranges, MAP preloads and encrypted-part validation. Continue with content steering, interstitials/trick-play, remaining text profiles and stabilization.

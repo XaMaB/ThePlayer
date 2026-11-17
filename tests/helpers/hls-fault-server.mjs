@@ -1,3 +1,4 @@
+import { createCipheriv } from 'node:crypto';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { readFileSync } from 'node:fs';
@@ -90,7 +91,16 @@ export function faultServer({
               '\n#EXT-X-DISCONTINUITY-SEQUENCE:' +
               Math.floor(first / 6) +
               '\n#EXT-X-MAP:URI="init.mp4"\n#EXT-X-PART-INF:PART-TARGET=0.5\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=1.5\n';
+            if (scenario === 'll-parts-map' && first >= 2)
+              text = text.replace('init.mp4', 'init2.mp4');
             for (let parent = first; parent <= completed; parent++) {
+              if (scenario === 'll-parts-map' && parent === 2)
+                text += '#EXT-X-MAP:URI="init2.mp4"\n';
+              if (scenario === 'll-parts-encrypted')
+                text +=
+                  '#EXT-X-KEY:METHOD=AES-128,URI="part.key",IV=0x' +
+                  parent.toString(16).padStart(32, '0') +
+                  '\n';
               if (parent > first && parent % 6 === 0)
                 text += '#EXT-X-DISCONTINUITY\n';
               const n = parent === completed ? count % 4 : 4;
@@ -103,6 +113,21 @@ export function faultServer({
                     '.m4s?index=' +
                     index +
                     '"' +
+                    (scenario === 'll-parts-open'
+                      ? ',BYTERANGE="' +
+                        (
+                          await readFile(
+                            path.join(
+                              fixtures,
+                              'll-parts',
+                              'part' +
+                                String(index % 24).padStart(2, '0') +
+                                '.m4s',
+                            ),
+                          )
+                        ).length +
+                        '@128"'
+                      : '') +
                     (part === 0 ? ',INDEPENDENT=YES' : '') +
                     '\n';
                 }
@@ -126,8 +151,25 @@ export function faultServer({
                 '.m4s?index=' +
                 count +
                 '"\n';
+            if (scenario === 'll-parts-map' && completed < 2)
+              text += '#EXT-X-PRELOAD-HINT:TYPE=MAP,URI="init2.mp4"\n';
+            if (scenario === 'll-parts-open')
+              text = text.replace(
+                /(#EXT-X-PRELOAD-HINT:TYPE=PART[^\n]*)/,
+                '$1,BYTERANGE-START=128',
+              );
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.end(text);
+            return;
+          }
+          if (resource === 'init2.mp4') {
+            res.end(
+              await readFile(path.join(fixtures, 'll-parts', 'init.mp4')),
+            );
+            return;
+          }
+          if (resource === 'part.key') {
+            res.end(Buffer.alloc(16, 0x59));
             return;
           }
           if (resource === 'abandoned.m4s') {
@@ -143,6 +185,48 @@ export function faultServer({
             requests.set(id, (requests.get(id) ?? 0) + 1);
             await waitFor(Number(url.searchParams.get('index')));
             if (res.destroyed) return;
+            if (scenario === 'll-parts-encrypted') {
+              const bytes = await readFile(
+                  path.join(fixtures, 'll-parts', resource),
+                ),
+                iv = Buffer.alloc(16);
+              iv.writeUInt32BE(
+                Math.floor(Number(url.searchParams.get('index')) / 4),
+                12,
+              );
+              const cipher = createCipheriv(
+                'aes-128-cbc',
+                Buffer.alloc(16, 0x59),
+                iv,
+              );
+              res.end(Buffer.concat([cipher.update(bytes), cipher.final()]));
+              return;
+            }
+            if (scenario === 'll-parts-open') {
+              const bytes = await readFile(
+                path.join(fixtures, 'll-parts', resource),
+              );
+              const open = req.headers.range === 'bytes=128-9007199254740991';
+              if (!req.headers.range?.startsWith('bytes=128-'))
+                throw Error('Expected byte range');
+              res.writeHead(206, {
+                'Content-Range': `bytes 128-${127 + bytes.length}/*`,
+                'Content-Type': 'video/mp4',
+              });
+              if (open) {
+                res.write(bytes.subarray(0, Math.floor(bytes.length / 2)));
+                const next = setTimeout(() => {
+                  if (!res.destroyed)
+                    res.write(bytes.subarray(Math.floor(bytes.length / 2)));
+                }, 30);
+                const finish = setTimeout(() => res.end(), 4000);
+                res.on('close', () => {
+                  clearTimeout(next);
+                  clearTimeout(finish);
+                });
+              } else res.end(bytes);
+              return;
+            }
           }
         }
         if (

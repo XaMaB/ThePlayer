@@ -1,5 +1,20 @@
 import { HttpError, NetworkError, retryable, retryDelay } from './recovery';
 import type { Resource } from './playlist';
+function openRangeLength(header: string | null, offset: number) {
+  const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(header ?? '');
+  if (!match) throw new Error('Invalid HLS open range response');
+  const start = Number(match[1]),
+    end = Number(match[2]),
+    total = match[3] === '*' ? undefined : Number(match[3]);
+  if (
+    start !== offset ||
+    !Number.isSafeInteger(end) ||
+    end < start ||
+    (total != null && (!Number.isSafeInteger(total) || total <= end))
+  )
+    throw new Error('Invalid HLS open range response');
+  return end - start + 1;
+}
 export interface NetworkOptions {
   transport?: 'fetch' | 'xhr';
   timeoutMs?: number;
@@ -21,6 +36,8 @@ export interface RequestOptions {
   signal?: AbortSignal;
   recoveryWindowMs?: number;
   onProgress?: (progress: RequestProgress) => void;
+  /** Validated response chunks for speculative open-range delivery. */
+  onChunk?: (chunk: Uint8Array, url: string) => void;
 }
 export class ResourceClient {
   bytes = 0;
@@ -82,6 +99,7 @@ export class ResourceClient {
             ),
             signal,
             request.onProgress,
+            request.onChunk,
           );
           if (recovering) this.recovery.recovered++;
           return { ...result, elapsed: performance.now() - started };
@@ -120,6 +138,7 @@ export class ResourceClient {
     timeoutMs: number,
     signal: AbortSignal,
     progress?: (value: RequestProgress) => void,
+    chunk?: (data: Uint8Array, url: string) => void,
   ) {
     const controller = new AbortController();
     const stop = () => controller.abort(signal.reason);
@@ -146,6 +165,8 @@ export class ResourceClient {
     const pulse = progress ? setInterval(notify, 250) : undefined;
     try {
       const headers = { ...this.options.headers?.(resource.url) };
+      if (resource.rangeStart != null)
+        headers.Range = `bytes=${resource.rangeStart}-9007199254740991`;
       if (resource.range)
         headers.Range = `bytes=${resource.range.offset}-${resource.range.offset + resource.range.length - 1}`;
       let data: Uint8Array,
@@ -208,6 +229,12 @@ export class ResourceClient {
             ? length
             : undefined;
         if (!response.ok) throw new HttpError(status);
+        const openLength =
+          resource.rangeStart != null && status === 206
+            ? openRangeLength(contentRange, resource.rangeStart)
+            : undefined;
+        if (resource.rangeStart != null && status !== 200 && status !== 206)
+          throw new Error('Invalid HLS open range response');
         const reader = response.body?.getReader();
         if (!reader) throw new Error('Empty HTTP response');
         const chunks: Uint8Array[] = [];
@@ -217,6 +244,8 @@ export class ResourceClient {
             const { value, done } = await reader.read();
             if (done) break;
             size += value.length;
+            if (openLength != null && size > openLength)
+              throw new Error('Open range response exceeds declared length');
             loaded = size;
             notify();
             controller.signal.throwIfAborted();
@@ -225,6 +254,13 @@ export class ResourceClient {
               throw new Error('HLS resource exceeds 64 MiB limit');
             }
             chunks.push(value);
+            if (chunk && resource.rangeStart != null) {
+              const skip =
+                status === 200
+                  ? Math.max(0, resource.rangeStart - (size - value.length))
+                  : 0;
+              if (skip < value.length) chunk(value.subarray(skip), url);
+            }
           }
         } finally {
           reader.releaseLock();
@@ -239,6 +275,17 @@ export class ResourceClient {
       if (status < 200 || status >= 300) throw new HttpError(status);
       if (data.byteLength > 64 * 1024 * 1024)
         throw new Error('HLS resource exceeds 64 MiB limit');
+      if (resource.rangeStart != null) {
+        if (status === 200) {
+          if (data.length < resource.rangeStart)
+            throw new Error('Open range response is too short');
+          data = data.slice(resource.rangeStart);
+        } else if (
+          status !== 206 ||
+          data.length !== openRangeLength(contentRange, resource.rangeStart)
+        )
+          throw new Error('Invalid HLS open range response');
+      }
       if (resource.range) {
         if (status === 200) {
           const { offset, length } = resource.range;

@@ -7,6 +7,8 @@ export interface ByteRange {
 export interface Resource {
   url: string;
   range?: ByteRange;
+  /** Preload-only range with an unknown final byte. */
+  rangeStart?: number;
 }
 export interface Initialization extends Resource {
   key?: Key;
@@ -75,6 +77,8 @@ export interface Playlist {
   parents?: Segment[];
   partTarget?: number;
   preload?: Resource;
+  preloadMap?: Resource;
+  nextMap?: Initialization;
   reports?: { url: string; sequence?: number; part?: number }[];
   skipped?: number;
   unsupported: string[];
@@ -457,23 +461,28 @@ export function parsePlaylist(
       }
       case '#EXT-X-PRELOAD-HINT': {
         const a = attributes(value);
-        if (a.TYPE !== 'PART' || p.preload || !a.URI) break;
-        const url = uri(a.URI);
-        // Open-ended hinted ranges need a streaming range cache; retain only
-        // bounded hints here until that path is available.
-        if (a['BYTERANGE-START'] && !a['BYTERANGE-LENGTH']) break;
-        p.preload = {
-          url,
-          range: a['BYTERANGE-LENGTH']
-            ? {
-                offset: number(
-                  a['BYTERANGE-START'] ?? '0',
-                  'hint offset',
-                  true,
-                ),
-                length: number(a['BYTERANGE-LENGTH'], 'hint length', true),
-              }
-            : undefined,
+        if (!['PART', 'MAP'].includes(a.TYPE)) break;
+        if (!a.URI) throw new Error('Missing preload hint URI');
+        const field = a.TYPE === 'MAP' ? 'preloadMap' : 'preload';
+        if (p[field]) throw new Error('Duplicate preload hint type');
+        const offset = number(a['BYTERANGE-START'] ?? '0', 'hint offset', true);
+        if (offset < 0) throw new Error('Invalid hint offset');
+        const length =
+          a['BYTERANGE-LENGTH'] == null
+            ? undefined
+            : number(a['BYTERANGE-LENGTH'], 'hint length', true);
+        if (
+          length != null &&
+          (length <= 0 || !Number.isSafeInteger(offset + length))
+        )
+          throw new Error('Invalid hint length');
+        p[field] = {
+          url: uri(a.URI),
+          ...(length != null
+            ? { range: { offset, length } }
+            : a['BYTERANGE-START'] != null
+              ? { rangeStart: offset }
+              : {}),
         };
         break;
       }
@@ -551,6 +560,7 @@ export function parsePlaylist(
     throw new Error('Mixed multivariant and media playlist');
   if (p.parts.length && !p.partTarget)
     throw new Error('Partial segments require PART-INF');
+  p.nextMap = map;
   p.duration += partOffset;
   const reportedTail = p.parts.at(-1) ?? p.segments.at(-1);
   for (const report of p.reports ?? []) {

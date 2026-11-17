@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.23.0-alpha.1
+
+- LL-HLS open-range preloads can deliver authoritative parts before the HTTP response ends.
+- MAP preloads preserve initialization bytes across the map-before-first-part transition.
+- XHR uses bounded-range fallback for incomplete streaming responses.
+- Growing-response, map reuse and AES-128 partial-segment browser scenarios.
+
 ## 0.22.0-alpha.1
 
 - E-AC-3 TS/packed framing and six-block MP4 sample assembly for one independent substream.

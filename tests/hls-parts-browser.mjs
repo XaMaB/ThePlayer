@@ -1,18 +1,29 @@
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import assert from 'node:assert/strict';
 import { faultServer } from './helpers/hls-fault-server.mjs';
 const { server, requests } = faultServer();
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base =
   process.env.HLS_RECOVERY_BASE ?? `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({
-  args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'],
-});
+const browserName = process.env.HLS_TEST_BROWSER ?? 'chromium';
+const browserType = { chromium, firefox, webkit }[browserName];
+if (!browserType) throw new Error('Unknown test browser');
+const browser = await browserType.launch(
+  browserName === 'chromium'
+    ? { args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] }
+    : {},
+);
 try {
   for (const transport of ['fetch', 'xhr'])
-    for (const scenario of ['ll-parts', 'll-parts-cancel']) {
+    for (const scenario of process.env.HLS_PART_SCENARIOS?.split(',') ?? [
+      'll-parts',
+      'll-parts-cancel',
+      'll-parts-open',
+      'll-parts-encrypted',
+      'll-parts-map',
+    ]) {
       const id = `parts-${transport}-${scenario}-${Date.now().toString(36)}`;
-      const page = await browser.newPage();
+      const page = await browser.newPage({ ignoreHTTPSErrors: true });
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto(base + '/harness.html');
@@ -62,16 +73,24 @@ try {
         assert.ok(result.frames > 250);
         assert.equal(result.diagnostics.live.restarts, 0);
         assert.ok(result.diagnostics.playlistReload.blocking > 20);
-        assert.ok(result.diagnostics.preload.used > 20);
+        if (scenario !== 'll-parts-open' || transport === 'fetch')
+          assert.ok(result.diagnostics.preload.used > 20);
         if (scenario === 'll-parts-cancel')
           assert.ok(result.diagnostics.preload.cancelled > 0);
         if (!process.env.HLS_RECOVERY_BASE) {
+          if (scenario === 'll-parts-map')
+            assert.equal(
+              requests.get(`/scenario/${id}/${scenario}/init2.mp4`),
+              1,
+              'Initialization preload is reused',
+            );
           const parts = [...requests].filter(([key]) =>
             key.startsWith(id + ':part:'),
           );
           assert.ok(parts.length > 25);
           for (const [key, count] of parts)
-            assert.equal(count, 1, 'No duplicate part request: ' + key);
+            if (scenario !== 'll-parts-open' || transport === 'fetch')
+              assert.equal(count, 1, 'No duplicate part request: ' + key);
           assert.equal(
             [...requests.keys()].some((key) =>
               key.startsWith(`/scenario/${id}/${scenario}/parent`),
@@ -82,6 +101,7 @@ try {
         await page.evaluate(() => window.player.destroy());
         console.log(
           'PASS LL-HLS parts',
+          browserName,
           transport,
           scenario,
           result.diagnostics.playlistReload,

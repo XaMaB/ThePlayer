@@ -22,7 +22,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 ## Explicit limits
 
 - **No full protocol-version claim.** The parser recognizes version numbers through 13 and rejects higher versions. Acceptance of a version number does not certify all its optional features.
-- **LL-HLS fMP4 baseline is implemented.** Partial-only startup, dependent parts, parent completion, blocking reload, delta merge/full reload fallback and speculative whole-resource/bounded-range preload hints are supported. Rendition-report positions are used when available. Open-ended hinted ranges are currently ignored and fetched from the authoritative part reference instead. See the validation scope below.
+- **LL-HLS fMP4 baseline is implemented.** Partial-only startup, dependent parts, parent completion, blocking reload, delta merge/full reload fallback and speculative whole-resource/bounded-range preload hints are supported. Rendition-report positions are used when available. Open-ended hinted ranges and MAP hints are supported; Fetch can consume confirmed ranges from a growing response, while XHR falls back to a bounded request when the hinted response has not completed. See the validation scope below.
 - **Auto ABR and manual switching** support browser-compatible AVC/HEVC/AV1/AAC-LC/HE-AAC v1 variants in the same audio/subtitle groups. Switching takes effect at a future segment boundary.
 - External AAC audio renditions have independent SourceBuffers and language selection. Audio and video must share a media clock; live playlists need matching sequence/discontinuity positions or PROGRAM-DATE-TIME anchors. Arbitrary timeline repair is not supported.
 - **TTML/IMSC text and MP4 WebVTT are implemented subsets.** See the text-profile scope below. HLS CEA-708 SEI decoding uses an original implementation separate from the MoQ decoder; see its scope below.
@@ -301,3 +301,9 @@ Independent FFmpeg decoding checks every AC-3 PCM frame and exact elementary byt
 TS and packed E-AC-3 support a single independent substream, including aggregation of one/two/three-block syncframes into six-block MP4 samples. SAMPLE-AES chains encrypted blocks across syncframes within each audio sample and resets at the next sample. Clear leaders and incomplete encrypted tails remain untouched. `dec3` is generated from the bitstream configuration.
 
 Generated 48/44.1 kHz stereo, 5.1 and SAMPLE-AES packed streams pass independent decoded PCM/hash/sample-clock checks; TS decoding is compared independently too. Synthetic tests exercise short-syncframe aggregation, CBC continuity, truncation and unsupported substreams. Dependent and multiple independent substreams are explicitly rejected in this path; Atmos object metadata and full device interoperability are not certified.
+
+## Extended LL-HLS preloads (0.23)
+
+Open-ended byte ranges use the RFC 8673 recommended last-byte position. Fetch retains validated response chunks and releases only the byte range subsequently announced by PART/MAP; receiving a hint alone never authorizes an MSE append. Growing requests are cancelled after consumption, on replacement or teardown. An unavailable/invalid speculative response falls back to the authoritative request. XHR cannot expose partial binary responses, so incomplete open-range requests are cancelled and replaced with bounded requests.
+
+MAP hints survive a playlist that announces the new EXT-X-MAP before its first PART. Bounded cache size, response limits and range validation apply. Browser scenarios cover continuously growing responses, map prefetch/reuse, abandoned hints and AES-128 parts with per-parent IV changes, alongside existing partial-only startup and blocking reload tests.

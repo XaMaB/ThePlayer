@@ -54,3 +54,6 @@ jobs:
       - run: npm run test:hls:metadata
       - run: npm run test:hls:mp3
       - run: npm run test:hls:dolby
+      - run: node tests/hls-parts-browser.mjs
+        env:
+          HLS_PART_SCENARIOS: ll-parts-open,ll-parts-map,ll-parts-encrypted
