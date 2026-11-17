@@ -259,3 +259,48 @@ export function newPicture(a: Picture, b: Picture): boolean {
       (a.delta0 !== b.delta0 || a.delta1 !== b.delta1))
   );
 }
+
+/** An immediate recovery point on an intra picture is also a random access point. */
+export function avcRandomAccess(units: Uint8Array[]): boolean {
+  if (units.some((n) => (n[0] & 31) === 5)) return true;
+  const slices = units.filter((n) => (n[0] & 31) === 1);
+  if (
+    !slices.length ||
+    slices.some((n) => {
+      const reader = new BitReader(rbsp(n));
+      reader.ue();
+      return ![2, 4].includes(reader.ue() % 5);
+    })
+  )
+    return false;
+  for (const nal of units) {
+    if ((nal[0] & 31) !== 6) continue;
+    const data = rbsp(nal);
+    let at = 0;
+    while (at + 1 < data.length) {
+      let type = 0,
+        size = 0;
+      while (at < data.length && data[at] === 255) {
+        type += 255;
+        at++;
+      }
+      if (at >= data.length) break;
+      type += data[at++];
+      while (at < data.length && data[at] === 255) {
+        size += 255;
+        at++;
+      }
+      if (at >= data.length) break;
+      size += data[at++];
+      if (at + size > data.length) break;
+      if (
+        type === 6 &&
+        size &&
+        new BitReader(data.subarray(at, at + size)).ue() === 0
+      )
+        return true;
+      at += size;
+    }
+  }
+  return false;
+}

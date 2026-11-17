@@ -232,7 +232,7 @@ function sampleEntry(t: Track): Uint8Array {
           pps,
         );
     return box(
-      t.hvcc ? 'hvc1' : 'avc1',
+      t.hvcc ? 'hvc1' : t.codec.startsWith('avc3.') ? 'avc3' : 'avc1',
       zero(6),
       u16(1),
       zero(16),

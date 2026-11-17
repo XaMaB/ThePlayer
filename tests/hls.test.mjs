@@ -1255,3 +1255,25 @@ test('Field 2 captions produce CC3 and ignore XDS bytes without changing field 1
     'BC',
   );
 });
+
+test('AVC immediate intra recovery points are random access; gradual recovery is not', async () => {
+  const { avcRandomAccess } = await module('avc-access');
+  // first_mb=0, slice_type=2 (I); recovery_frame_cnt=0.
+  const intra = Uint8Array.of(0x41, 0xb8);
+  assert.equal(
+    avcRandomAccess([intra, Uint8Array.of(6, 6, 1, 0x84, 0x80)]),
+    true,
+  );
+  assert.equal(
+    avcRandomAccess([intra, Uint8Array.of(6, 6, 1, 0x44, 0x80)]),
+    false,
+  );
+  assert.equal(
+    avcRandomAccess([
+      Uint8Array.of(0x41, 0xe0),
+      Uint8Array.of(6, 6, 1, 0x84, 0x80),
+    ]),
+    false,
+  );
+  assert.equal(avcRandomAccess([Uint8Array.of(0x65)]), true);
+});

@@ -60,18 +60,18 @@ MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer a
 | -------------------------- | ---------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | DVB subtitles              | Implemented with compatible Origin | Not implemented                                           | Origin decodes timestamped bitmap cues; canvas preserves placement                                                                |
 | Teletext                   | Implemented with compatible Origin | Not implemented                                           | Origin-decoded bitmap cues, selectable by advertised language/track                                                               |
-| CEA-708 / DTVCC            | Implemented subset                 | Not implemented                                           | Browser decoding from AVC SEI; service discovery, window anchors, alignment, explicit rows/columns and pen size                   |
-| CEA-708 P16                | Implemented subset                 | Not implemented                                           | Two-byte operands, Cyrillic/Latin Extended handling and configurable service encoding                                             |
+| CEA-708 / DTVCC            | Implemented subset                 | Implemented SEI subset                                    | Browser decoding from AVC SEI; service discovery, window anchors, alignment, explicit rows/columns and pen size                   |
+| CEA-708 P16                | Implemented subset                 | Implemented                                               | Two-byte operands, Cyrillic/Latin Extended handling and configurable service encoding                                             |
 | CEA-608                    | Not exposed                        | Implemented subset: fMP4 `c608` and AVC/HEVC SEI, CC1–CC4 | Original decoder; pop-on, paint-on, 2–4-row roll-up, PAC position/indent, character sets, foreground colors, italic and underline |
 | WebVTT                     | Not exposed                        | Implemented subset                                        | External segmented WebVTT renditions, timestamp mapping and basic cue placement using browser TextTracks                          |
-| TTML / IMSC1               | Not implemented                    | Planned                                                   | No `stpp` support                                                                                                                 |
-| WebVTT inside MP4 (`wvtt`) | Not implemented                    | Not implemented                                           | Separate from external WebVTT rendition support                                                                                   |
+| TTML / IMSC1               | Not implemented                    | Implemented text subset                                   | fMP4 stpp, positioned/styled regions and timed spans; see profile limits                                                          |
+| WebVTT inside MP4 (`wvtt`) | Not implemented                    | Implemented subset                                        | fMP4 vttc/vtte samples, sample timing and cue settings                                                                            |
 
 **CEA-608:** parity checks and duplicate-control suppression are implemented. Caption history supports seeking and quality transitions. Field-2 CC3/CC4 and TS/fMP4 SEI carriage are implemented; field-2 XDS packets are skipped. Multiple `c608` tracks, background attributes, flashing and Text/XDS services remain unsupported. Native browser typography means placement is not a pixel-exact broadcast rendering. A live join or seek with insufficient history can wait for the next complete caption update.
 
-**CEA-708:** cues retain source window positions and synchronize to the media clock, including fullscreen letterboxing. P16 consumes both operands atomically: a zero high byte represents one character; other pairs use Unicode code-unit handling or a configured service encoding such as EUC-KR. Invalid surrogate values become replacement characters. Full typography/colors, vertical writing, display effects and delayed commands remain incomplete. See the [decoder notes](vendor/mux.js/README.md).
+**CEA-708:** cues retain source window positions and synchronize to the media clock, including fullscreen letterboxing. P16 consumes both operands atomically: a zero high byte represents one character; other pairs use Unicode code-unit handling or a configured service encoding such as EUC-KR. Invalid surrogate values become replacement characters. HLS has its own original decoder with window/pen colors, print/scroll direction and media-time delays. Its snap display fallback and other limits are described in [HLS support](docs/hls-support.md). The separate MoQ implementation retains its [decoder notes](vendor/mux.js/README.md).
 
-**WebVTT:** STYLE/REGION blocks and some cue settings are not rendered. DVB and teletext decoding belongs to the Origin; their availability here does not mean browser-side raw broadcast subtitle decoding.
+**WebVTT:** scoped safe STYLE rules and cue/region placement are supported. Browsers without native VTTRegion use placement fallback; region scrolling/clipping is not emulated. DVB and teletext decoding belongs to the Origin; their availability here does not mean browser-side raw broadcast subtitle decoding.
 
 The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. MediaInfo separates received events, including clears and refreshes, from displayed subtitles. See the [caption support details](docs/hls-support.md).
 
@@ -222,8 +222,8 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Extend the original HLS engine: broader LL-HLS interoperability, additional TTML/IMSC features, HLS CEA-708 and protection/extensions.
-- Extend HLS captions with original CEA-708 decoding and remaining caption attributes.
+- Extend the original HLS engine: broader LL-HLS interoperability, additional TTML/IMSC features, c708/CDP carriage and protection/extensions.
+- Extend HLS captions with c708/CDP carriage and remaining caption attributes.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
 - Package the controls as a self-contained UI component.
@@ -239,4 +239,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.14.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.15.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

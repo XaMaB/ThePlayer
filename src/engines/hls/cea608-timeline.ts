@@ -2,6 +2,7 @@ import { Cea608Decoder, type Screen608 } from './cea608';
 import type { CaptionPacket } from './c608-mp4';
 interface Packet extends CaptionPacket {
   reset?: boolean;
+  owner?: number;
 }
 /** Checkpoint decoder state while retaining enough history for the media back buffer. */
 export class Cea608Timeline {
@@ -36,11 +37,19 @@ export class Cea608Timeline {
       this.packets.some((p) => p.reset && Math.abs(p.time - start) < 0.001);
     this.period = period;
     this.packets = this.packets.filter(
-      (p) => p.time < start || (!replaceFuture && p.time >= end),
+      (p) => p.owner !== start && (!replaceFuture || p.time < start),
     );
     if (reset)
-      this.packets.push({ time: start, first: 0, second: 0, reset: true });
-    this.packets.push(...input.map((p) => ({ ...p, time: p.time + offset })));
+      this.packets.push({
+        time: start,
+        first: 0,
+        second: 0,
+        owner: start,
+        reset: true,
+      });
+    this.packets.push(
+      ...input.map((p) => ({ ...p, owner: start, time: p.time + offset })),
+    );
     this.packets.sort(
       (a, b) => a.time - b.time || Number(!!b.reset) - Number(!!a.reset),
     );

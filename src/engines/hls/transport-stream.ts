@@ -1,6 +1,6 @@
 import { seiCaptions, type CcData } from './cea-sei';
 import { HevcPictures } from './hevc-access';
-import { AvcPictures } from './avc-access';
+import { AvcPictures, avcRandomAccess } from './avc-access';
 import { videoAccessUnits } from './access-units';
 import { PsiAssembler, PsiTable } from './psi';
 import { hevcConfiguration } from './hevc';
@@ -376,43 +376,32 @@ export class TsTransmuxer {
           'Multiple AVC access units per PES are not yet supported',
         );
       for (const unit of units) {
-        const type = unit[0] & 31;
-        const previous =
-          type === 7 ? this.sps : type === 8 ? this.pps : undefined;
-        if (
-          pictures.length &&
-          previous &&
-          (previous.length !== unit.length ||
-            previous.some((b, i) => b !== unit[i]))
-        )
-          throw new Error('AVC parameter sets changed within a segment');
         if ((unit[0] & 31) === 7) this.sps = unit;
         if ((unit[0] & 31) === 8) this.pps = unit;
       }
       const picture = units.some((n) => [1, 5].includes(n[0] & 31));
       if (!picture) continue;
-      const keep = units.filter((n) => ![7, 8, 9, 12].includes(n[0] & 31));
+      // avc3 keeps parameter sets in-band, including multiple PPS IDs used by broadcasts.
+      const keep = units.filter((n) => ![9, 12].includes(n[0] & 31));
       pictures.push({
         dts: p.dts,
         sample: {
           data: concat(...keep.flatMap((n) => [u32(n.length), n])),
           duration: 0,
           cts: Math.round(p.pts - p.dts),
-          key: units.some((n) => (n[0] & 31) === 5),
+          key: avcRandomAccess(units),
         },
       });
     }
     if (pictures.length) {
       if (!this.sps || !this.pps)
         throw new Error('Missing video parameter sets');
-      if (!pictures[0].sample.key)
-        throw new Error('TS baseline needs independently decodable segments');
       const t: Track = {
         id: 1,
         kind: 'video',
         timescale: 90000,
         codec:
-          'avc1.' +
+          'avc3.' +
           Array.from(this.sps.subarray(1, 4), (n) =>
             n.toString(16).padStart(2, '0'),
           ).join(''),

@@ -1,3 +1,6 @@
+import { Cea708Timeline } from './cea708-timeline';
+import { Cea708Renderer } from './cea708-renderer';
+import type { P16Encoding } from './cea708-packets';
 import { TtmlRenderer } from './ttml-renderer';
 import { parseTtml } from './ttml';
 import { textMetadata, textSamples } from './text-mp4';
@@ -52,6 +55,7 @@ export interface HlsSource {
   audioLanguage?: string;
   subtitleLanguage?: string;
   preferredLanguages?: string[];
+  captionEncodings?: Record<number, P16Encoding>;
 }
 /** Original baseline HLS engine; no hls.js, VHS or Shaka code/dependency. */
 export class HlsEngine extends EventTarget {
@@ -86,6 +90,7 @@ export class HlsEngine extends EventTarget {
     },
     unsupportedCaptions: [] as { id: number; format: string }[],
     captions608: { packets: 0, parityErrors: 0, events: 0, warning: '' },
+    captions708: { packets: 0, errors: 0, events: 0 },
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
     startup: { firstFrameMs: null as number | null },
     buffer: {} as Record<string, unknown>,
@@ -123,6 +128,9 @@ export class HlsEngine extends EventTarget {
   }
   private master?: Playlist;
   private captions608 = new Cea608Timeline();
+  private captions708: Cea708Timeline;
+  private renderer708?: Cea708Renderer;
+  private captions708Seen = new Map<string, number>();
   private captions608Seen = new Map<string, number>();
   private media?: MediaSource;
   private mediaUrl?: string;
@@ -159,6 +167,17 @@ export class HlsEngine extends EventTarget {
     readonly source: HlsSource,
   ) {
     super();
+    for (const [service, encoding] of Object.entries(
+      source.captionEncodings ?? {},
+    ))
+      if (
+        !Number.isInteger(+service) ||
+        +service < 1 ||
+        +service > 63 ||
+        !['unicode', 'euc-kr', 'gbk', 'big5'].includes(encoding)
+      )
+        throw new Error('Invalid CEA-708 service encoding');
+    this.captions708 = new Cea708Timeline(source.captionEncodings);
     const url = new URL(source.url);
     if (!['http:', 'https:'].includes(url.protocol))
       throw new Error('HLS requires an HTTP(S) URL');
@@ -431,9 +450,11 @@ export class HlsEngine extends EventTarget {
         );
     if (
       this.main.ahead(this.video.currentTime) < 0.1 &&
-      this.subtitleTracks.some((t) => t.format === 'cea-608')
+      this.subtitleTracks.some((t) => ['cea-608', 'cea-708'].includes(t.format))
     ) {
       this.captions608.reset();
+      this.captions708.reset();
+      this.renderer708?.set([]);
       this.main.next = Math.max(0, this.main.next - 3);
       if (!this.subtitleManual) this.selectAutomaticSubtitles();
       if (this.selectedSubtitle.startsWith('hls-608-')) this.render608();
@@ -530,7 +551,10 @@ export class HlsEngine extends EventTarget {
     this.keys.clear();
     this.gaps = [];
     this.captions608.reset();
+    this.captions708.reset();
+    this.renderer708?.set([]);
     this.captions608Seen.clear();
+    this.captions708Seen.clear();
     this.liveProgress.reset();
     this.ended = false;
     this.main = this.lane(
@@ -680,6 +704,45 @@ export class HlsEngine extends EventTarget {
       }
       if (!this.subtitleManual) this.selectAutomaticSubtitles();
       if (this.selectedSubtitle.startsWith('hls-608-')) this.render608();
+    }
+    if (lane.role === 'main') {
+      this.captions708.update(
+        prepared.digitalPackets,
+        offset,
+        prepared.segment.start,
+        prepared.segment.start + prepared.segment.duration,
+        prepared.segment.discontinuity,
+        this.video.currentTime,
+        lane !== this.main,
+      );
+      this.diagnostics.captions708.packets += prepared.digitalPackets.length;
+      this.diagnostics.captions708.errors = this.captions708.errors;
+      this.diagnostics.captions708.events = this.captions708.events.length;
+      const services = new Set(this.captions708.events.map((e) => e.service));
+      for (const service of services) {
+        const name = 'hls-708-' + service;
+        if (this.subtitleTracks.some((t) => t.name === name)) continue;
+        const group = this.qualityLevels[this.selectedQuality]?.closedCaptions;
+        const metadata = this.master?.renditions.find(
+          (r) =>
+            r.type === 'CLOSED-CAPTIONS' &&
+            r.group === group &&
+            r.instreamId === 'SERVICE' + service,
+        );
+        this.subtitleTracks.push({
+          name,
+          format: 'cea-708',
+          service,
+          language: metadata?.language ?? 'und',
+          label: metadata?.name ?? 'Service ' + service,
+          default: metadata?.default ?? false,
+          autoselect: metadata?.autoselect ?? false,
+          forced: false,
+        });
+        this.emit('subtitletracks', this.subtitleTracks);
+      }
+      if (!this.subtitleManual) this.selectAutomaticSubtitles();
+      this.render708();
     }
     this.diagnostics.objects++;
     if (lane.role === 'main') {
@@ -1281,6 +1344,8 @@ export class HlsEngine extends EventTarget {
     if (name && !track) throw new Error('Unknown HLS subtitle track');
     this.subtitleAbort?.abort();
     this.subtitleAbort = undefined;
+    this.renderer708?.destroy();
+    this.renderer708 = undefined;
     this.ttmlRenderer?.destroy();
     this.ttmlRenderer = undefined;
     this.vttStyles?.destroy();
@@ -1301,7 +1366,7 @@ export class HlsEngine extends EventTarget {
     const textTrack = this.textTrack;
     textTrack.mode = 'showing';
     const update = () => {
-      if (this.ttmlRenderer) return;
+      if (this.ttmlRenderer || this.renderer708) return;
       const text = Array.from(textTrack.activeCues ?? [])
         .map((c) => (c as VTTCue).text)
         .join('\n');
@@ -1313,6 +1378,26 @@ export class HlsEngine extends EventTarget {
     };
     textTrack.addEventListener('cuechange', update, { signal: abort.signal });
 
+    if (track.format === 'cea-708') {
+      textTrack.mode = 'hidden';
+      this.renderer708 = new Cea708Renderer(this.video, (text) => {
+        this.subtitleCounters.present(
+          text ? { text, rects: [] } : null,
+          !!text,
+        );
+        this.emit('subtitlemetrics', {
+          received: this.subtitleCounters.received,
+          displayed: this.subtitleCounters.displayed,
+        });
+      });
+      abort.signal.addEventListener(
+        'abort',
+        () => this.abort.signal.removeEventListener('abort', stop),
+        { once: true },
+      );
+      this.render708();
+      return;
+    }
     if (track.format === 'cea-608') {
       this.vttStyles ??= new WebVttStyles(this.video);
       this.vttStyles.add('::cue(.cea608) { font-family: monospace; }');
@@ -1465,6 +1550,27 @@ export class HlsEngine extends EventTarget {
       })
       .finally(() => this.abort.signal.removeEventListener('abort', stop));
   }
+  private render708() {
+    const service = Number(this.selectedSubtitle.replace('hls-708-', ''));
+    if (!this.renderer708) return;
+    const events = this.captions708.events.filter((e) => e.service === service);
+    for (const [key, time] of this.captions708Seen)
+      if (time < this.video.currentTime - 35) this.captions708Seen.delete(key);
+    for (const event of events) {
+      const key = service + ':' + event.time;
+      if (
+        !event.checkpoint &&
+        !this.captions708Seen.has(key) &&
+        event.windows.some((w) =>
+          w.cells.some((r) => r.some((c) => c?.text.trim())),
+        )
+      ) {
+        this.subtitleCounters.receive();
+        this.captions708Seen.set(key, event.time);
+      }
+    }
+    this.renderer708.set(events);
+  }
   private render608() {
     if (!this.textTrack) return;
     const service = Number(this.selectedSubtitle.replace('hls-608-', ''));
@@ -1513,6 +1619,8 @@ export class HlsEngine extends EventTarget {
     for (const request of this.switches.splice(0))
       request.reject(new DOMException('Player closed', 'AbortError'));
     this.subtitleAbort?.abort();
+    this.renderer708?.destroy();
+    this.renderer708 = undefined;
     this.ttmlRenderer?.destroy();
     this.ttmlRenderer = undefined;
     this.vttStyles?.destroy();

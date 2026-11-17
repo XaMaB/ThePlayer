@@ -612,3 +612,7 @@ await import('./prepare-ll-hls-fixtures.mjs');
 await import('./prepare-text-fixtures.mjs');
 
 await import('./prepare-sei-fixtures.mjs');
+
+await import('./prepare-708-fixtures.mjs');
+
+await import('./prepare-open-gop-fixtures.mjs');

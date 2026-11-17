@@ -117,6 +117,8 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['open-gop/index.m3u8', 'fetch'],
+    ['open-gop/index.m3u8', 'xhr'],
     ['pes-split/index.m3u8', 'fetch'],
     ['pes-bundle/index.m3u8', 'xhr'],
     ['pes-bframes/index.m3u8', 'fetch'],

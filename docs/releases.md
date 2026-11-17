@@ -1,5 +1,14 @@
 # Release versions
 
+## 0.15.0-alpha.1
+
+- Decode CEA-708 services from AVC/HEVC SEI using an original packet, command and window implementation.
+- Render anchor coordinates, row/column geometry, justification, pen colors/styles, wrapping and scrolling with media-clock delays and bounded seek history.
+- Decode P16 as Unicode BMP by default, with explicit per-service EUC-KR/GBK/Big5 options.
+- Preserve AVC parameter sets in-band with avc3 so multiple PPS IDs can coexist in broadcast segments; recognize immediate intra recovery points and retain non-random-access segment continuity.
+- Keep caption packets by source segment ownership when presentation timestamps cross a nominal segment boundary.
+- Add deterministic service, P16, delay, checkpoint and browser geometry/selection/seek tests. Remaining caption limitations are documented in the support matrix.
+
 ## 0.14.0-alpha.1
 
 - Extract ATSC caption packets from AVC/HEVC SEI in TS and fMP4 before MSE append.
