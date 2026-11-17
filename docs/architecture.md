@@ -6,13 +6,43 @@ The application supplies a source to `PlayerCore`. Its engine registry maps a pr
 
 ## Engine contract
 
-The `PlaybackEngine` TypeScript interface in `src/core/player.ts` defines initialization, teardown, playback, track selection and observable state. Engines own transport-specific retries, buffering and media ingestion. The contract is an initial extension API: some catalog/diagnostic payloads retain the current MoQ shape and need normalization when adding a second engine.
+The `PlaybackEngine` TypeScript interface in `src/core/player.ts` defines initialization, teardown, playback, track selection and observable state. Engines own transport-specific retries, buffering and media ingestion. The contract is an initial extension API: some catalog/diagnostic payloads retain a MoQ-compatible shape. New engines must adapt to the shared controls rather than expose an unrelated track model.
+
+## Module boundaries
+
+| Module               | Responsibility                                                                  |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `src/core/player.ts` | Engine registry, serialized source replacement, event forwarding and teardown   |
+| `src/player.ts`      | Default MoQ registration and lazy HLS registration                              |
+| `src/engines/moq/`   | moq-dev transport integration, media ingestion and group-based buffering        |
+| `src/engines/hls/`   | Original playlist parser, segment scheduling, ABR, demux/remux and HLS captions |
+| `src/subtitles/`     | MoQ bitmap/CEA-708 caption rendering and shared caption metrics                 |
+| `src/ui/controls.ts` | Playback, quality/audio/CC menus, keyboard controls and MediaInfo               |
+| `demo/`              | Source selection, directory discovery and integration examples                  |
+
+```mermaid
+flowchart TD
+  App[Application or demo] --> Core[PlayerCore]
+  Core --> MoQ[MoQ engine]
+  Core --> HLS[HLS engine]
+  MoQ --> MSE[MediaSource / video element]
+  HLS --> MSE
+  MoQ --> Canvas[Bitmap / CEA-708 renderer]
+  HLS --> Text[Native WebVTT / CEA-608 text tracks]
+  Core --> UI[Shared controls and MediaInfo]
+```
+
+## Events
 
 Events forwarded by the core:
 
 | Event             | Detail                                           |
 | ----------------- | ------------------------------------------------ |
 | `statechange`     | State string                                     |
+| `streamchange`    | Live presentation state                          |
+| `qualitylevels`   | Available quality levels                         |
+| `qualitychange`   | Current engine quality selection/state           |
+| `subtitlemetrics` | Caption reception/display counters               |
 | `catalog`         | Media catalog                                    |
 | `error`           | Error object                                     |
 | `autoplayblocked` | No payload                                       |
@@ -24,11 +54,21 @@ Events forwarded by the core:
 
 Bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` consumes caption events and owns canvas drawing, bitmap decoding and displayed-cue counters. Selection invalidates pending bitmap decodes. Destroying or reattaching the renderer clears listeners and its animation loop.
 
+## HLS media and caption pipeline
+
+`engine.ts` schedules playlist refreshes and segment appends. `playlist.ts` parses manifests; `selection.ts` handles rendition preferences; `abr.ts` estimates bandwidth and selects compatible qualities. `network.ts` owns Fetch/XHR, timeouts and bounded retries. Each `MediaLane` manages the initialization, timing and SourceBuffer for its main or external-audio rendition.
+
+MPEG-TS samples pass through the original AVC/HEVC/AAC demux/remux path. fMP4 initialization is inspected for AVC, HEVC, AV1 and AAC configuration before MSE appends. Browser decoders perform the actual audio/video decoding. Quality transitions fill the previous rendition through the switching boundary; the engine's buffering policy is separate from MoQ's GOP/group policy.
+
+External WebVTT uses the subtitle rendition loader. For fMP4 CEA-608, `c608-mp4.ts` extracts timestamped `cdat` pairs, `cea608.ts` decodes channel memories/commands, and `cea608-timeline.ts` checkpoints history for seeking and quality changes. The engine maps rows and columns to native text cues. Caption descriptors are excluded from MSE without moving A/V payload offsets. Unsupported `c708` tracks remain excluded rather than decoded.
+
+HLS captions use browser TextTracks; MoQ bitmap/CEA-708 captions use `SubtitleRenderer`. They share selection and metric conventions but have different rendering paths. See the [HLS support matrix](hls-support.md) for exact carriage, codec and caption limitations.
+
 ## Extending HLS or adding DASH
 
 Implement a separate engine, then register its factory with `PlayerCore` or the third constructor argument to `ThePlayer`. Keep manifest/network libraries inside that engine. Prefer optional entry points or dynamic imports so MoQ-only users do not download HLS/DASH dependencies.
 
-Before exposing the engine, normalize its audio/subtitle tracks and diagnostics, translate text cues to the common subtitle model, and test source replacement and teardown. Its buffer/ABR policy must be independent of MoQ's group-cache policy. The selected HLS direction is our own implementation, not a Shaka/hls.js/VHS adapter. See the HLS research and support documents.
+Before exposing the engine, normalize its audio/subtitle tracks and diagnostics, connect caption rendering and metrics to the common selection lifecycle, and test source replacement and teardown. Its buffer/ABR policy must be independent of MoQ's group-cache policy. The selected HLS direction is our own implementation, not a Shaka/hls.js/VHS adapter. See the HLS research and support documents.
 
 ## Demo boundary
 
