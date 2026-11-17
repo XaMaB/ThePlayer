@@ -27,6 +27,42 @@ const { TsTransmuxer } = await module('transport-stream');
 const { inspectInit } = await module('mp4');
 const temp = await mkdtemp(path.join(os.tmpdir(), 'theplayer-codecs-'));
 try {
+  const { expandedPsi } = await import('./helpers/expanded-psi.mjs');
+  const input = expandedPsi(await readFile(path.join(root, 'ts/segment00.ts')));
+  const expanded = new TsTransmuxer().transmux(input, 2);
+  const expandedFile = path.join(temp, 'expanded-psi.mp4');
+  await writeFile(expandedFile, Buffer.concat([expanded.init, expanded.media]));
+  const expandedProbe = JSON.parse(
+    execFileSync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-count_frames',
+        '-show_streams',
+        '-of',
+        'json',
+        expandedFile,
+      ],
+      { encoding: 'utf8' },
+    ),
+  );
+  assert.equal(
+    Number(
+      expandedProbe.streams.find((s) => s.codec_type === 'video')
+        .nb_read_frames,
+    ),
+    50,
+  );
+  assert.ok(
+    Number(
+      expandedProbe.streams.find((s) => s.codec_type === 'audio')
+        .nb_read_frames,
+    ) > 0,
+  );
+  console.log(
+    'PASS multi-packet PMT remux: 50 AVC frames and audio independently decoded',
+  );
   for (const depth of [8, 10]) {
     const decoder = new TsTransmuxer();
     const fragments = [];

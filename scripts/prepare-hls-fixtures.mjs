@@ -1,3 +1,4 @@
+import { expandedPsi } from '../tests/helpers/expanded-psi.mjs';
 import { createCipheriv } from 'node:crypto';
 // Original synthetic test media, generated locally. Requires ffmpeg with libx264.
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -572,3 +573,15 @@ await writeFile(
     await writeFile(path.join(dir, name), concat(media, extra));
   }
 }
+
+// The same A/V samples with a PMT section spanning two TS packets.
+await mkdir(path.join(root, 'psi'), { recursive: true });
+const psiPlaylist = await readFile(path.join(root, 'ts/index.m3u8'), 'utf8');
+await writeFile(path.join(root, 'psi/index.m3u8'), psiPlaylist);
+for (const name of psiPlaylist
+  .split('\n')
+  .filter((line) => line.endsWith('.ts')))
+  await writeFile(
+    path.join(root, 'psi', name),
+    expandedPsi(await readFile(path.join(root, 'ts', name))),
+  );

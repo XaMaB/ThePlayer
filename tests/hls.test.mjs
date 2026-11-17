@@ -796,3 +796,67 @@ test('declared GAP recovery crosses adjacent known gaps but not unknown missing 
     undefined,
   );
 });
+
+test('live progress counts media advancement, not repeated successful HTTP responses', async () => {
+  const { LiveProgress, reconcileLive } = await module('live');
+  const p = parsePlaylist(vod('#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts', 10), base);
+  const tracker = new LiveProgress();
+  assert.equal(tracker.observe(p, 100), 0);
+  assert.equal(tracker.observe(p, 4100), 4000);
+  const moved = parsePlaylist(
+    vod('#EXTINF:2,\nb.ts\n#EXTINF:2,\nc.ts', 11),
+    base,
+  );
+  assert.equal(tracker.observe(moved, 5000), 0);
+  assert.equal(reconcileLive(moved, p, 11).restart, false);
+  assert.equal(reconcileLive(moved, p, 10).reason, 'live-window-missed');
+  const reset = parsePlaylist(vod('#EXTINF:2,\nnew.ts', 0), base);
+  assert.equal(reconcileLive(reset, p, 12).restart, true);
+  const changed = parsePlaylist(vod('#EXTINF:2,\nnew.ts', 10), base);
+  assert.equal(reconcileLive(changed, p, 12).restart, true);
+});
+
+test('PSI assembler handles pointer tails, multi-packet sections, multiple sections and CRC corruption', async () => {
+  const { PsiAssembler, PsiTable, psiCrc } = await module('psi');
+  assert.equal(psiCrc(new TextEncoder().encode('123456789')), 0x0376e6e7);
+  const section = (number, last, size = 200) => {
+    const d = new Uint8Array(size);
+    d.set([
+      0,
+      0xb0 | ((size - 3) >> 8),
+      (size - 3) & 255,
+      0,
+      1,
+      0xc1,
+      number,
+      last,
+    ]);
+    new DataView(d.buffer).setUint32(size - 4, psiCrc(d.subarray(0, -4)));
+    return d;
+  };
+  const a = section(0, 1),
+    b = section(1, 1, 16);
+  const assembler = new PsiAssembler();
+  assert.deepEqual(
+    assembler.push(Uint8Array.from([0, ...a.slice(0, 150)]), true),
+    [],
+  );
+  const result = assembler.push(
+    Uint8Array.from([50, ...a.slice(150), ...b, 255, 255]),
+    true,
+  );
+  assert.deepEqual(result, [a, b]);
+  const table = new PsiTable();
+  assert.equal(table.accept(a), undefined);
+  assert.deepEqual(table.accept(b), [a, b]);
+  const corrupt = b.slice();
+  corrupt[9] ^= 1;
+  assert.throws(
+    () => new PsiAssembler().push(Uint8Array.from([0, ...corrupt]), true),
+    /CRC/,
+  );
+  assert.throws(
+    () => new PsiAssembler().push(Uint8Array.from([255]), true),
+    /pointer/,
+  );
+});

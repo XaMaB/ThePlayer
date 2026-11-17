@@ -49,3 +49,11 @@ Before publishing:
 - Skip playlist-declared GAP resources and cross adjacent known gaps only after playable media arrives.
 - Reusable isolated HTTP fault server and browser recovery tests, also runnable against an external host.
 - Encoder restarts, stale-playlist handling and full timeline repair remain future stages.
+
+## 0.9.0-alpha.1
+
+- Track live publisher advancement independently of HTTP reload success; bounded stale-publisher handling.
+- Coordinated video/audio MediaSource restart after sequence reset, changed segment identity or lost live window; preserve pause and selections.
+- Re-establish external audio clocks when aligned playlists use distinct raw timestamp origins.
+- Assemble and CRC-check multi-packet/multi-section PAT/PMT tables; reject malformed descriptors.
+- Deterministic live recovery scenarios and independently decoded expanded-PMT fixtures.

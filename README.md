@@ -91,7 +91,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 | Content steering / interstitials / timed metadata   | Not implemented                                                                          |
 | I-frame trick play / image playlists / packed audio | Not implemented                                                                          |
 | Declared GAP segments                               | Skipped without requests; playback resumes at buffered media after the declared interval |
-| Unaligned live resets                               | Not implemented; reconnect is required                                                   |
+| Live timeline resets                                | Bounded coordinated media restart; paused state and track selection retained             |
 
 The HLS engine is original code: it does not bundle or copy hls.js, Video.js/VHS or Shaka implementations. This does not mean the entire player has no dependencies: MoQ uses moq-dev, and the MoQ caption path includes a locally patched mux.js decoder with provenance and licensing. See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [detailed limits](docs/hls-support.md).
 
@@ -239,4 +239,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.8.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.9.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

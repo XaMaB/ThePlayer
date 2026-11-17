@@ -1,3 +1,4 @@
+import { PsiAssembler, PsiTable } from './psi';
 import { hevcConfiguration } from './hevc';
 import { sampleRates, aacConfiguration } from './aac';
 import {
@@ -128,6 +129,8 @@ function demux(bytes: Uint8Array): Pes[] {
   if (bytes.length % 188 || bytes[0] !== 0x47)
     throw new Error('Expected 188-byte MPEG-TS packets');
   let pmt = -1;
+  const assemblers = new Map<number, PsiAssembler>();
+  const tables = new Map<number, PsiTable>();
   const types = new Map<number, number>(),
     pending = new Map<number, Uint8Array[]>(),
     packets: Pes[] = [];
@@ -167,43 +170,79 @@ function demux(bytes: Uint8Array): Pes[] {
     const discontinuity = !!(adapt & 2 && d[4] && d[5] & 0x80),
       cc = d[3] & 15,
       previous = continuity.get(pid);
-    if (types.has(pid) && previous !== undefined && !discontinuity) {
+    if (
+      (types.has(pid) || pid === 0 || pid === pmt) &&
+      previous !== undefined &&
+      !discontinuity
+    ) {
       if (cc === previous) continue;
       if (cc !== (previous + 1) % 16) throw new Error('MPEG-TS packet loss');
     }
     continuity.set(pid, cc);
     let payload = d.subarray(offset);
     if (pid === 0 || pid === pmt) {
-      if (!start) continue;
-      payload = payload.subarray(1 + payload[0]);
-      if (payload.length < 8) throw new Error('Invalid PSI table');
-      const end = 3 + ((payload[1] & 15) << 8) + payload[2] - 4;
-      if (end + 4 > payload.length)
-        throw new Error('Multi-packet PSI is not yet supported');
-      if (pid === 0) {
-        for (let i = 8; i + 4 <= end; i += 4)
-          if (payload[i] || payload[i + 1]) {
-            pmt = ((payload[i + 2] & 31) << 8) | payload[i + 3];
-            break;
+      let assembler = assemblers.get(pid);
+      if (!assembler) {
+        assembler = new PsiAssembler();
+        assemblers.set(pid, assembler);
+      }
+      if (discontinuity) {
+        assembler.reset();
+        tables.delete(pid);
+      }
+      for (const section of assembler.push(payload, start)) {
+        if (section[0] !== (pid === 0 ? 0 : 2))
+          throw new Error('Unexpected PSI table');
+        let table = tables.get(pid);
+        if (!table) {
+          table = new PsiTable();
+          tables.set(pid, table);
+        }
+        const sections = table.accept(section);
+        if (!sections) continue;
+        if (pid === 0) {
+          for (const part of sections) {
+            const end = part.length - 4;
+            for (let i = 8; i + 4 <= end; i += 4) {
+              if (part[i] || part[i + 1]) {
+                pmt = ((part[i + 2] & 31) << 8) | part[i + 3];
+                break;
+              }
+            }
+            if (pmt >= 0) break;
           }
-      } else {
-        let i = 12 + ((payload[10] & 15) << 8) + payload[11];
-        for (; i + 5 <= end; ) {
-          const type = payload[i],
-            elementary = ((payload[i + 1] & 31) << 8) | payload[i + 2];
-          if (type === 0x1b || type === 0x24 || type === 0x0f) {
-            if (
-              Array.from(types).some(
-                ([pid, value]) => value === type && pid !== elementary,
-              )
-            )
-              throw new Error(
-                'Multiple same-kind elementary streams are not yet supported',
-              );
-            types.set(elementary, type);
-          } else if ([0x03, 0x04, 0x81, 0x87].includes(type))
-            throw new Error('TS baseline supports AVC/HEVC/AAC only');
-          i += 5 + ((payload[i + 3] & 15) << 8) + payload[i + 4];
+        } else {
+          const discovered = new Map<number, number>();
+          for (const part of sections) {
+            const end = part.length - 4;
+            let i = 12 + ((part[10] & 15) << 8) + part[11];
+            if (i > end) throw new Error('Invalid PMT program descriptors');
+            for (; i + 5 <= end; ) {
+              const type = part[i],
+                elementary = ((part[i + 1] & 31) << 8) | part[i + 2];
+              const next = i + 5 + ((part[i + 3] & 15) << 8) + part[i + 4];
+              if (next > end)
+                throw new Error('Invalid PMT elementary descriptors');
+              if ([0x1b, 0x24, 0x0f].includes(type)) {
+                if (
+                  Array.from(discovered).some(
+                    ([id, kind]) => id !== elementary && kind === type,
+                  )
+                )
+                  throw new Error(
+                    'Multiple same-kind elementary streams are not yet supported',
+                  );
+                discovered.set(elementary, type);
+              } else if ([0x03, 0x04, 0x81, 0x87].includes(type))
+                throw new Error('TS supports AVC/HEVC/AAC only');
+              i = next;
+            }
+            if (i !== end) throw new Error('Truncated PMT elementary entry');
+          }
+          for (const [id, type] of types)
+            if (discovered.get(id) !== type) flush(id);
+          types.clear();
+          for (const [id, type] of discovered) types.set(id, type);
         }
       }
     } else if (types.has(pid)) {

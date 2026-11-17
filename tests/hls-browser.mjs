@@ -115,6 +115,7 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['psi/index.m3u8', 'fetch'],
     ['caption-tracks/index.m3u8', 'fetch'],
     ['av1-8/index.m3u8', 'fetch'],
     ['av1-10/index.m3u8', 'xhr'],

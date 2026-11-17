@@ -18,6 +18,12 @@ try {
     )
       continue;
     for (const scenario of [
+      'restart',
+      'restart-paused',
+      'restart-audio',
+      'window-jump',
+      'stale-resume',
+      'stale-terminal',
       'gap',
       'http-outage',
       'disconnect',
@@ -50,6 +56,9 @@ try {
               protocol: 'hls',
               url,
               targetBuffer: 4,
+              liveStallTimeoutMs: 3000,
+              liveRecoveryTimeoutMs:
+                scenario === 'stale-terminal' ? 6000 : 30000,
               network: {
                 transport,
                 timeoutMs: 400,
@@ -63,7 +72,105 @@ try {
         },
         { url: base + route + 'index.m3u8', transport, scenario },
       );
-      if (scenario === 'gap') {
+      if (scenario === 'restart-paused') {
+        await page.waitForFunction(
+          () => window.player.diagnostics.state === 'playing',
+        );
+        await page.evaluate(() => document.querySelector('video').pause());
+        await page.waitForFunction(
+          () =>
+            window.player.diagnostics.live.restarts === 1 &&
+            document.querySelector('video').readyState >= 2,
+        );
+        assert.equal(
+          await page.evaluate(() => document.querySelector('video').paused),
+          true,
+        );
+        assert.deepEqual(await page.evaluate(() => window.failures), []);
+      } else if (
+        scenario === 'restart' ||
+        scenario === 'window-jump' ||
+        scenario === 'restart-audio'
+      ) {
+        await page
+          .waitForFunction(
+            () =>
+              window.player.diagnostics.live.restarts === 1 &&
+              document.querySelector('video').currentTime > 5 &&
+              document.querySelector('video').getVideoPlaybackQuality()
+                .totalVideoFrames > 30,
+            null,
+            { timeout: 20000 },
+          )
+          .catch(async (error) => {
+            console.log(
+              await page.evaluate(() => ({
+                diagnostics: window.player.diagnostics,
+                failures: window.failures,
+                time: document.querySelector('video').currentTime,
+                initial: window.player.engine?.initial,
+                ready: document.querySelector('video').readyState,
+                ranges: Array.from(
+                  { length: document.querySelector('video').buffered.length },
+                  (_, i) => [
+                    document.querySelector('video').buffered.start(i),
+                    document.querySelector('video').buffered.end(i),
+                  ],
+                ),
+                lanes: [
+                  window.player.engine?.main,
+                  window.player.engine?.audio,
+                ].map((l) => ({
+                  next: l?.next,
+                  offset: l?.offset,
+                  ranges: Array.from(
+                    { length: l?.buffer?.buffered.length ?? 0 },
+                    (_, i) => [
+                      l.buffer.buffered.start(i),
+                      l.buffer.buffered.end(i),
+                    ],
+                  ),
+                })),
+              })),
+              [...requests],
+            );
+            throw error;
+          });
+        if (scenario === 'restart-audio')
+          assert.ok(
+            await page.evaluate(
+              () =>
+                document.querySelector('video').webkitAudioDecodedByteCount > 0,
+            ),
+          );
+        assert.deepEqual(await page.evaluate(() => window.failures), []);
+        assert.equal(
+          await page.evaluate(() => window.player.diagnostics.state),
+          'playing',
+        );
+      } else if (scenario === 'stale-resume') {
+        await page.waitForFunction(
+          () => window.player.diagnostics.live.stale,
+          null,
+          { timeout: 10000 },
+        );
+        await page.waitForFunction(
+          () =>
+            !window.player.diagnostics.live.stale &&
+            document.querySelector('video').currentTime > 7,
+          null,
+          { timeout: 15000 },
+        );
+        assert.deepEqual(await page.evaluate(() => window.failures), []);
+      } else if (scenario === 'stale-terminal') {
+        await page.waitForFunction(() => window.failures.length, null, {
+          timeout: 12000,
+        });
+        assert.match(
+          await page.evaluate(() => window.failures.join()),
+          /stopped advancing/,
+        );
+      } else if (scenario === 'gap') {
         await page.waitForFunction(
           () => document.querySelector('video').currentTime > 11,
           null,
@@ -115,6 +222,14 @@ try {
                 diagnostics: window.player.diagnostics,
                 failures: window.failures,
                 time: document.querySelector('video').currentTime,
+                initial: window.player.engine?.initial,
+                ranges: Array.from(
+                  { length: document.querySelector('video').buffered.length },
+                  (_, i) => [
+                    document.querySelector('video').buffered.start(i),
+                    document.querySelector('video').buffered.end(i),
+                  ],
+                ),
               })),
               [...requests],
             );

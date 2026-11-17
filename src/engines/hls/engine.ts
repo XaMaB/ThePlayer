@@ -1,3 +1,4 @@
+import { LiveProgress, reconcileLive } from './live';
 import { Cea608Timeline } from './cea608-timeline';
 import { row608Text } from './cea608';
 import type { Track } from './mp4';
@@ -30,6 +31,8 @@ export interface HlsSource {
   url: string;
   network?: NetworkOptions;
   targetBuffer?: number;
+  liveStallTimeoutMs?: number;
+  liveRecoveryTimeoutMs?: number;
   autoplay?: boolean;
   quality?: 'auto' | number;
   media?: 'video' | 'audio';
@@ -50,6 +53,14 @@ export class HlsEngine extends EventTarget {
     requests: 0,
     retries: 0,
     declaredGaps: 0,
+    audioClockRebases: 0,
+    live: {
+      stale: false,
+      unchangedMs: 0,
+      restarts: 0,
+      reason: '',
+      lanes: {} as Record<string, { unchangedMs: number; stale: boolean }>,
+    },
     recovery: {} as Record<string, unknown>,
     bandwidth: 0,
     quality: {} as Record<string, unknown>,
@@ -80,6 +91,9 @@ export class HlsEngine extends EventTarget {
     );
   }
   private abrRetryAt = 0;
+  private liveProgress = new LiveProgress();
+  private restartTimes: number[] = [];
+  private resumeAfterReset?: boolean;
   private gaps: { start: number; end: number }[] = [];
   private abort = new AbortController();
   private client: ResourceClient;
@@ -139,6 +153,19 @@ export class HlsEngine extends EventTarget {
       (!Number.isFinite(source.startTime) || source.startTime < 0)
     )
       throw new Error('Invalid HLS startTime');
+    for (const value of [
+      source.liveStallTimeoutMs,
+      source.liveRecoveryTimeoutMs,
+    ])
+      if (value != null && (!Number.isFinite(value) || value < 1000))
+        throw new Error('Live recovery timeouts must be at least 1000 ms');
+    if (
+      source.liveRecoveryTimeoutMs != null &&
+      source.liveRecoveryTimeoutMs < (source.liveStallTimeoutMs ?? 30000)
+    )
+      throw new Error(
+        'Live recovery timeout must not precede the stale threshold',
+      );
     this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
     this.diagnostics.recovery = this.client.recovery;
     video.addEventListener('playing', () => this.state('playing'), {
@@ -376,7 +403,38 @@ export class HlsEngine extends EventTarget {
     const token = this.generation,
       nextSequence =
         p.segments[lane.next]?.sequence ?? p.segments.at(-1)!.sequence + 1;
-    const updated = alignPlaylist(await this.readPlaylist(p.url), p);
+    const incoming = await this.readPlaylist(p.url);
+    const unchanged = this.liveProgress.observe(incoming, performance.now());
+    const staleAfter =
+      this.source.liveStallTimeoutMs ??
+      Math.max(30000, p.targetDuration * 3000);
+    this.diagnostics.live.lanes[lane.role] = {
+      unchangedMs: unchanged,
+      stale: incoming.live && unchanged >= staleAfter,
+    };
+    this.diagnostics.live.stale = Object.values(
+      this.diagnostics.live.lanes,
+    ).some((l) => l.stale);
+    this.diagnostics.live.unchangedMs = Math.max(
+      ...Object.values(this.diagnostics.live.lanes).map((l) => l.unchangedMs),
+    );
+    if (
+      incoming.live &&
+      unchanged >=
+        (this.source.liveRecoveryTimeoutMs ?? Math.max(120000, staleAfter * 2))
+    )
+      throw new Error(
+        'HLS live playlist stopped advancing beyond recovery timeout',
+      );
+    const result = reconcileLive(incoming, p, nextSequence);
+    if (result.restart) {
+      await this.restartLive(
+        lane === this.main ? incoming : undefined,
+        result.reason,
+      );
+      return;
+    }
+    const updated = result.playlist;
     lane.playlist = updated;
     lane.refreshedAt = performance.now();
     lane.next =
@@ -384,6 +442,62 @@ export class HlsEngine extends EventTarget {
         ? updated.segments.findIndex((s) => s.sequence >= nextSequence)
         : segmentAt(updated, this.video.currentTime);
     if (lane.next < 0) lane.next = updated.segments.length;
+  }
+  private async restartLive(incoming: Playlist | undefined, reason: string) {
+    const now = performance.now();
+    this.restartTimes = this.restartTimes.filter((at) => now - at < 60000);
+    if (this.restartTimes.length >= 3)
+      throw new Error('HLS live source repeatedly reset its timeline');
+    this.restartTimes.push(now);
+    const main = incoming ?? (await this.readPlaylist(this.main!.playlist.url));
+    const audio = this.audio
+      ? alignRendition(await this.readPlaylist(this.audio.playlist.url), main)
+      : undefined;
+    // Fetch and validate both playlists before releasing the old presentation.
+    const play = !this.video.paused;
+    this.initial = true;
+    this.resumeAfterReset = play;
+    this.generation++;
+    this.subtitleAbort?.abort();
+    this.video.pause();
+    this.video.removeAttribute('src');
+    this.video.load();
+    if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
+    this.offsets.clear();
+    this.keys.clear();
+    this.gaps = [];
+    this.captions608.reset();
+    this.captions608Seen.clear();
+    this.liveProgress.reset();
+    this.ended = false;
+    this.main = this.lane(
+      main,
+      'main',
+      this.qualityLevels[this.selectedQuality]?.codecs,
+    );
+    this.main.next = Math.max(
+      0,
+      main.segments.length -
+        Math.max(3, Math.ceil(this.targetBuffer / main.targetDuration)),
+    );
+    this.audio = audio ? this.lane(audio, 'audio') : undefined;
+    if (this.audio)
+      this.audio.next = segmentAt(audio!, main.segments[this.main.next].start);
+    this.isLive = main.live;
+    this.diagnostics.live.restarts++;
+    this.diagnostics.live.reason = reason;
+    this.diagnostics.live.stale = false;
+    this.diagnostics.live.lanes = {};
+    this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
+    this.media = new MediaSource();
+    this.mediaUrl = URL.createObjectURL(this.media);
+    const opened = this.event(this.media, 'sourceopen');
+    this.video.src = this.mediaUrl;
+    await opened;
+    this.media.duration = main.live ? Infinity : main.duration;
+    this.state('buffering');
+    this.emit('streamchange', { live: this.isLive });
+    await this.prime();
   }
   private assertLayout(prepared: PreparedSegment, lane: MediaLane) {
     if (
@@ -420,14 +534,27 @@ export class HlsEngine extends EventTarget {
       );
     this.assertLayout(prepared, lane);
     lane.configure(this.media!, prepared);
-    const offset =
+    let offset =
       lane.role === 'audio'
-        ? this.offsets.get(prepared.segment.discontinuity)
+        ? lane.discontinuity === prepared.segment.discontinuity
+          ? lane.offset
+          : this.offsets.get(prepared.segment.discontinuity)
         : lane.discontinuity !== prepared.segment.discontinuity
           ? prepared.segment.start - prepared.rawStart
           : lane.offset;
     if (offset === undefined)
       throw new Error('Audio discontinuity has no video clock anchor');
+    if (
+      lane.role === 'audio' &&
+      lane.discontinuity !== prepared.segment.discontinuity &&
+      Math.abs(prepared.rawStart + offset - prepared.segment.start) >
+        Math.max(1, lane.playlist.targetDuration)
+    ) {
+      // Rendition playlists have already been aligned by PDT or sequence. A
+      // different raw clock must not turn all audio timestamps negative after reset.
+      offset = prepared.segment.start - prepared.rawStart;
+      this.diagnostics.audioClockRebases++;
+    }
     if (
       lane.role === 'main' &&
       !this.offsets.has(prepared.segment.discontinuity)
@@ -506,7 +633,7 @@ export class HlsEngine extends EventTarget {
     }
     this.gaps = this.gaps.filter((g) => g.end >= this.video.currentTime - 35);
   }
-  private async run() {
+  private async prime() {
     for (const lane of this.lanes()) this.skipDeclaredGaps(lane);
     // Install every SourceBuffer before appending media, preserving shared A/V ownership.
     const first = await Promise.all(
@@ -524,7 +651,14 @@ export class HlsEngine extends EventTarget {
       lane.next++;
     }
     this.publishCatalog();
-    this.selectAutomaticSubtitles();
+    if (this.subtitleManual)
+      this.selectSubtitleTrack(this.selectedSubtitle, true);
+    else this.selectAutomaticSubtitles();
+    for (const lane of this.lanes())
+      this.liveProgress.observe(lane.playlist, performance.now());
+  }
+  private async run() {
+    await this.prime();
     while (!this.abort.signal.aborted && !this.failed) {
       if (this.switches.length) {
         const request = this.switches.shift()!;
@@ -538,6 +672,7 @@ export class HlsEngine extends EventTarget {
       }
       for (const lane of this.lanes()) {
         await this.refresh(lane);
+        if (lane !== this.main && lane !== this.audio) break;
         this.skipDeclaredGaps(lane);
       }
       if (
@@ -575,7 +710,9 @@ export class HlsEngine extends EventTarget {
         this.video.currentTime = Math.max(
           this.video.buffered.start(0) + 0.001,
           Math.min(
-            this.source.startTime ?? 0,
+            this.resumeAfterReset !== undefined
+              ? 0
+              : (this.source.startTime ?? 0),
             this.video.buffered.end(0) - 0.001,
           ),
         );
@@ -585,7 +722,10 @@ export class HlsEngine extends EventTarget {
         if (!this.availableMediaModes.length)
           this.availableMediaModes = [this.mediaMode];
         this.initial = false;
-        if (this.source.autoplay !== false) void this.play();
+        const autoplay =
+          this.resumeAfterReset ?? this.source.autoplay !== false;
+        this.resumeAfterReset = undefined;
+        if (autoplay) void this.play();
       }
       if (!this.video.paused && this.video.readyState < 3) {
         const position =

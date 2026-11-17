@@ -11,6 +11,8 @@ export function faultServer({
   dist = fileURLToPath(new URL('../../dist/', import.meta.url)),
 } = {}) {
   const requests = new Map();
+  const epochs = new Map();
+  const starts = new Map();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
@@ -33,6 +35,105 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
+        if (scenario === 'soak' && resource === 'index.m3u8') {
+          const key = match[1];
+          if (!starts.has(key)) starts.set(key, Date.now());
+          const first = Math.floor((Date.now() - starts.get(key)) / 2000);
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.end(
+            '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:' +
+              first +
+              '\n#EXT-X-DISCONTINUITY-SEQUENCE:' +
+              Math.floor(first / 9) +
+              '\n' +
+              Array.from({ length: 6 }, (_, i) => {
+                const n = first + i;
+                return (
+                  (i && n % 9 === 0 ? '#EXT-X-DISCONTINUITY\n' : '') +
+                  '#EXTINF:2,\nsegment' +
+                  String(n % 9).padStart(2, '0') +
+                  '.ts?sequence=' +
+                  n +
+                  '\n'
+                );
+              }).join(''),
+          );
+          return;
+        }
+
+        if (scenario === 'restart-audio') {
+          relative = resource === 'index.m3u8' ? 'renditions.m3u8' : resource;
+          if (resource.endsWith('.m3u8')) {
+            let data = await readFile(path.join(root, relative), 'utf8');
+            if (resource !== 'index.m3u8') {
+              const key = match[1];
+              if (resource.startsWith('video-') && count >= 3)
+                epochs.set(key, true);
+              const restarted = epochs.has(key);
+              data = data
+                .replace('#EXT-X-ENDLIST', '')
+                .replace(
+                  /#EXT-X-MEDIA-SEQUENCE:\d+/,
+                  '#EXT-X-MEDIA-SEQUENCE:' + (restarted ? 0 : 10),
+                );
+              data = data
+                .split('\n')
+                .map((line) =>
+                  line && !line.startsWith('#')
+                    ? line + '?epoch=' + (restarted ? 'new' : 'old')
+                    : line,
+                )
+                .join('\n');
+            }
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.end(data);
+            return;
+          }
+        }
+
+        if (
+          resource === 'index.m3u8' &&
+          [
+            'restart',
+            'restart-paused',
+            'window-jump',
+            'stale-resume',
+            'stale-terminal',
+          ].includes(scenario)
+        ) {
+          let first = 0,
+            sequence = 10,
+            epoch = 'old';
+          if (scenario.startsWith('restart') && count >= 3) {
+            sequence = 0;
+            epoch = 'new';
+          }
+          if (scenario === 'window-jump' && count >= 3) {
+            sequence = 30;
+            epoch = 'new';
+          }
+          if (scenario === 'stale-resume' && count >= 4) {
+            first = 1;
+            sequence = 11;
+          }
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.end(
+            '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:' +
+              sequence +
+              '\n' +
+              Array.from(
+                { length: 5 },
+                (_, i) =>
+                  '#EXTINF:2,\nsegment' +
+                  String(first + i).padStart(2, '0') +
+                  '.ts?epoch=' +
+                  epoch +
+                  '\n',
+              ).join(''),
+          );
+          return;
+        }
+
         if (scenario === 'gap' && resource === 'index.m3u8') {
           const data = (await readFile(path.join(root, relative), 'utf8'))
             .replace('segment03.ts', '#EXT-X-GAP\nsegment03.ts')

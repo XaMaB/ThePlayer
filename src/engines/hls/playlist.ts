@@ -397,6 +397,10 @@ export function alignPlaylist(next: Playlist, previous: Playlist): Playlist {
     if (
       old.url !== overlap.url ||
       JSON.stringify(old.range) !== JSON.stringify(overlap.range) ||
+      JSON.stringify(old.map) !== JSON.stringify(overlap.map) ||
+      (old.programDateTime &&
+        overlap.programDateTime &&
+        old.programDateTime !== overlap.programDateTime) ||
       Math.abs(old.duration - overlap.duration) > 0.05
     )
       throw new Error('Live playlist changed an existing segment');
