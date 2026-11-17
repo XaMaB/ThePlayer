@@ -619,3 +619,5 @@ await import('./prepare-open-gop-fixtures.mjs');
 
 await import('./prepare-cdp-fixtures.mjs');
 await import('./prepare-protection-fixtures.mjs');
+
+await import('./prepare-sample-aes-fixtures.mjs');

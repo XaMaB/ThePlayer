@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.17.0-alpha.1
+
+- Decrypt identity SAMPLE-AES AVC/AAC in MPEG-TS before transmuxing, including key rotation and explicit/sequence IVs.
+- Preserve CBC block boundaries, AVC outer escaping and samples split across PES.
+- Verify every decrypted elementary byte and remux output against the clear fixtures; test playback and seeking through Fetch/XHR.
+- fMP4 cbcs, EME and encrypted AC-3/E-AC-3 remain separate work.
+
 ## 0.16.0-alpha.1
 
 - Decode separate c708/ccdp tracks with CDP section, checksum, sequence and cadence validation.

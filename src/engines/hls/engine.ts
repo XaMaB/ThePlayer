@@ -1,3 +1,4 @@
+import { decryptSamplePes } from './sample-aes';
 import { Cea708Timeline } from './cea708-timeline';
 import { Cea708Renderer } from './cea708-renderer';
 import type { P16Encoding } from './cea708-packets';
@@ -306,6 +307,14 @@ export class HlsEngine extends EventTarget {
         ?.split(',')
         .find((codec) => codec.trim().startsWith('mp4a.'))
         ?.trim(),
+      async (pes, key, sequence) => {
+        if (pes.some((p) => p.type === 0x24))
+          throw new Error('SAMPLE-AES TS supports AVC/AAC only');
+        const imported = await this.importKey(key);
+        const iv = key.iv ?? new Uint8Array(16);
+        if (!key.iv) new DataView(iv.buffer).setBigUint64(8, BigInt(sequence));
+        return decryptSamplePes(pes, imported, iv);
+      },
     );
   }
   async init() {
@@ -1231,6 +1240,8 @@ export class HlsEngine extends EventTarget {
     sequence: number,
   ) {
     if (!key) return data;
+    if (key.method === 'SAMPLE-AES')
+      throw new Error('SAMPLE-AES requires an elementary sample decoder');
     const imported = await this.importKey(key);
     if (key.method === 'AES-256-GCM') {
       if (data.length < 32) throw new Error('Truncated AES-256-GCM resource');
@@ -1262,7 +1273,7 @@ export class HlsEngine extends EventTarget {
   }
   private async importKey(key: Key): Promise<CryptoKey> {
     if (
-      !['AES-128', 'AES-256-GCM'].includes(key.method) ||
+      !['AES-128', 'AES-256-GCM', 'SAMPLE-AES'].includes(key.method) ||
       key.format !== 'identity' ||
       !(key.versions ?? [1]).includes(1) ||
       !key.url
@@ -1288,7 +1299,7 @@ export class HlsEngine extends EventTarget {
             bytes as BufferSource,
             key.method === 'AES-256-GCM' ? 'AES-GCM' : 'AES-CBC',
             false,
-            ['decrypt'],
+            key.method === 'SAMPLE-AES' ? ['encrypt', 'decrypt'] : ['decrypt'],
           );
         })();
       if (this.keys.size >= 32)

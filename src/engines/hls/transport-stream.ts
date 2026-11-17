@@ -125,13 +125,13 @@ export function timestamp(data: Uint8Array, at: number) {
 export function unwrap(value: number, reference: number) {
   return value + Math.round((reference - value) / 2 ** 33) * 2 ** 33;
 }
-interface Pes {
+export interface Pes {
   type: number;
   pts?: number;
   dts?: number;
   data: Uint8Array;
 }
-function demux(bytes: Uint8Array): Pes[] {
+export function demux(bytes: Uint8Array): Pes[] {
   if (bytes.length % 188 || bytes[0] !== 0x47)
     throw new Error('Expected 188-byte MPEG-TS packets');
   let pmt = -1;
@@ -238,7 +238,7 @@ function demux(bytes: Uint8Array): Pes[] {
               const next = i + 5 + ((part[i + 3] & 15) << 8) + part[i + 4];
               if (next > end)
                 throw new Error('Invalid PMT elementary descriptors');
-              if ([0x1b, 0x24, 0x0f].includes(type)) {
+              if ([0x1b, 0x24, 0x0f, 0xdb, 0xcf].includes(type)) {
                 if (
                   Array.from(discovered).some(
                     ([id, kind]) => id !== elementary && kind === type,
@@ -289,7 +289,11 @@ export class TsTransmuxer {
     this.clock = undefined;
   }
   transmux(bytes: Uint8Array, segmentDuration: number) {
-    const pes = demux(bytes);
+    return this.transmuxPes(demux(bytes), segmentDuration);
+  }
+  transmuxPes(pes: Pes[], segmentDuration: number) {
+    if (pes.some((p) => p.type === 0xdb || p.type === 0xcf))
+      throw new Error('Encrypted TS samples require SAMPLE-AES decryption');
     const first =
       pes.find((p) => (p.type === 0x1b || p.type === 0x24) && p.dts != null) ??
       pes.find((p) => p.dts != null);

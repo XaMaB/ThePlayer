@@ -8,7 +8,7 @@ import {
 } from './caption-tracks';
 import { bufferedAhead } from './buffer';
 import type { Playlist, Segment, Key, Resource } from './playlist';
-import { TsTransmuxer } from './transport-stream';
+import { TsTransmuxer, demux, type Pes } from './transport-stream';
 import { inspectInit, decodeTime, type Track } from './mp4';
 
 export interface LoadedResource {
@@ -55,6 +55,11 @@ export class MediaLane {
       sequence: number,
     ) => Promise<Uint8Array>,
     audioCodec?: string,
+    private readonly decryptSamples?: (
+      pes: Pes[],
+      key: Key,
+      sequence: number,
+    ) => Promise<Pes[]>,
   ) {
     this.decoder = new TsTransmuxer(audioCodec);
   }
@@ -67,7 +72,10 @@ export class MediaLane {
     if (!segment || segment.gap)
       throw new Error('Missing segment or unsupported HLS GAP');
     const response = await this.load(segment);
-    let data = await this.decrypt(response.data, segment.key, segment.sequence);
+    let data =
+      segment.key?.method === 'SAMPLE-AES'
+        ? response.data
+        : await this.decrypt(response.data, segment.key, segment.sequence);
     if (this.preparedDiscontinuity !== segment.discontinuity) {
       this.decoder.reset();
       this.preparedDiscontinuity = segment.discontinuity;
@@ -77,6 +85,8 @@ export class MediaLane {
     let captionPackets: CaptionPacket[] = [],
       captionError: string | undefined = this.captionMetaError;
     if (segment.map) {
+      if (segment.key?.method === 'SAMPLE-AES')
+        throw new Error('fMP4 SAMPLE-AES requires cbcs support');
       const key = JSON.stringify(segment.map);
       if (this.initCache?.key !== key) {
         if (segment.map.key?.method === 'AES-128' && !segment.map.key.iv)
@@ -153,7 +163,16 @@ export class MediaLane {
       tracks = inspectInit(init);
       rawStart = decodeTime(data, tracks);
     } else if (data[0] === 0x47) {
-      const result = this.decoder.transmux(data, segment.duration);
+      const pes = demux(data);
+      const encrypted = segment.key?.method === 'SAMPLE-AES';
+      if (encrypted && !this.decryptSamples)
+        throw new Error('SAMPLE-AES decoder unavailable');
+      const result = this.decoder.transmuxPes(
+        encrypted
+          ? await this.decryptSamples!(pes, segment.key!, segment.sequence)
+          : pes,
+        segment.duration,
+      );
       init = result.init;
       tracks = result.tracks;
       data = result.media;

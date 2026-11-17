@@ -28,7 +28,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 - **TTML/IMSC text and MP4 WebVTT are implemented subsets.** See the text-profile scope below. HLS CEA-708 SEI decoding uses an original implementation separate from the MoQ decoder; see its scope below.
 - TS supports one video/audio stream, supported access-unit timing and complete PES packets. Multi-packet PAT/PMT sections are assembled and CRC-checked. Annex-B NAL units may span PES boundaries, and multiple pictures per PES are supported for the timing profiles below. IDR and immediate AVC intra recovery points are marked as random access; other segment starts preserve continuity and MSE waits for a random access point when required. Unsupported codecs still fail explicitly. More broadcast edge-case testing is needed.
 - AVC, HEVC Main/Main10, AV1 Main 8/10-bit (fMP4) and AAC-LC/declared HE-AAC v1 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. Dolby audio, packed audio, I-frame-only trick-play and image playlists are not supported.
-- SAMPLE-AES, DRM/EME, content steering, interstitials and timed metadata are not implemented.
+- SAMPLE-AES supports TS AVC/AAC identity keys. fMP4 cbcs, DRM/EME, content steering, interstitials and timed metadata remain pending.
 - Declared GAP segments have bounded scheduling/playback recovery; see the validation scope below. Live-window loss and detected timeline resets now trigger a bounded coordinated media restart; see below.
 - The network client bounds individual resources at 64 MiB. No server proxy is provided; cross-origin resources need appropriate CORS headers.
 - The player uses MSE. There is no native-HLS fallback in this engine; such a fallback would not test our own parser/pipeline.
@@ -104,7 +104,7 @@ All eight entries on [Mux's test-stream index](https://test-streams.mux.dev/) we
 | Ad insertion in EVENT stream | Passed          | AES-128 and first ad discontinuity; the hosted snapshot is ended                                 |
 | Issue 666                    | Passed          | MPEG-TS byte ranges                                                                              |
 | DK Turntable                 | Passed          | Transition between variants with shifted timestamps                                              |
-| SAMPLE-AES                   | Unsupported     | Explicit encryption rejection; AES-128 support does not imply SAMPLE-AES support                 |
+| SAMPLE-AES                   | TS AVC/AAC      | Identity keys, explicit/sequence IV, rotation; fMP4 cbcs pending                                 |
 | Tears of Steel with IMSC     | Unsupported     | `stpp.ttml.im1t` in CODECS currently excludes the variant; no claim of video or caption playback |
 
 The six passing Mux sources are available in the demo presets alongside Apple's example. Run `npm run test:hls:mux` to repeat the catalog audit; `HLS_PUBLIC_SOURCE=mux-imsc` can select one case. Results go to ignored `test-results/mux-audit.json`. Known unsupported cases are recorded as **unsupported**, never passed; unexpected failures make the command exit nonzero. Public availability, contents and CORS can change, so this audit is separate from deterministic CI. Media stays hosted by Mux and is not redistributed.
@@ -240,3 +240,9 @@ Initialization maps retain the encryption declaration active at EXT-X-MAP, indep
 AES-128 uses CBC/PKCS#7 with a sequence-derived or explicit IV; encrypted initialization maps require an explicit IV. AES-256-GCM uses the resource's leading 16-byte IV and trailing 16-byte authentication tag, with a 32-byte identity key. An IV attribute on AES-256-GCM or SAMPLE-AES-CTR is rejected. GCM authentication failure prevents plaintext from reaching MSE. This is whole-resource encryption, not SAMPLE-AES/cenc/cbcs or DRM support.
 
 Fetch/XHR fixtures exercise an independently encrypted map, rotating media keys, clear/encrypted transitions, session-key reuse, alternate key formats, GCM playback/seeking and tampered ciphertext rejection. Separate c708 fixtures validate CDP caption selection/geometry/P16 and media seeking. CDP time codes and service-description sections are skipped after structural checks; MP4 presentation timing and HLS master service metadata are authoritative. Multiple c708 tracks and CDP service-metadata reconciliation remain unsupported.
+
+## SAMPLE-AES TS validation (0.17)
+
+Identity SAMPLE-AES supports AVC and ADTS AAC with per-sample CBC reset, AVC skip encryption and outer emulation-prevention removal. Keys rotate by declaration; IVs can be explicit or derived from media sequence. The tests compare every elementary payload and timestamp and the resulting fMP4 against clear originals, then exercise playback and seeking through Fetch/XHR.
+
+This is the MPEG-TS AVC/AAC path only. fMP4 cbcs, CENC/EME, encrypted AC-3/E-AC-3 and Apple audio-setup priming metadata remain pending. The original algorithm follows [Apple's sample encryption specification](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/HLS_Sample_Encryption/Encryption/Encryption.html).
