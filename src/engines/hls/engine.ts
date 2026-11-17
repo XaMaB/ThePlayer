@@ -312,7 +312,12 @@ export class HlsEngine extends EventTarget {
     this.generation++;
     for (const lane of this.lanes())
       if (lane.ahead(this.video.currentTime) < 0.1)
-        lane.next = segmentAt(lane.playlist, this.video.currentTime);
+        // Seeking exactly to duration still needs the last segment. Otherwise
+        // endOfStream() can shorten the duration to the buffered prefix.
+        lane.next = Math.min(
+          segmentAt(lane.playlist, this.video.currentTime),
+          lane.playlist.segments.length - 1,
+        );
     this.ended = false;
   }
   private ahead() {

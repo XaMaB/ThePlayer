@@ -318,9 +318,37 @@ try {
         await page.evaluate(() => window.testAudio.context.close());
       }
       if (source === 'fmp4/index.m3u8') {
-        await page.evaluate(
-          () => (document.querySelector('video').currentTime = 14),
+        const duration = await page.evaluate(
+          () => document.querySelector('video').duration,
         );
+        await page.evaluate(() => {
+          const video = document.querySelector('video');
+          video.pause();
+          video.currentTime = video.duration;
+        });
+        await page.waitForFunction(
+          (end) => {
+            const video = document.querySelector('video');
+            return (
+              !video.seeking &&
+              video.buffered.length &&
+              video.buffered.end(video.buffered.length - 1) >= end - 0.1
+            );
+          },
+          duration,
+          { timeout: 10000 },
+        );
+        assert.ok(
+          (await page.evaluate(
+            () => document.querySelector('video').duration,
+          )) >=
+            duration - 0.1,
+          'End seek must not truncate VOD duration to the buffered prefix',
+        );
+        await page.evaluate(() => {
+          document.querySelector('video').currentTime = 14;
+          return document.querySelector('video').play();
+        });
         await page.waitForFunction(
           () => document.querySelector('video').currentTime > 15,
           null,

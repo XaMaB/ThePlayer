@@ -52,7 +52,7 @@ export function mountControls(
    <button id="play-toggle" class="icon-button" title="Play (K)" aria-label="Play">${svg('play')}</button>
    <button id="mute-toggle" class="icon-button" title="Unmute (M)" aria-label="Unmute">${svg('muted')}</button>
    <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
-   <span id="playback-time" class="playback-time" hidden></span><input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback position" hidden/><span id="control-spacer" class="control-spacer"></span>
+   <span id="playback-time" class="playback-time" hidden></span><input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="any" value="0" aria-label="Playback position" hidden/><span id="control-spacer" class="control-spacer"></span>
    <button id="quality-toggle" class="icon-button" title="Quality" aria-label="Quality" aria-expanded="false" aria-controls="quality-menu" disabled>${svg('quality')}<span class="quality-copy"><span id="quality-mode">Auto</span><span id="quality-resolution">—</span></span></button>
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>

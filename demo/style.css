@@ -939,6 +939,13 @@ body[data-embed] .screen {
 }
 
 .seek-bar {
+  /* Range controls must not inherit text-field padding or borders. */
+  padding: 0;
+  margin: 0;
+  border: 0;
+  height: 24px;
+  background: transparent;
+  cursor: pointer;
   flex: 1;
   min-width: 40px;
   width: 100px;
