@@ -52,3 +52,4 @@ jobs:
       - run: npm run fixtures:hls
       - run: npm run test:hls:packed-audio
       - run: npm run test:hls:metadata
+      - run: npm run test:hls:mp3

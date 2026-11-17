@@ -54,6 +54,7 @@ export interface Sample {
   key: boolean;
 }
 export interface Track {
+  audioObjectType?: number;
   encryption?: { scheme: 'cenc' | 'cbcs'; kid: Uint8Array };
   id: number;
   kind: 'video' | 'audio';
@@ -142,7 +143,10 @@ function audioObjectType(data: Uint8Array): number {
       return audioObjectType(body.subarray(offset));
     }
     if (tag === 4) {
-      if (body.length < 13 || body[0] !== 0x40)
+      if (body.length < 13)
+        throw new Error('Truncated audio decoder descriptor');
+      if (body[0] === 0x6b || body[0] === 0x69) return -1;
+      if (body[0] !== 0x40)
         throw new Error('Unsupported audio decoder descriptor');
       return audioObjectType(body.subarray(13));
     }
@@ -216,7 +220,7 @@ export function inspectInit(data: Uint8Array): Track[] {
       } else if (entry.type === 'mp4a') {
         const esds = child(entry.body.subarray(28), 'esds');
         const objectType = audioObjectType(esds.subarray(4));
-        codec = 'mp4a.40.' + objectType;
+        codec = objectType === -1 ? 'mp3' : 'mp4a.40.' + objectType;
       } else
         throw new Error(
           `Unsupported HLS sample entry ${entry.type}; supports AVC/HEVC/AV1/AAC`,
@@ -286,10 +290,16 @@ function sampleEntry(t: Track): Uint8Array {
   };
   const config = descriptor(
     4,
-    new Uint8Array([0x40, 0x15, 0, 0, 0]),
+    new Uint8Array([
+      t.codec === 'mp3' ? (t.audioObjectType ?? 0x6b) : 0x40,
+      0x15,
+      0,
+      0,
+      0,
+    ]),
     u32(128000),
     u32(128000),
-    descriptor(5, t.asc!),
+    ...(t.codec === 'mp3' ? [] : [descriptor(5, t.asc!)]),
   );
   const esds = full(
     'esds',

@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.20.0-alpha.1
+
+- Add packed MPEG-1/2/2.5 Layer III with CBR/VBR frame parsing, ID3 clocks, AES-128 and timestamp rollover.
+- Select native MPEG audio MSE where supported, or remux MP3 into fMP4 for browsers such as Firefox.
+- Normalize MP3 playlist codec aliases and filter variants using the available audio container capability.
+- Verify every MP3 payload and all independently decoded audio hashes/timestamps; exercise playback and seeks in Chromium, Firefox and WebKit.
+
 ## 0.19.0-alpha.1
 
 - Add packed ADTS AAC with mandatory ID3 timestamp anchors, interleaved ID3, timestamp rollover, AES-128 and SAMPLE-AES.

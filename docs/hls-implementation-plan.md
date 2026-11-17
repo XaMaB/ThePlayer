@@ -69,3 +69,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.18.0-alpha.1 adds CENC/CBCS fMP4 through EME with ClearKey validation and automatic identity-key delivery. Continue with protected key/rendition rotation, remaining media/protocol extensions and stabilization; commercial CDM certification remains distinct from ClearKey coverage.
 
 0.19.0-alpha.1 adds packed AAC and ID3/emsg metadata delivery with browser-engine coverage. Continue with remaining packed codecs, protocol extensions, expanded interoperability and stabilization.
+
+0.20.0-alpha.1 adds packed MP3 with raw-MPEG/fMP4 browser capability selection and independent decoding checks. Continue with Dolby audio framing/encryption, protocol extensions and stabilization.

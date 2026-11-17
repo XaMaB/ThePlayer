@@ -653,7 +653,8 @@ export class HlsEngine extends EventTarget {
     const codecs = prepared.tracks.map((t) => t.codec).join(',');
     if (
       !MediaSource.isTypeSupported(
-        `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codecs}"`,
+        prepared.mime ??
+          `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codecs}"`,
       )
     )
       throw new Error('Unsupported browser codec: ' + codecs);

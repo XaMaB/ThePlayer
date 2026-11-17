@@ -274,10 +274,16 @@ References: [W3C EME](https://www.w3.org/TR/encrypted-media/), [CENC initializat
 
 ## Packed AAC and timed metadata (0.19)
 
-Packed ADTS AAC requires a leading ID3 PRIV transport timestamp. ID3 v2.3/v2.4, interleaved tags, 33-bit clock rollover, whole-resource AES-128 and AAC SAMPLE-AES are supported. Fifty generated segments are checked against the original ADTS bytes and timestamps. Packed MP3/AC-3/E-AC-3 remain pending.
+Packed ADTS AAC requires a leading ID3 PRIV transport timestamp. ID3 v2.3/v2.4, interleaved tags, 33-bit clock rollover, whole-resource AES-128 and AAC SAMPLE-AES are supported. Fifty generated segments are checked against the original ADTS bytes and timestamps. Packed MP3 is covered below; packed AC-3/E-AC-3 remain pending.
 
 `metadata` events are emitted after a segment is appended. Their `time` is in the presentation timeline; arrival does not mean playback has reached that time. Events may be delivered again after a seek/reload. They contain `type` (`id3` or `emsg`), `frames` and `lane`; emsg also exposes scheme/value/id/duration and raw message bytes. ID3 exposes parsed private/text fields and original frame bytes. Applications own presentation-time scheduling and deduplication appropriate to their metadata semantics.
 
 ID3 is read from MPEG-TS stream type 0x15 and packed audio. fMP4 supports emsg v0 relative and v1 absolute timestamps, including AOM/Apple ID3 schemes. Optional malformed metadata emits `metadatawarning` and does not stop A/V playback. emsg boxes are neutralized before MSE without moving sample offsets. Compressed/encrypted ID3 frames are retained as encoded bytes, not interpreted.
 
 Generated tests cover metadata timing, byte preservation, seeks, malformed metadata recovery and Fetch/XHR. Packed-audio and timed-metadata playback/seek tests have passed in Playwright Chromium, Firefox and WebKit on Linux (60 browser cases). These are browser-engine tests, not Safari/iOS device certification.
+
+## Packed MP3 (0.20)
+
+Packed MPEG-1/2/2.5 Layer III supports CBR and VBR frames, ID3 timestamps, interleaved metadata, AES-128 and 33-bit timestamp rollover. The player selects `audio/mpeg` MSE when available; otherwise it remuxes complete MP3 frames to fMP4 with MPEG audio descriptors. MP3 codec aliases in playlists are normalized before capability filtering. Free-format bitrate, MPEG Layer I/II and SAMPLE-AES for MP3 are explicitly rejected.
+
+Six generated assets are checked byte-for-byte against the encoder output, then remuxed and decoded independently with FFmpeg to compare every audio hash and timestamp. Thirty-six browser playback/seek cases pass across Playwright Chromium, Firefox and WebKit on Linux, covering Fetch/XHR for all six assets. Packed AC-3/E-AC-3 and broader cold-seek/rendition-switch interoperability remain work in progress.

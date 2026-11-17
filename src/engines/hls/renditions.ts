@@ -7,6 +7,7 @@ import type { Playlist, Variant } from './playlist';
  */
 export function normalizeCodec(value: string): string {
   const codec = value.trim().toLowerCase();
+  if (['mp3', 'mp4a.6b', 'mp4a.69'].includes(codec)) return 'mp3';
   if (codec.startsWith('av01.')) return normalizeAv1Codec(codec) ?? codec;
   const legacy = /^avc1\.(\d{1,3})\.(\d{1,3})$/.exec(codec);
   if (!legacy) {
@@ -36,6 +37,7 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
               /^(?:wvtt|stpp(?:\.ttml(?:\.(?:im1t|etd1)(?:\|(?:im1t|etd1))*)?)?)$/.test(
                 codec,
               ) ||
+              codec === 'mp3' ||
               !!normalizeAv1Codec(codec) ||
               /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
                 codec,
@@ -119,6 +121,7 @@ export function browserVariants(
     .filter(
       (v) =>
         !v.codecs ||
+        (v.codecs === 'mp3' && supports('audio/mpeg')) ||
         supports(
           `${hasVideo(v) ? 'video' : 'audio'}/mp4; codecs="${v.codecs}"`,
         ),

@@ -1,3 +1,4 @@
+import { packedAudioKind, packedMp3 } from './packed-mp3';
 import { isId3 } from './id3';
 import { packedAac } from './packed-audio';
 import { emsgMetadata, filterEmsg, type TimedMetadata } from './metadata';
@@ -13,7 +14,13 @@ import {
 import { bufferedAhead } from './buffer';
 import type { Playlist, Segment, Key, Resource } from './playlist';
 import { TsTransmuxer, demux, unwrap, type Pes } from './transport-stream';
-import { inspectInit, decodeTime, type Track } from './mp4';
+import {
+  inspectInit,
+  decodeTime,
+  initialization,
+  fragment,
+  type Track,
+} from './mp4';
 
 export interface LoadedResource {
   data: Uint8Array;
@@ -21,6 +28,7 @@ export interface LoadedResource {
   elapsed: number;
 }
 export interface PreparedSegment {
+  mime?: string;
   metadata: TimedMetadata[];
   metadataError?: string;
   segment: Segment;
@@ -45,6 +53,9 @@ export class MediaLane {
   next = 0;
   refreshedAt = performance.now();
   private decoder: TsTransmuxer;
+  private packedClock?: number;
+  private packedSerial = 0;
+  private mime = '';
   private captionMeta: ReturnType<typeof captionMetadata> = [];
   private captionMetaError?: string;
   private preparedDiscontinuity = -1;
@@ -85,9 +96,13 @@ export class MediaLane {
       : await this.decrypt(response.data, segment.key, segment.sequence);
     if (this.preparedDiscontinuity !== segment.discontinuity) {
       this.decoder.reset();
+      this.packedClock = undefined;
       this.preparedDiscontinuity = segment.discontinuity;
     }
-    let init: Uint8Array, tracks: Track[], rawStart: number;
+    let init: Uint8Array,
+      tracks: Track[],
+      rawStart: number,
+      mime: string | undefined;
     let digitalPackets: CcData[] = [];
     let metadata: TimedMetadata[] = [];
     let metadataError: string | undefined;
@@ -199,6 +214,36 @@ export class MediaLane {
         metadataError = error instanceof Error ? error.message : String(error);
       }
       data = filterEmsg(data);
+    } else if (isId3(data) && packedAudioKind(data) === 'mp3') {
+      if (
+        segment.key?.method === 'SAMPLE-AES' ||
+        segment.key?.method === 'SAMPLE-AES-CTR'
+      )
+        throw new Error('SAMPLE-AES does not define MP3 encryption');
+      const packed = packedMp3(data);
+      const timestamp = unwrap(
+        packed.timestamp,
+        this.packedClock ?? packed.timestamp,
+      );
+      this.packedClock = timestamp;
+      rawStart = timestamp / 90000;
+      tracks = [packed.track];
+      data = packed.data;
+      init = new Uint8Array();
+      if (MediaSource.isTypeSupported('audio/mpeg')) mime = 'audio/mpeg';
+      else {
+        init = initialization(tracks);
+        data = fragment(
+          packed.track,
+          packed.samples,
+          (timestamp * packed.track.timescale) / 90000,
+          ++this.packedSerial,
+        );
+      }
+      metadata = packed.metadata.map((item) => ({
+        ...item,
+        time: unwrap(item.time * 90000, timestamp) / 90000,
+      }));
     } else if (data[0] === 0x47 || isId3(data)) {
       if (segment.key?.method === 'SAMPLE-AES-CTR')
         throw new Error('SAMPLE-AES-CTR requires fMP4');
@@ -240,6 +285,7 @@ export class MediaLane {
       throw new Error('Audio rendition contains a non-audio track');
     return {
       segment,
+      mime,
       metadata,
       metadataError,
       init,
@@ -256,13 +302,20 @@ export class MediaLane {
   }
   configure(media: MediaSource, prepared: PreparedSegment) {
     const codec = prepared.tracks.map((t) => t.codec).join(','),
-      mime = `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codec}"`;
+      mime =
+        prepared.mime ??
+        `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codec}"`;
     if (!MediaSource.isTypeSupported(mime))
       throw new Error('Unsupported browser codec: ' + codec);
     if (!this.buffer) {
       this.buffer = media.addSourceBuffer(mime);
-      this.buffer.mode = 'segments';
-    } else if (this.codec !== codec) this.buffer.changeType(mime);
+      this.buffer.mode = mime === 'audio/mpeg' ? 'sequence' : 'segments';
+    } else if (this.mime !== mime) {
+      this.buffer.changeType(mime);
+      this.appendedInit = undefined;
+      this.buffer.mode = mime === 'audio/mpeg' ? 'sequence' : 'segments';
+    }
+    this.mime = mime;
     this.codec = codec;
     this.tracks = prepared.tracks;
   }
@@ -272,12 +325,14 @@ export class MediaLane {
     operation: (buffer: SourceBuffer, action: () => void) => Promise<void>,
   ) {
     this.offset = offset;
-    this.buffer!.timestampOffset = offset;
+    this.buffer!.timestampOffset =
+      prepared.mime === 'audio/mpeg' ? prepared.rawStart + offset : offset;
     const previous = this.appendedInit;
     if (
-      !previous ||
-      previous.length !== prepared.init.length ||
-      previous.some((value, i) => value !== prepared.init[i])
+      prepared.init.length &&
+      (!previous ||
+        previous.length !== prepared.init.length ||
+        previous.some((value, i) => value !== prepared.init[i]))
     ) {
       await operation(this.buffer!, () =>
         this.buffer!.appendBuffer(prepared.init as BufferSource),
