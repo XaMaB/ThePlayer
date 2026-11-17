@@ -39,6 +39,8 @@ const server = await tlsServer(config, async (req, res) => {
     '/core.js': 'core.js',
     '/style.css': 'style.css',
   };
+  if (/^\/(?:chunks\/[a-zA-Z0-9_-]+|hls)\.js$/.test(u.pathname))
+    return serveFile(res, path.join(here, 'dist', u.pathname.slice(1)));
   if (files[u.pathname])
     return serveFile(res, path.join(here, 'dist', files[u.pathname]));
   if (u.pathname === '/healthz')

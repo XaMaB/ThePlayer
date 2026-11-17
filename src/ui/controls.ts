@@ -31,12 +31,12 @@ export function mountControls(
   screen.insertAdjacentHTML(
     'beforeend',
     `
-  <button id="live-button" class="live-indicator" title="Return to live" aria-label="Return to live"><span></span>LIVE</button>
+  <button id="live-button" hidden class="live-indicator" title="Return to live" aria-label="Return to live"><span></span>LIVE</button>
   <div class="video-controls" role="group" aria-label="Playback controls">
    <button id="play-toggle" class="icon-button" title="Play (K)" aria-label="Play">${svg('play')}</button>
    <button id="mute-toggle" class="icon-button" title="Unmute (M)" aria-label="Unmute">${svg('muted')}</button>
    <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
-   <span class="control-spacer"></span>
+   <input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback position" hidden/><span id="playback-time" class="playback-time" hidden></span><span class="control-spacer"></span>
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>
    <button id="info-toggle" class="icon-button" title="Player options" aria-label="Player options" aria-haspopup="menu" aria-expanded="false">${svg('more')}</button>
@@ -49,9 +49,9 @@ export function mountControls(
    <div class="stats-title"><strong>mediainfo</strong><button id="stats-close" aria-label="Close stats" title="Close stats">×</button></div>
    <dl><dt>Resolution</dt><dd id="stats-resolution">—</dd><dt>Frames / dropped</dt><dd><span id="frames">0</span> / <span id="dropped">0</span></dd>
    <dt>Buffer health</dt><dd><span id="buffer">0.00</span> s <span id="buffer-detail">· cache reserve</span></dd>
-   <dt>Received payload</dt><dd><span id="bitrate">—</span> Mb/s</dd><dt>First picture</dt><dd id="stats-first-picture">—</dd><dt>4 s reserve ready</dt><dd id="stats-reserve-ready">—</dd><dt>MoQ objects</dt><dd id="stats-objects">0</dd>
+   <dt>Received payload</dt><dd><span id="bitrate">—</span> Mb/s</dd><dt>First picture</dt><dd id="stats-first-picture">—</dd><dt>4 s reserve ready</dt><dd id="stats-reserve-ready">—</dd><dt>Media objects</dt><dd id="stats-objects">0</dd>
    <dt title="Received subtitle messages, including clears, refreshes and cached events. Counters reset on channel connect.">Received events</dt><dd id="cue-count">0</dd><dt title="Nonempty subtitle appearances drawn on the video. Unchanged refreshes and redraws are not counted again.">Displayed subtitles</dt><dd id="subtitle-displayed">0</dd><dt>Transport</dt><dd id="stats-transport">—</dd>
-   <dt>Playback</dt><dd id="stats-state">idle</dd><dt>Codecs</dt><dd id="stats-codecs">—</dd><dt>Namespace</dt><dd id="stats-namespace">—</dd></dl><pre id="details" hidden></pre>
+   <dt>Playback</dt><dd id="stats-state">idle</dd><dt>Codecs</dt><dd id="stats-codecs">—</dd><dt>Source</dt><dd id="stats-namespace">—</dd></dl><pre id="details" hidden></pre>
   </section>`,
   );
   const el = (id: string) => screen.querySelector<HTMLElement>('#' + id)!;
@@ -68,7 +68,7 @@ export function mountControls(
   let hideTimer: ReturnType<typeof setTimeout>;
   let previous: any = null;
   screen.tabIndex = 0;
-  screen.setAttribute('aria-label', 'Live video player');
+  screen.setAttribute('aria-label', 'Video player');
   const closeMenus = () => {
     ccMenu.hidden = true;
     audioMenu.hidden = true;
@@ -157,7 +157,13 @@ export function mountControls(
       badge.title = names[format] ?? format;
       badge.setAttribute('aria-label', badge.title);
       const glyph =
-        format === 'dvb' ? 'DVB' : format === 'teletext' ? 'TXT' : 'CC';
+        format === 'dvb'
+          ? 'DVB'
+          : format === 'teletext'
+            ? 'TXT'
+            : format === 'webvtt'
+              ? 'VTT'
+              : 'CC';
       const inner = `<text x="16" y="15" text-anchor="middle" fill="currentColor" font-family="sans-serif" font-size="${glyph === 'CC' ? 12 : 9}" font-weight="700">${glyph}</text>`;
       badge.innerHTML = `<svg viewBox="0 0 32 22" aria-hidden="true"><rect x="1" y="1" width="30" height="20" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>${inner}</svg>`;
       button.append(badge);
@@ -371,11 +377,28 @@ export function mountControls(
         break;
     }
   });
+  const seek = el('seek-bar') as HTMLInputElement;
+  seek.oninput = () => {
+    video.currentTime = Number(seek.value);
+  };
+  const clock = (seconds: number) => {
+    const n = Math.max(0, Math.floor(seconds));
+    return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+  };
   const statsTimer = setInterval(() => {
     (audio as HTMLButtonElement).disabled = !getPlayer()?.audioTracks?.length;
     const p = getPlayer(),
       q = video.getVideoPlaybackQuality(),
       d = p?.diagnostics;
+    el('live-button').hidden = !p?.isLive;
+    seek.hidden = !p || p.isLive;
+    el('playback-time').hidden = seek.hidden;
+    if (!seek.hidden) {
+      seek.max = String(Number.isFinite(video.duration) ? video.duration : 0);
+      seek.value = String(video.currentTime);
+      el('playback-time').textContent =
+        `${clock(video.currentTime)} / ${clock(Number.isFinite(video.duration) ? video.duration : 0)}`;
+    }
     el('frames').textContent = q.totalVideoFrames.toLocaleString('en-US');
     el('dropped').textContent = String(q.droppedVideoFrames);
     el('stats-resolution').textContent = video.videoWidth
@@ -390,7 +413,7 @@ export function mountControls(
         ahead = video.buffered.end(i) - video.currentTime;
     el('buffer').textContent = ahead.toFixed(2);
     el('buffer-detail').textContent = d?.buffer?.target
-      ? `· target ${d.buffer.target.toFixed(1)} s · GOP ${d.buffer.gop?.toFixed(1) ?? '—'} s`
+      ? `· target ${d.buffer.target.toFixed(1)} s${d.buffer.gop != null ? ' · GOP ' + d.buffer.gop.toFixed(1) + ' s' : ''}`
       : '';
     el('stats-first-picture').textContent =
       d?.startup?.firstFrameMs != null
@@ -409,7 +432,8 @@ export function mountControls(
         : (p?.protocol ?? '—');
     el('stats-codecs').textContent =
       p?.catalog?.tracks?.map((t: any) => t.codec).join(' / ') ?? '—';
-    el('stats-namespace').textContent = p?.source?.namespace ?? '—';
+    el('stats-namespace').textContent =
+      p?.source?.namespace ?? p?.source?.url ?? '—';
     const now = performance.now(),
       bytes = d?.bytes ?? 0;
     if (

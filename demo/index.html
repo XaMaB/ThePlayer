@@ -44,8 +44,11 @@
       <div class="heading">
         <div>
           <div class="eyebrow">Player playground</div>
-          <h1>Live, in your browser.</h1>
-          <p>Choose a Relay and namespace. Connect, watch, integrate.</p>
+          <h1>Your stream. Your player.</h1>
+          <p>
+            Connect a MoQ broadcast or an HLS playlist. Watch, inspect,
+            integrate.
+          </p>
         </div>
         <span class="badge" id="playback-state">IDLE</span>
       </div>
@@ -93,27 +96,54 @@
             </div>
             <form id="source-form">
               <label
-                >Relay · WebTransport URL<input
-                  id="relay-url"
-                  type="url"
-                  required
-                  placeholder="https://relay.example:4434/" /></label
-              ><label
-                >Broadcast namespace<input
-                  id="namespace"
-                  required
-                  placeholder="channel-namespace" /></label
-              ><label
-                >Catalog track<input id="catalog" value="catalog" required
-              /></label>
-              <details>
-                <summary>Development relay certificate</summary>
+                >Protocol<select id="source-protocol">
+                  <option value="moq">MoQ</option>
+                  <option value="hls">HLS · experimental</option>
+                </select></label
+              >
+              <div id="hls-fields" hidden>
                 <label
-                  >SHA-256 fingerprint<input
-                    id="hash"
-                    placeholder="Leave empty for a publicly trusted TLS certificate"
+                  >Playlist URL<input
+                    id="hls-url"
+                    type="url"
+                    placeholder="https://media.example.com/master.m3u8"
                 /></label>
-              </details>
+                <label
+                  >HTTP requests<select id="hls-transport">
+                    <option value="fetch">Fetch</option>
+                    <option value="xhr">XMLHttpRequest</option>
+                  </select></label
+                >
+                <p class="notice">
+                  Original HLS engine preview: AVC/AAC, TS/fMP4, live/VOD,
+                  AES-128 and WebVTT. LL-HLS parts, ABR, alternate audio and
+                  TTML are not implemented yet.
+                </p>
+              </div>
+              <div id="moq-fields">
+                <label
+                  >Relay · WebTransport URL<input
+                    id="relay-url"
+                    type="url"
+                    required
+                    placeholder="https://relay.example:4434/" /></label
+                ><label
+                  >Broadcast namespace<input
+                    id="namespace"
+                    required
+                    placeholder="channel-namespace" /></label
+                ><label
+                  >Catalog track<input id="catalog" value="catalog" required
+                /></label>
+                <details>
+                  <summary>Development relay certificate</summary>
+                  <label
+                    >SHA-256 fingerprint<input
+                      id="hash"
+                      placeholder="Leave empty for a publicly trusted TLS certificate"
+                  /></label>
+                </details>
+              </div>
               <div class="actions">
                 <button id="connect" class="primary">Connect</button
                 ><button id="disconnect" type="button">Stop</button>
@@ -135,8 +165,7 @@
         </section>
       </div>
       <footer>
-        <span>THEPLAYER · moq-dev/moq</span
-        ><span>WebTransport · MSE · DVB / Teletext</span>
+        <span>THEPLAYER · MoQ + HLS</span><span>WebTransport · HTTP · MSE</span>
       </footer>
     </main>
     <script type="module" src="/app.js"></script>

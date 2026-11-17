@@ -937,3 +937,31 @@ body[data-embed] .screen {
     max-width: calc(100% - 16px);
   }
 }
+
+.seek-bar {
+  flex: 1;
+  min-width: 40px;
+  width: 100px;
+  accent-color: #61ffe0;
+}
+.playback-time {
+  color: #e8eef6;
+  font-size: 11px;
+  white-space: nowrap;
+}
+#source-form select {
+  width: 100%;
+  padding: 10px;
+  color: inherit;
+  background: #101521;
+  border: 1px solid #344151;
+  border-radius: 8px;
+}
+@media (max-width: 600px) {
+  .playback-time {
+    display: none;
+  }
+  .seek-bar {
+    width: 50px;
+  }
+}

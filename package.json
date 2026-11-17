@@ -1,13 +1,14 @@
 {
   "name": "theplayer",
-  "version": "0.3.0",
+  "version": "0.4.0-alpha.1",
   "private": true,
-  "description": "Modular live video player with a moq-dev playback engine",
+  "description": "Modular MoQ player with an original experimental HLS engine",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
     ".": "./dist/player.js",
-    "./core": "./dist/core.js"
+    "./core": "./dist/core.js",
+    "./hls": "./dist/hls.js"
   },
   "scripts": {
     "bootstrap": "node scripts/bootstrap.mjs",
@@ -18,7 +19,9 @@
     "format:check": "prettier --check src demo scripts tests server.mjs package.json README.md docs",
     "check": "npm run format:check && npm run typecheck && npm test && npm run build",
     "export": "node scripts/export.mjs",
-    "typecheck": "node scripts/typecheck.mjs"
+    "typecheck": "node scripts/typecheck.mjs",
+    "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
+    "test:hls": "node tests/hls-browser.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",
@@ -26,6 +29,7 @@
   },
   "devDependencies": {
     "esbuild": "0.28.1",
+    "playwright": "1.65.0",
     "prettier": "3.6.2",
     "typescript": "6.0.3"
   }

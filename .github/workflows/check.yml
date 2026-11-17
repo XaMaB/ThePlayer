@@ -14,3 +14,18 @@ jobs:
       - run: npm ci
       - run: npm run bootstrap
       - run: npm run check
+  hls-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npx playwright install --with-deps chromium
+      - run: npm run bootstrap
+      - run: npm run build
+      - run: npm run fixtures:hls
+      - run: npm run test:hls

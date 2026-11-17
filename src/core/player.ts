@@ -14,6 +14,8 @@ export interface PlaybackEngine extends EventTarget {
   readonly audioTracks: any[];
   readonly subtitleTracks: any[];
   readonly selectedAudioTrack: string;
+  readonly isLive?: boolean;
+  seekToLive?(): void;
   init(): Promise<void>;
   play(): Promise<void>;
   destroy(): Promise<void>;
@@ -25,17 +27,19 @@ export interface PlaybackEngine extends EventTarget {
 export type EngineFactory = (
   video: HTMLVideoElement,
   source: any,
-) => PlaybackEngine;
+) => PlaybackEngine | Promise<PlaybackEngine>;
 export type EngineRegistry = Readonly<Record<string, EngineFactory>>;
 
 const events = [
   'statechange',
+  'streamchange',
   'catalog',
   'error',
   'autoplayblocked',
   'audiochange',
   'subtitletracks',
   'subtitlechange',
+  'subtitlemetrics',
   'caption',
   'captionwarning',
 ];
@@ -68,7 +72,11 @@ export class PlayerCore extends EventTarget {
       if (!factory)
         throw new Error(`No playback engine registered for ${protocol}`);
       await this.release();
-      const engine = factory(this.video, source);
+      const engine = await factory(this.video, source);
+      if (this.closed) {
+        await engine.destroy();
+        throw new Error('ThePlayer has been destroyed');
+      }
       this.engine = engine;
       this.listeners = new AbortController();
       for (const name of events) {
@@ -109,6 +117,23 @@ export class PlayerCore extends EventTarget {
     });
   }
 
+  get isLive() {
+    return this.engine?.isLive ?? this.engine?.protocol === 'moq';
+  }
+  seekToLive() {
+    if (!this.isLive) return;
+    if (this.engine?.seekToLive) {
+      this.engine.seekToLive();
+      return;
+    }
+    const b = this.video.buffered;
+    if (b.length)
+      this.video.currentTime = Math.max(
+        b.start(b.length - 1),
+        b.end(b.length - 1) - this.targetBuffer,
+      );
+    void this.play();
+  }
   get protocol() {
     return this.engine?.protocol ?? '';
   }

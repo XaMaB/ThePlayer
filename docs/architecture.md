@@ -2,7 +2,7 @@
 
 The application supplies a source to `PlayerCore`. Its engine registry maps a protocol name to a factory. The core releases the previous engine before initializing a replacement, forwards events, and destroys subscriptions through the engine lifecycle. Only one engine owns the video element and MediaSource at a time.
 
-`ThePlayer` registers the MoQ engine by default. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
+`ThePlayer` registers MoQ and a lazily imported original HLS baseline engine. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
 
 ## Engine contract
 
@@ -24,11 +24,11 @@ Events forwarded by the core:
 
 Bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` consumes caption events and owns canvas drawing, bitmap decoding and displayed-cue counters. Selection invalidates pending bitmap decodes. Destroying or reattaching the renderer clears listeners and its animation loop.
 
-## Adding HLS or DASH
+## Extending HLS or adding DASH
 
 Implement a separate engine, then register its factory with `PlayerCore` or the third constructor argument to `ThePlayer`. Keep manifest/network libraries inside that engine. Prefer optional entry points or dynamic imports so MoQ-only users do not download HLS/DASH dependencies.
 
-Before exposing the engine, normalize its audio/subtitle tracks and diagnostics, translate text cues to the common subtitle model, and test source replacement and teardown. Its buffer/ABR policy must be independent of MoQ's group-cache policy. A Shaka-based engine without Shaka UI is a candidate, not a bundled dependency today.
+Before exposing the engine, normalize its audio/subtitle tracks and diagnostics, translate text cues to the common subtitle model, and test source replacement and teardown. Its buffer/ABR policy must be independent of MoQ's group-cache policy. The selected HLS direction is our own implementation, not a Shaka/hls.js/VHS adapter. See the HLS research and support documents.
 
 ## Demo boundary
 

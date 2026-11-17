@@ -68,3 +68,35 @@ test('failed initialization releases media ownership', async () => {
   assert.equal(player.source, undefined);
   await player.destroy();
 });
+
+test('destroy during lazy engine import releases it without initialization', async () => {
+  let release;
+  let initialized = false,
+    destroyed = false;
+  const ready = new Promise((resolve) => (release = resolve));
+  const engine = Object.assign(new EventTarget(), {
+    async init() {
+      initialized = true;
+    },
+    async destroy() {
+      destroyed = true;
+    },
+  });
+  const player = new PlayerCore(
+    {},
+    {
+      lazy: async () => {
+        await ready;
+        return engine;
+      },
+    },
+  );
+  const loading = player.load({ protocol: 'lazy' });
+  await Promise.resolve();
+  const closing = player.destroy();
+  release();
+  await assert.rejects(loading, /destroyed/);
+  await closing;
+  assert.equal(initialized, false);
+  assert.equal(destroyed, true);
+});
