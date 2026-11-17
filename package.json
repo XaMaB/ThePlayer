@@ -1,0 +1,32 @@
+{
+  "name": "theplayer",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Modular live video player with a moq-dev playback engine",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./dist/player.js",
+    "./core": "./dist/core.js"
+  },
+  "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "format": "prettier --write src demo scripts tests server.mjs package.json README.md docs",
+    "format:check": "prettier --check src demo scripts tests server.mjs package.json README.md docs",
+    "check": "npm run format:check && npm run typecheck && npm test && npm run build",
+    "export": "node scripts/export.mjs",
+    "typecheck": "node scripts/typecheck.mjs"
+  },
+  "dependencies": {
+    "mux.js": "6.3.0",
+    "pako": "3.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "prettier": "3.6.2",
+    "typescript": "6.0.3"
+  }
+}

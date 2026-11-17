@@ -1,0 +1,14 @@
+MoQ Player integration
+Our application code: Apache-2.0.
+
+Contains bundled code from moq-dev/moq (Luke Curley and contributors),
+commit caf6ebc05d0b56a5689af1df431dd13804aaa1a2,
+licensed MIT OR Apache-2.0. Upstream LICENSE-MIT and LICENSE-APACHE included.
+https://github.com/moq-dev/moq
+
+Contains pako 3.0.3 (Vitaly Puzrin, Andrey Tupitsin and contributors),
+licensed MIT AND Zlib. Its license notices are in THIRD-PARTY-pako-LICENSE.
+
+ThePlayer (formerly MoQ Player).
+Contains locally modified mux.js 6.3.0 caption parsing code, Copyright Brightcove,
+licensed Apache-2.0. See vendor/mux.js/LICENSE and vendor/mux.js/README.md.

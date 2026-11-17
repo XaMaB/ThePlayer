@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ThePlayer · Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="38"
+          height="38"
+          viewBox="0 0 256 256"
+          role="img"
+          aria-labelledby="title"
+        >
+          <title id="title">ThePlayer — signal and play</title>
+          <defs>
+            <linearGradient id="signal" x1="0" y1="0" x2="1" y2="1">
+              <stop stop-color="#61ffe0" />
+              <stop offset=".52" stop-color="#55c9ff" />
+              <stop offset="1" stop-color="#a891ff" />
+            </linearGradient>
+          </defs>
+          <rect width="256" height="256" rx="58" fill="#101521" />
+          <path d="M42 48h148v32h-58v128H98V80H42z" fill="url(#signal)" />
+          <path d="M150 100l70 44-70 44z" fill="url(#signal)" />
+          <path
+            d="M42 112h28m-28 32h18m-18 32h28"
+            stroke="#61ffe0"
+            stroke-width="8"
+            stroke-linecap="round"
+            opacity=".55"
+          />
+        </svg>
+        ThePlayer
+      </div>
+      <span class="badge">STANDALONE DEMO</span>
+    </header>
+    <main>
+      <div class="heading">
+        <div>
+          <div class="eyebrow">Player playground</div>
+          <h1>Live, in your browser.</h1>
+          <p>Choose a Relay and namespace. Connect, watch, integrate.</p>
+        </div>
+        <span class="badge" id="playback-state">IDLE</span>
+      </div>
+      <div class="player-grid">
+        <section>
+          <div class="panel video-panel">
+            <div class="panel-title">
+              <h2 id="channel-title">Demo player</h2>
+              <span class="status" id="transport-state"
+                >WebTransport / moq-lite-06</span
+              >
+            </div>
+            <div class="screen" id="screen">
+              <video id="video" playsinline muted></video
+              ><canvas
+                id="subtitles"
+                aria-label="Selectable subtitles"
+              ></canvas>
+              <div id="placeholder" class="placeholder">
+                <h2>MoQ live player</h2>
+                <p id="player-message">
+                  Choose a channel or enter a source to connect.
+                </p>
+                <button id="retry" hidden>Try again</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">
+              <h2>Integration</h2>
+              <button id="copy" type="button">Copy</button>
+            </div>
+            <pre id="snippet">Choose a source…</pre>
+            <p class="notice">
+              MoqPlayer takes a relay URL and namespace. Media uses the
+              origin-cmaf-v1 profile; no management API is required.
+            </p>
+          </div>
+        </section>
+        <section>
+          <div class="panel">
+            <div class="panel-title">
+              <h2>Source</h2>
+              <span class="badge">CONNECTION</span>
+            </div>
+            <form id="source-form">
+              <label
+                >Relay · WebTransport URL<input
+                  id="relay-url"
+                  type="url"
+                  required
+                  placeholder="https://relay.example:4434/" /></label
+              ><label
+                >Broadcast namespace<input
+                  id="namespace"
+                  required
+                  placeholder="channel-namespace" /></label
+              ><label
+                >Catalog track<input id="catalog" value="catalog" required
+              /></label>
+              <details>
+                <summary>Development relay certificate</summary>
+                <label
+                  >SHA-256 fingerprint<input
+                    id="hash"
+                    placeholder="Leave empty for a publicly trusted TLS certificate"
+                /></label>
+              </details>
+              <div class="actions">
+                <button id="connect" class="primary">Connect</button
+                ><button id="disconnect" type="button">Stop</button>
+              </div>
+            </form>
+          </div>
+          <div class="panel">
+            <div class="panel-title">
+              <h2>Relay channels</h2>
+              <span class="badge" id="channel-count">0</span>
+            </div>
+            <p id="directory-message" class="message"></p>
+            <div id="channel-list"></div>
+            <p class="notice">
+              Optional directory service. Enter a source manually to use another
+              Relay.
+            </p>
+          </div>
+        </section>
+      </div>
+      <footer>
+        <span>THEPLAYER · moq-dev/moq</span
+        ><span>WebTransport · MSE · DVB / Teletext</span>
+      </footer>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
