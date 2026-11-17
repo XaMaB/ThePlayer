@@ -1,3 +1,4 @@
+import { seiCaptions, type CcData } from './cea-sei';
 import { HevcPictures } from './hevc-access';
 import { AvcPictures } from './avc-access';
 import { videoAccessUnits } from './access-units';
@@ -308,6 +309,8 @@ export class TsTransmuxer {
     if (hevc && pes.some((p) => p.type === 0x1b))
       throw new Error('Mixed AVC and HEVC elementary streams');
     const pictures: { sample: Sample; dts: number }[] = [];
+    const captions: CcData[] = [];
+    let captionError: string | undefined;
     for (const p of videoAccessUnits(
       pes.filter((p) => p.type === 0x1b || p.type === 0x24),
       hevc,
@@ -315,6 +318,12 @@ export class TsTransmuxer {
       this.h265,
     )) {
       const units = p.units;
+      try {
+        for (const unit of units)
+          captions.push(...seiCaptions(unit, hevc, p.pts / 90000));
+      } catch (error) {
+        captionError = error instanceof Error ? error.message : String(error);
+      }
       if (hevc) {
         if (
           units.some(
@@ -508,6 +517,8 @@ export class TsTransmuxer {
       init: initialization(tracks),
       media: concat(...media),
       start: Math.min(...starts),
+      captions,
+      captionError,
     };
   }
 }

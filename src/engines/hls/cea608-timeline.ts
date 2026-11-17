@@ -5,7 +5,7 @@ interface Packet extends CaptionPacket {
 }
 /** Checkpoint decoder state while retaining enough history for the media back buffer. */
 export class Cea608Timeline {
-  private base = new Cea608Decoder();
+  private base = [new Cea608Decoder(1), new Cea608Decoder(2)];
   private packets: Packet[] = [];
   private baseTime = 0;
   private period = -1;
@@ -13,7 +13,7 @@ export class Cea608Timeline {
   parityErrors = 0;
   horizon = 0;
   reset() {
-    this.base = new Cea608Decoder();
+    this.base = [new Cea608Decoder(1), new Cea608Decoder(2)];
     this.packets = [];
     this.events = [];
     this.baseTime = 0;
@@ -45,21 +45,35 @@ export class Cea608Timeline {
       (a, b) => a.time - b.time || Number(!!b.reset) - Number(!!a.reset),
     );
     const cutoff = Math.max(this.baseTime, currentTime - 35);
-    const consume = (decoder: Cea608Decoder, p: Packet) => {
+    const screens = (decoders: Cea608Decoder[], time: number) =>
+      decoders.flatMap((decoder, field) =>
+        decoder.screens(time).map((screen) => ({
+          ...screen,
+          service: screen.service + field * 2,
+        })),
+      );
+    const consume = (decoders: Cea608Decoder[], p: Packet) => {
       if (p.reset) {
-        decoder.reset();
-        return decoder.screens(p.time);
+        for (const decoder of decoders) decoder.reset();
+        return screens(decoders, p.time);
       }
-      return decoder.push(p.first, p.second, p.time);
+      const field = (p.field ?? 1) - 1;
+      return decoders[field]
+        .push(p.first, p.second, p.time)
+        .map((screen) => ({ ...screen, service: screen.service + field * 2 }));
     };
     for (const p of this.packets) if (p.time < cutoff) consume(this.base, p);
     this.packets = this.packets.filter((p) => p.time >= cutoff);
     this.baseTime = cutoff;
-    const decoder = this.base.clone();
-    this.events = decoder
-      .screens(cutoff)
-      .map((e) => ({ ...e, checkpoint: true }));
+    const decoder = this.base.map((field) => field.clone());
+    this.events = screens(decoder, cutoff).map((e) => ({
+      ...e,
+      checkpoint: true,
+    }));
     for (const p of this.packets) this.events.push(...consume(decoder, p));
-    this.parityErrors = decoder.parityErrors;
+    this.parityErrors = decoder.reduce(
+      (sum, field) => sum + field.parityErrors,
+      0,
+    );
   }
 }

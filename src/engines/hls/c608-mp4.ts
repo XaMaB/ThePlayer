@@ -9,6 +9,7 @@ export interface CaptionPacket {
   time: number;
   first: number;
   second: number;
+  field?: 1 | 2;
 }
 export function extract608(
   data: Uint8Array,
@@ -26,7 +27,8 @@ export function extract608(
   for (const sample of pending) {
     let index = 0;
     for (const atom of boxes(sample.data)) {
-      if (atom.type !== 'cdat') continue;
+      if (!['cdat', 'cdt2'].includes(atom.type)) continue;
+      index = 0;
       if (atom.body.length % 2) throw new Error('Odd cdat byte count');
       if (atom.body.length > 2 && !(frameDuration > 0 && frameDuration <= 1))
         throw new Error('Missing video cadence for cdat');
@@ -38,6 +40,7 @@ export function extract608(
           time: sample.time + delta,
           first: atom.body[i],
           second: atom.body[i + 1],
+          ...(atom.type === 'cdt2' ? { field: 2 as const } : {}),
         });
       }
     }

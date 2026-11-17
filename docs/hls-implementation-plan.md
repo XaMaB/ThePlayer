@@ -57,3 +57,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.12.0-alpha.1 adds the first LL-HLS fMP4 delivery implementation and an isolated build/test output directory. Continue with subtitle carriage/rendering, protection/extensions and broader LL-HLS interoperability; the overall plan is still active.
 
 0.13.0-alpha.1 adds original TTML/IMSC text and wvtt sample handling, layout/timing tests, encrypted text and WebVTT styling/clock improvements. Continue with CEA carriage/708 and remaining text-profile details, then protection/extensions and stabilization.
+
+0.14.0-alpha.1 adds ATSC SEI carriage and field-2 CEA-608 decoding. Original CEA-708 decoding remains the next caption target; protection/extensions and stabilization remain active.

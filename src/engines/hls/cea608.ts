@@ -1,4 +1,4 @@
-/** Original field-1 CTA-608 caption decoder. Text/XDS services are not captions. */
+/** Original CTA-608 field decoder. Text/XDS services are not captions. */
 export interface Cell608 {
   char: string;
   color: string;
@@ -193,19 +193,23 @@ class Channel {
   }
 }
 export class Cea608Decoder {
+  private xds = false;
+  constructor(private field: 1 | 2 = 1) {}
   private channels = [new Channel(), new Channel()];
   private service = 0;
   private lastControl = -1;
   private lastScreens = ['[]', '[]'];
   parityErrors = 0;
   reset() {
+    this.xds = false;
     this.channels = [new Channel(), new Channel()];
     this.service = 0;
     this.lastControl = -1;
     this.lastScreens = ['[]', '[]'];
   }
   clone(): Cea608Decoder {
-    const copy = new Cea608Decoder();
+    const copy = new Cea608Decoder(this.field);
+    copy.xds = this.xds;
     copy.channels = this.channels.map((channel) =>
       Object.assign(new Channel(), structuredClone(channel)),
     );
@@ -230,6 +234,14 @@ export class Cea608Decoder {
       this.parityErrors++;
       this.lastControl = -1;
       return [];
+    }
+    if (this.field === 2) {
+      if (a >= 1 && a <= 15) {
+        this.xds = a !== 15;
+        return [];
+      }
+      if (a >= 0x10 && a <= 0x1f) this.xds = false;
+      if (this.xds) return [];
     }
     const coded = a >= 0x10 && a <= 0x1f && b >= 0x20;
     if (coded) {

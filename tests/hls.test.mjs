@@ -1194,3 +1194,64 @@ test('WebVTT timestamp maps unwrap the 33-bit media clock around the current pla
     /timestamp/,
   );
 });
+
+test('ATSC caption SEI validates markers, ignores unrelated user data and retains both fields/DTVCC', async () => {
+  const { registeredCaptions, seiCaptions } = await module('cea-sei');
+  const payload = Uint8Array.from([
+    0xb5, 0, 0x31, 0x47, 0x41, 0x39, 0x34, 3, 0x43, 0xff, 0xfc, 0x94, 0x29,
+    0xfd, 0x94, 0x29, 0xff, 0x02, 0x21, 0xff,
+  ]);
+  assert.deepEqual(
+    registeredCaptions(payload, 1).map((p) => p.type),
+    [0, 1, 3],
+  );
+  assert.equal(
+    seiCaptions(
+      Uint8Array.from([6, 4, payload.length, ...payload, 0x80]),
+      false,
+      2,
+    )[0].time,
+    2,
+  );
+  assert.equal(
+    seiCaptions(
+      Uint8Array.from([0x4e, 1, 4, payload.length, ...payload, 0x80]),
+      true,
+      2,
+    ).length,
+    3,
+  );
+  assert.deepEqual(registeredCaptions(Uint8Array.of(0), 1), []);
+  assert.throws(() => registeredCaptions(payload.slice(0, -1), 0), /Truncated/);
+  const bad = payload.slice();
+  bad[10] = 4;
+  assert.throws(() => registeredCaptions(bad, 0), /marker/);
+});
+
+test('Field 2 captions produce CC3 and ignore XDS bytes without changing field 1', () => {
+  const timeline = new Cea608Timeline();
+  const data = [
+    [1, 0x14, 0x29],
+    [1, 0x41, 0],
+    [2, 0x14, 0x29],
+    [2, 0x42, 0],
+    [2, 0x01, 0x01],
+    [2, 0x58, 0x59],
+    [2, 0x0f, 0],
+    [2, 0x43, 0],
+  ].map(([field, first, second], i) => ({
+    time: i / 30,
+    field,
+    first: parity608(first),
+    second: parity608(second),
+  }));
+  timeline.update(data, 0, 0, 2, 0, 0);
+  assert.equal(
+    plain608(timeline.events.filter((e) => e.service === 1).at(-1)),
+    'A',
+  );
+  assert.equal(
+    plain608(timeline.events.filter((e) => e.service === 3).at(-1)),
+    'BC',
+  );
+});

@@ -6,6 +6,8 @@ export interface FragmentTrack {
   video: boolean;
   duration: number;
   size: number;
+  nalLength?: number;
+  flags?: number;
 }
 const u32 = (d: Uint8Array, at: number) =>
   new DataView(d.buffer, d.byteOffset, d.byteLength).getUint32(at);
@@ -25,12 +27,16 @@ const child = (d: Uint8Array, type: string) => {
 };
 export function fragmentMetadata(init: Uint8Array): FragmentTrack[] {
   const moov = child(init, 'moov');
-  const defaults = new Map<number, { duration: number; size: number }>();
+  const defaults = new Map<
+    number,
+    { duration: number; size: number; flags: number }
+  >();
   for (const mvex of boxes(moov).filter((b) => b.type === 'mvex'))
     for (const trex of boxes(mvex.body).filter((b) => b.type === 'trex'))
       defaults.set(u32(trex.body, 4), {
         duration: u32(trex.body, 12),
         size: u32(trex.body, 16),
+        flags: u32(trex.body, 20),
       });
   return boxes(moov)
     .filter((b) => b.type === 'trak')
@@ -44,9 +50,19 @@ export function fragmentMetadata(init: Uint8Array): FragmentTrack[] {
       const entry = boxes(
         child(child(child(mdia, 'minf'), 'stbl'), 'stsd').subarray(8),
       )[0];
+      let nalLength: number | undefined;
+      if (['avc1', 'avc3', 'hvc1', 'hev1'].includes(entry.type)) {
+        const hevc = entry.type === 'hvc1' || entry.type === 'hev1';
+        const config = boxes(entry.body.subarray(78)).find(
+          (box) => box.type === (hevc ? 'hvcC' : 'avcC'),
+        );
+        if (config && config.body.length > (hevc ? 21 : 4))
+          nalLength = (config.body[hevc ? 21 : 4] & 3) + 1;
+      }
       return {
         id,
         timescale,
+        nalLength,
         format: entry.type,
         video:
           String.fromCharCode(...child(mdia, 'hdlr').subarray(8, 12)) ===
@@ -58,6 +74,8 @@ export function fragmentMetadata(init: Uint8Array): FragmentTrack[] {
     });
 }
 export interface FragmentSample {
+  dts: number;
+  flags: number;
   track: FragmentTrack;
   time: number;
   duration: number;
@@ -101,7 +119,11 @@ export function fragmentSamples(
         defaultSize = u32(tfhd, at);
         at += 4;
       }
-      if (flags & 32) at += 4;
+      let defaultFlags = meta.flags ?? 0;
+      if (flags & 32) {
+        defaultFlags = u32(tfhd, at);
+        at += 4;
+      }
       if (at > tfhd.length) throw new Error('Truncated fragment tfhd');
       const tfdt = child(traf.body, 'tfdt');
       let time = tfdt[0] === 1 ? u64(tfdt, 4) : u32(tfdt, 4),
@@ -117,11 +139,16 @@ export function fragmentSamples(
           cursor = base + i32(d, at);
           at += 4;
         }
-        if (f & 4) at += 4;
+        let firstFlags = defaultFlags;
+        if (f & 4) {
+          firstFlags = u32(d, at);
+          at += 4;
+        }
         for (let i = 0; i < count; i++) {
           let duration = defaultDuration,
             size = defaultSize,
-            composition = 0;
+            composition = 0,
+            sampleFlags = i === 0 ? firstFlags : defaultFlags;
           if (f & 0x100) {
             duration = u32(d, at);
             at += 4;
@@ -130,7 +157,10 @@ export function fragmentSamples(
             size = u32(d, at);
             at += 4;
           }
-          if (f & 0x400) at += 4;
+          if (f & 0x400) {
+            sampleFlags = u32(d, at);
+            at += 4;
+          }
           if (f & 0x800) {
             composition = d[0] === 1 ? i32(d, at) : u32(d, at);
             at += 4;
@@ -147,6 +177,8 @@ export function fragmentSamples(
               throw new Error('Invalid fragment sample bounds');
             pending.push({
               track: meta,
+              dts: time / meta.timescale,
+              flags: sampleFlags,
               time: (time + composition) / meta.timescale,
               duration: duration / meta.timescale,
               data: data.subarray(cursor, cursor + size),

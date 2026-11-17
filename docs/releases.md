@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.14.0-alpha.1
+
+- Extract ATSC caption packets from AVC/HEVC SEI in TS and fMP4 before MSE append.
+- Decode independent field-1 and field-2 CEA-608 services (CC1–CC4), including `cdt2`, while skipping XDS data.
+- Preserve caption history across seeking and expose only advertised or observed services.
+- Add original AVC SEI fixtures verified independently by FFmpeg and browser selection/seek tests for Fetch and XHR. HEVC SEI parsing has unit coverage; full HEVC-caption playback remains a separate validation target.
+
 ## 0.13.0-alpha.1
 
 - Extract stpp/TTML and wvtt samples with checked MP4 timing and byte bounds.

@@ -633,10 +633,7 @@ export class HlsEngine extends EventTarget {
     await lane.append(prepared, offset, (buffer, action) =>
       this.operation(buffer, action),
     );
-    if (
-      lane.role === 'main' &&
-      prepared.ignoredCaptions.some((t) => t.format === 'c608')
-    ) {
+    if (lane.role === 'main') {
       this.captions608.update(
         prepared.captionPackets,
         offset,
@@ -652,7 +649,7 @@ export class HlsEngine extends EventTarget {
         (e) => e.rows.length && !e.checkpoint,
       ).length;
       this.diagnostics.captions608.warning = prepared.captionError ?? '';
-      for (const service of [1, 2]) {
+      for (const service of [1, 2, 3, 4]) {
         const name = 'hls-608-' + service;
         if (this.subtitleTracks.some((t) => t.name === name)) continue;
         const group = this.qualityLevels[this.selectedQuality]?.closedCaptions;
@@ -663,9 +660,10 @@ export class HlsEngine extends EventTarget {
             r.instreamId === 'CC' + service,
         );
         if (
-          service === 2 &&
           !metadata &&
-          !this.captions608.events.some((e) => e.service === 2 && e.rows.length)
+          !this.captions608.events.some(
+            (e) => e.service === service && e.rows.length,
+          )
         )
           continue;
         this.subtitleTracks.push({
@@ -1316,6 +1314,8 @@ export class HlsEngine extends EventTarget {
     textTrack.addEventListener('cuechange', update, { signal: abort.signal });
 
     if (track.format === 'cea-608') {
+      this.vttStyles ??= new WebVttStyles(this.video);
+      this.vttStyles.add('::cue(.cea608) { font-family: monospace; }');
       abort.signal.addEventListener(
         'abort',
         () => this.abort.signal.removeEventListener('abort', stop),

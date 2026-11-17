@@ -1,3 +1,4 @@
+import { mp4SeiCaptions, type CcData } from './cea-sei';
 import { captionMetadata, extract608, type CaptionPacket } from './c608-mp4';
 import {
   filterCaptionInit,
@@ -25,6 +26,7 @@ export interface PreparedSegment {
   ignoredCaptions: IgnoredCaptionTrack[];
   captionPackets: CaptionPacket[];
   captionError?: string;
+  digitalPackets: CcData[];
 }
 /** Each independently loaded rendition owns one SourceBuffer and decoder configuration. */
 export class MediaLane {
@@ -70,6 +72,7 @@ export class MediaLane {
       this.preparedDiscontinuity = segment.discontinuity;
     }
     let init: Uint8Array, tracks: Track[], rawStart: number;
+    let digitalPackets: CcData[] = [];
     let captionPackets: CaptionPacket[] = [],
       captionError: string | undefined = this.captionMetaError;
     if (segment.map) {
@@ -86,7 +89,7 @@ export class MediaLane {
         const filtered = filterCaptionInit(original);
         this.captionMeta = [];
         this.captionMetaError = undefined;
-        if (filtered.ignored.some((t) => t.format === 'c608')) {
+        {
           try {
             this.captionMeta = captionMetadata(original);
           } catch (error) {
@@ -108,6 +111,26 @@ export class MediaLane {
       } catch (error) {
         captionError = error instanceof Error ? error.message : String(error);
       }
+      try {
+        const packets = mp4SeiCaptions(
+          data,
+          this.captionMeta,
+          segment.range?.offset ?? 0,
+        );
+        captionPackets.push(
+          ...packets
+            .filter((p) => p.type < 2)
+            .map((p) => ({
+              time: p.time,
+              first: p.first,
+              second: p.second,
+              field: (p.type + 1) as 1 | 2,
+            })),
+        );
+        digitalPackets = packets.filter((p) => p.type >= 2);
+      } catch (error) {
+        captionError = error instanceof Error ? error.message : String(error);
+      }
       data = filterCaptionMedia(data, this.ignoredCaptions);
       tracks = inspectInit(init);
       rawStart = decodeTime(data, tracks);
@@ -117,6 +140,16 @@ export class MediaLane {
       tracks = result.tracks;
       data = result.media;
       rawStart = result.start;
+      captionPackets = result.captions
+        .filter((p) => p.type < 2)
+        .map((p) => ({
+          time: p.time,
+          first: p.first,
+          second: p.second,
+          field: (p.type + 1) as 1 | 2,
+        }));
+      digitalPackets = result.captions.filter((p) => p.type >= 2);
+      captionError = result.captionError;
     } else throw new Error('Expected MPEG-TS or fMP4 with EXT-X-MAP');
     if (this.role === 'audio' && tracks.some((t) => t.kind !== 'audio'))
       throw new Error('Audio rendition contains a non-audio track');
@@ -130,6 +163,7 @@ export class MediaLane {
       elapsed: response.elapsed,
       ignoredCaptions: this.ignoredCaptions,
       captionPackets,
+      digitalPackets,
       captionError,
     };
   }

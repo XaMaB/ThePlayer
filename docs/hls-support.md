@@ -153,13 +153,15 @@ The [Apple Dolby Vision/Atmos sample](https://devstreaming-cdn.apple.com/videos/
 
 ## CEA-608 captions (0.7.0-alpha.1)
 
-An original decoder extracts `cdat` pairs from one fMP4 `c608` track and exposes field-1 CC1/CC2 in the CC menu. Master CLOSED-CAPTIONS metadata supplies labels, language, DEFAULT/AUTOSELECT and INSTREAM-ID. Timing follows sample presentation timestamps and video-frame cadence, including signed composition offsets, byte ranges and fragment defaults. Caption decoding errors are diagnostic warnings rather than fatal A/V errors.
+An original decoder extracts `cdat`/`cdt2` pairs from one fMP4 `c608` track and exposes CC1–CC4 in the CC menu. Master CLOSED-CAPTIONS metadata supplies labels, language, DEFAULT/AUTOSELECT and INSTREAM-ID. Timing follows sample presentation timestamps and video-frame cadence, including signed composition offsets, byte ranges and fragment defaults. Caption decoding errors are diagnostic warnings rather than fatal A/V errors.
 
 Implemented: odd-parity checking, repeated-control suppression, pop-on/paint-on/2–4-row roll-up, displayed/non-displayed memories, PAC row/indent, tab, backspace, erase commands, carriage return, basic/special/extended characters, foreground colors, italic and underline. A 32-column × 15-row safe-area layout is mapped to native WebVTT cues with left alignment. Browser typography controls the final glyph dimensions; this is not a pixel-exact broadcast renderer.
 
 Caption history is checkpointed around playback. Quality transitions replace future caption state; seeks outside buffered media replay up to three preceding segments to recover caption memory. Cues end at the decoded horizon so stale preroll text cannot appear beyond known data. A live join or a seek without enough caption history can wait for the next complete caption update.
 
-Limits: field-2 CC3/CC4 (`cdt2`), TS/AVC-SEI carriage, standalone SCC, multiple `c608` tracks, Text/XDS services, background attributes and flashing are not implemented. This is a tested subset, not a full CTA-608 conformance claim. Existing MoQ CEA-708/P16 support is independent.
+Since 0.14.0-alpha.1, ATSC registered T.35 data in AVC/HEVC SEI is also extracted from TS and fMP4. Independent field decoders preserve CC1/CC2 and CC3/CC4; XDS data is skipped. Generated AVC fixtures are recognized by FFmpeg and tested for selection/seek in Chromium with Fetch/XHR. HEVC SEI has unit coverage; full HEVC-caption playback is not yet validated.
+
+Limits: standalone SCC, multiple `c608` tracks, Text/XDS services, background attributes and flashing are not implemented. This is a tested subset, not a full CTA-608 conformance claim. Existing MoQ CEA-708/P16 support is independent.
 
 Unit tests cover decoding, row/column commands, parity, character replacement, fragment bounds/timestamps and timeline replacement/checkpoints. The original synthetic caption fixture exercises selection, positioning, seek and Off in Chromium. The optional Apple Dolby sample test verifies actual English CC1 text, seek, quality switching and subsequent WebVTT selection through compatible AVC/AAC variants. `player.diagnostics.captions608` exposes packet, parity, retained-event and warning diagnostics.
 
