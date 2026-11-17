@@ -12,64 +12,91 @@
 
 **Live television deserves a player that understands broadcast.**
 
-ThePlayer brings multilingual audio, broadcast captions and live playback controls to a modular browser player. Build your own interface, embed the demo, or plug a new transport into the shared lifecycle.
+ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, an original experimental HLS engine, multilingual audio, broadcast captions and shared playback controls.
 
-[Quick start](#development) · [Subtitles](#subtitles) · [Integration](#library) · [Architecture](docs/architecture.md)
+[Protocols](#protocols) · [Codecs](#audio-and-video) · [Subtitles](#subtitles) · [HLS features](#hls-features) · [Quick start](#development) · [Integration](#library) · [Architecture](docs/architecture.md)
 
 ## What you get
 
-- **Live over MoQ:** WebTransport delivery, cached startup and a four-second target reserve.
-- **Audio language selection:** switch audio tracks while retaining the video timeline and connection.
-- **Broadcast subtitles:** selectable DVB, teletext and in-band CEA-708 services, with a shared canvas renderer.
-- **In-video controls:** matching quality/audio/CC menus, Auto/current-quality readout, center play/pause and ±10 s controls, LIVE indicator, fullscreen and a branded MediaInfo overlay.
-- **An independent library:** explicit source configuration; no Origin/Relay dashboard dependency.
-- **A modular foundation:** separate core, engines, subtitles, controls and demo.
+- **MoQ live playback:** WebTransport delivery, cached startup and a four-second target reserve.
+- **HLS live, VOD and EVENT playback:** TS/fMP4 segments, Auto ABR, manual quality selection and audio-only streams.
+- **Multilingual audio and captions:** audio/CC menus, source-positioned broadcast captions and subtitle Off.
+- **Shared controls:** current Auto quality, resolution badges, play/pause, ±10 s seeking, keyboard shortcuts, fullscreen and MediaInfo. LIVE appears only for live presentations.
+- **Independent integration:** explicit source configuration, separate engine modules and no Origin/Relay dashboard dependency.
 
 ## Protocols
 
-| Protocol              | Status                | Notes                                                                                         |
-| --------------------- | --------------------- | --------------------------------------------------------------------------------------------- |
-| MoQ over WebTransport | Implemented           | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile                            |
-| HLS                   | Experimental baseline | Original AVC/HEVC/AAC TS/fMP4 and AV1 fMP4 engine; [coverage and limits](docs/hls-support.md) |
-| MPEG-DASH             | Planned               | Engine API is in place; no DASH engine ships yet                                              |
+| Protocol              | Status                      | Implemented scope                                                                                         |
+| --------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| MoQ over WebTransport | Implemented                 | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                         |
+| HLS over HTTP(S)      | Experimental implementation | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                     |
+| LL-HLS                | Not implemented             | Complete segments may play as ordinary HLS; no partial-segment playback, blocking reload or delta updates |
+| MPEG-DASH             | Planned                     | No DASH engine ships yet                                                                                  |
+| UDP/RTP multicast     | Origin input only           | The browser does not join multicast groups; use an Origin to ingest and publish media                     |
 
-MoQ defines transport behavior; applications still need a matching catalog and media profile. An arbitrary MoQ relay or publisher is not automatically interoperable with this player.
-
-The DVB, teletext and CEA-708 entries below describe the **MoQ pipeline**. HLS supports WebVTT and CEA-608 field-1 captions in fMP4 `c608` tracks; see its [separate matrix](docs/hls-support.md).
-
-## Subtitles
-
-| Format             | Available today               | Delivery and rendering                                                                       |
-| ------------------ | ----------------------------- | -------------------------------------------------------------------------------------------- |
-| DVB subtitles      | Yes, with a compatible Origin | Origin-decoded, timestamped bitmap cues; browser canvas preserves their placement            |
-| Teletext subtitles | Yes, with a compatible Origin | Origin-decoded bitmap cues, selectable by the advertised track/language                      |
-| CEA-708 / DTVCC    | Implemented subset            | Decoded in the browser from AVC/H.264 SEI; service discovery and selectable caption services |
-| CEA-708 P16        | Yes                           | Two-byte operand handling, Cyrillic/Latin Extended support and configurable service encoding |
-| WebVTT             | HLS baseline                  | Segmented text cues and basic browser placement                                              |
-| TTML / IMSC        | Not implemented               | Planned HLS text/manifest integration                                                        |
-| CEA-608            | HLS fMP4 `c608`, CC1/CC2      | Pop-on, paint-on, roll-up, row/column placement and character styles; see HLS limits         |
-
-**CEA-708 layout follows the source.** Window anchors, positioning, justification, explicit rows, column limits and pen size are retained. Captions are synchronized to the video's media clock, including fullscreen letterboxing.
-
-P16 consumes both operands atomically. A zero high byte represents one character; other pairs use the decoder's Unicode code-unit handling or a configured service encoding, such as EUC-KR. Invalid surrogate values become replacement characters. See the [decoder notes](vendor/mux.js/README.md) and tests for the implemented behavior.
-
-This is not a complete CEA-708 conformance implementation. Full typography/color handling, vertical writing, display effects and delayed commands remain incomplete. DVB and teletext support here does **not** mean the browser accepts raw MPEG-TS or joins a multicast group: decoding those subtitle formats belongs to the Origin.
-
-The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. MediaInfo separates **received events** (including clears and refreshes) from **displayed subtitles**.
+MoQ transport compatibility alone does not guarantee interoperability: the publisher and player must also agree on the catalog and media profile. HLS is a tested subset, not a claim of full support for every protocol version. See the [HLS support matrix](docs/hls-support.md).
 
 ## Audio and video
 
-HLS supports AVC, HEVC Main/Main10 and AAC in TS/fMP4, including audio-only streams, plus AV1 Main 8/10-bit in fMP4. HEVC and AV1 playback require browser/OS decoder support. Mixed masters expose Video / Audio only in the Quality menu. See the [HLS matrix](docs/hls-support.md) for tested formats and device-validation limits.
+The player uses Media Source Extensions (MSE) and browser decoders. It does not transcode or bundle software video decoders.
 
-The MoQ engine appends fragmented MP4 to Media Source Extensions. Playback depends on browser support for the advertised codecs; the player does not transcode. Multilingual audio tracks come from the media catalog. Track switching replaces the audio subscription and buffer while keeping the video connection and timeline.
+| Codec / mode                 | HLS carriage                       | Status and limits                                                                                                                                                    |
+| ---------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AVC / H.264                  | MPEG-TS and fMP4                   | Implemented; browser playback tested                                                                                                                                 |
+| HEVC / H.265 Main and Main10 | MPEG-TS and fMP4 (`hvc1` / `hev1`) | Remux/configuration implemented and independently decoded with FFmpeg; browser/OS HEVC decoder required; visual HEVC browser playback not validated on the test host |
+| AV1 Main, 8/10-bit           | fMP4 (`av01`)                      | Browser playback, quality changes and seeking tested; no AV1 TS/WebM/raw OBU input                                                                                   |
+| AAC-LC / declared HE-AAC v1  | MPEG-TS and fMP4                   | Implemented, including separate audio renditions; HE-AAC v2 is excluded                                                                                              |
+| Audio-only AAC               | MPEG-TS and fMP4                   | Implemented; bitrate selection and Video / Audio only mode for compatible mixed masters                                                                              |
+| Dolby audio / Atmos          | —                                  | Not implemented                                                                                                                                                      |
+| Dolby Vision / HDR output    | —                                  | Dolby Vision and HDR display/tone mapping are not validated                                                                                                          |
 
-The current four-second reserve is a buffering policy, not a guaranteed end-to-end latency. Actual buffer health varies with fragment delivery and GOP structure. The MoQ engine does not implement DRM or adaptive bitrate rendition switching. The HLS engine has Auto ABR and manual quality selection.
+The MoQ engine appends catalog-advertised fragmented MP4 to MSE. Its codec compatibility depends on the publisher's media profile and the browser; the HLS-specific demux/remux matrix above does not imply equivalent MoQ codec validation. MoQ audio switching replaces the audio subscription/buffer while retaining the video connection and timeline.
 
-A modular browser player for live video. The current engine uses **moq-dev/moq** over WebTransport and plays the `origin-cmaf-v1` media profile. An original experimental HLS engine now handles the tested baseline described in [HLS support](docs/hls-support.md). DASH remains planned.
+MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer and ABR policy. Actual buffer health varies with delivery and GOP structure. Neither target is a guaranteed end-to-end latency. MoQ adaptive bitrate rendition switching is not implemented.
+
+## Subtitles
+
+| Format                     | MoQ                                | HLS                                                       | Rendering / implemented scope                                                                                                     |
+| -------------------------- | ---------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| DVB subtitles              | Implemented with compatible Origin | Not implemented                                           | Origin decodes timestamped bitmap cues; canvas preserves placement                                                                |
+| Teletext                   | Implemented with compatible Origin | Not implemented                                           | Origin-decoded bitmap cues, selectable by advertised language/track                                                               |
+| CEA-708 / DTVCC            | Implemented subset                 | Not implemented                                           | Browser decoding from AVC SEI; service discovery, window anchors, alignment, explicit rows/columns and pen size                   |
+| CEA-708 P16                | Implemented subset                 | Not implemented                                           | Two-byte operands, Cyrillic/Latin Extended handling and configurable service encoding                                             |
+| CEA-608                    | Not exposed                        | Implemented subset: fMP4 `c608` / `cdat`, field-1 CC1/CC2 | Original decoder; pop-on, paint-on, 2–4-row roll-up, PAC position/indent, character sets, foreground colors, italic and underline |
+| WebVTT                     | Not exposed                        | Implemented subset                                        | External segmented WebVTT renditions, timestamp mapping and basic cue placement using browser TextTracks                          |
+| TTML / IMSC1               | Not implemented                    | Planned                                                   | No `stpp` support                                                                                                                 |
+| WebVTT inside MP4 (`wvtt`) | Not implemented                    | Not implemented                                           | Separate from external WebVTT rendition support                                                                                   |
+
+**CEA-608:** parity checks and duplicate-control suppression are implemented. Caption history supports seeking and quality transitions. Field-2 CC3/CC4, TS/SEI carriage, multiple `c608` tracks, background attributes, flashing and Text/XDS remain unsupported. Native browser typography means placement is not a pixel-exact broadcast rendering. A live join or seek with insufficient history can wait for the next complete caption update.
+
+**CEA-708:** cues retain source window positions and synchronize to the media clock, including fullscreen letterboxing. P16 consumes both operands atomically: a zero high byte represents one character; other pairs use Unicode code-unit handling or a configured service encoding such as EUC-KR. Invalid surrogate values become replacement characters. Full typography/colors, vertical writing, display effects and delayed commands remain incomplete. See the [decoder notes](vendor/mux.js/README.md).
+
+**WebVTT:** STYLE/REGION blocks and some cue settings are not rendered. DVB and teletext decoding belongs to the Origin; their availability here does not mean browser-side raw broadcast subtitle decoding.
+
+The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. MediaInfo separates received events, including clears and refreshes, from displayed subtitles. See the [caption support details](docs/hls-support.md).
+
+## HLS features
+
+| Feature                                             | Status                                                                                  |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Media and multivariant playlists                    | Implemented; relative URLs and playlist variables                                       |
+| Live / VOD / EVENT                                  | Implemented; sliding refresh, finite duration, seeking and EVENT-to-ended transitions   |
+| Auto ABR / manual quality                           | Implemented for compatible renditions in the same audio/subtitle groups                 |
+| Multilingual external audio                         | AAC renditions with independent buffers and selection                                   |
+| DEFAULT / AUTOSELECT / FORCED                       | Used for supported rendition selection; explicit choices and subtitle Off take priority |
+| Network loading                                     | Fetch or XHR; abort, timeout, bounded retry and byte ranges                             |
+| AES-128 encryption                                  | Identity keys, explicit/sequence IV and Web Crypto AES-CBC                              |
+| Discontinuities                                     | Timestamp rebasing; arbitrary timeline repair is not supported                          |
+| SAMPLE-AES / DRM / EME                              | Not implemented                                                                         |
+| Content steering / interstitials / timed metadata   | Not implemented                                                                         |
+| I-frame trick play / image playlists / packed audio | Not implemented                                                                         |
+| GAP recovery / unaligned live resets                | Not implemented; reconnect is required                                                  |
+
+The HLS engine is original code: it does not bundle or copy hls.js, Video.js/VHS or Shaka implementations. This does not mean the entire player has no dependencies: MoQ uses moq-dev, and the MoQ caption path includes a locally patched mux.js decoder with provenance and licensing. See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [detailed limits](docs/hls-support.md).
 
 ## Development
 
-Requires Node.js 24+, npm and Git. Use a browser with WebTransport and Media Source Extensions in a secure context.
+Requires Node.js 24+, npm and Git. Playback requires Media Source Extensions and suitable browser codecs. MoQ additionally requires WebTransport in a secure context; HLS requires HTTP(S) access and suitable CORS headers.
 
 ```sh
 git clone https://github.com/XaMaB/ThePlayer.git
@@ -83,7 +110,7 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:5173`. Supply a relay URL, namespace and, for a self-signed development relay, its certificate fingerprint. WebTransport requires a secure context: localhost or HTTPS. The demo has no dependency on the Origin or Relay administration applications.
+Open `http://localhost:5173`. For HLS, select HLS and supply a playlist URL. For MoQ, supply a relay URL, namespace and, for a self-signed development relay, its certificate fingerprint. WebTransport requires a secure context: localhost or HTTPS. The demo has no dependency on the Origin or Relay administration applications.
 
 The bootstrap checks out moq-dev at `caf6ebc05d0b56a5689af1df431dd13804aaa1a2` into `.cache/moq`. Builds verify this revision. `MOQ_SOURCE` may point to an existing checkout at that revision. Do not replace it with an arbitrary npm version: the protocol and JS API are version sensitive.
 
@@ -96,7 +123,7 @@ npm run check
 
 The package remains private to prevent accidental npm publication. This does not prevent publishing its source repository.
 
-## HLS preview
+## HLS integration
 
 Choose **HLS · experimental** in the demo and enter a playlist URL. The engine is our own implementation, with no hls.js, Video.js/VHS or Shaka runtime dependency. See [architecture research](docs/hls-research.md) and [tested coverage](docs/hls-support.md).
 
@@ -143,6 +170,7 @@ The application provides the video and overlay canvas; position the canvas absol
 
 - `src/core`: common source lifecycle, engine registry and public engine contract; no MoQ imports.
 - `src/engines/moq`: WebTransport connection, catalog, subscriptions, MSE, audio switching and buffering.
+- `src/engines/hls`: playlist/network handling, segment scheduling, ABR, TS/fMP4 processing, WebVTT and CEA-608.
 - `src/subtitles`: cue history/counters, reusable canvas renderer and CEA-708 decoding/layout.
 - `src/ui`: the current in-video controls. These still use the demo's documented DOM IDs; this is not yet a drop-in custom element.
 - `demo`: source form, optional channel directory, embed page and styling.
@@ -152,15 +180,20 @@ The application provides the video and overlay canvas; position the canvas absol
 
 See [architecture](docs/architecture.md) for extension boundaries and events.
 
-## Current support and limits
+## Validation
 
-- MoQ uses `moq-lite-06` and this project's `origin-cmaf-v1` catalog. Generic MoQ transport compatibility alone does not guarantee compatible catalogs or media tracks.
-- Video/audio must be supported by the browser's Media Source Extensions. MoQ audio switching retains the video connection and timeline; HLS supports external AAC audio renditions, Auto ABR and manual quality selection.
-- Buffer policy targets a four-second reserve, with cached startup where available. Actual buffer health varies with fragment/GOP delivery; it is not a fixed end-to-end latency guarantee.
-- DVB and teletext subtitles arrive as timed bitmap cues from the Origin. CEA-708 is decoded from AVC SEI, including P16 characters, per-window positioning, alignment and explicit row structure.
-- CEA-708 is not a complete conformance implementation: all typography, colors, vertical writing, effects and delayed commands are not yet supported. See the vendor notes.
-- Browser autoplay policies may require muted startup or a user gesture.
-- HLS is experimental: no LL-HLS part playback, TTML or DRM yet. DASH remains planned.
+The 0.7.0-alpha.1 release passed formatting, TypeScript/build checks, 64 unit tests, 21 deterministic HLS browser scenarios and controlled-throughput ABR/UI checks. Independent FFmpeg decoding verifies HEVC remuxing; the test host's Chromium lacks an HEVC decoder, so those browser cases verify explicit capability rejection.
+
+Public-source checks include Apple's AV1 sample and real CEA-608 English CC1 captions from Apple's Dolby demo through compatible AVC/AAC renditions. A working fallback from a Dolby demo does not establish Dolby Vision/Atmos support. Public tests are optional and network-dependent; CI uses generated fixtures.
+
+```sh
+npm run fixtures:hls
+npm run test:hls
+# Optional public-source checks:
+npm run test:hls:public
+```
+
+Browser autoplay policy may require muted startup or a user gesture. Codec availability, rendering and device performance still need validation on your target browsers. See [release notes](docs/releases.md) for version-specific coverage.
 
 ## Optional deployment configuration
 
@@ -186,7 +219,8 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Extend the original HLS engine: LL-HLS, further ABR recovery and TTML.
+- Extend the original HLS engine: LL-HLS, further ABR recovery and TTML/IMSC1.
+- Extend HLS caption carriage beyond fMP4 CEA-608, including TS/SEI and CEA-708.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
 - Package the controls as a self-contained UI component.
