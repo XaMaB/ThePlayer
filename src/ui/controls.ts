@@ -19,7 +19,7 @@ export function mountControls(
   ) => target.addEventListener(type, handler, { signal: abort.signal });
   const icons = {
     quality:
-      '<rect class="stroke" x="2" y="5" width="20" height="14" rx="3"/><path class="stroke" d="M6 9v6m5-6v6M6 12h5m4-3v6h1a3 3 0 0 0 0-6z"/>',
+      '<rect class="stroke" x="1" y="5" width="22" height="14" rx="3"/><text id="quality-badge" x="12" y="15" text-anchor="middle" class="quality-badge">—</text>',
     back: '<path class="stroke" d="M5 8a8 8 0 1 1-1 7M5 3v5h5"/><text x="12" y="15" text-anchor="middle" class="skip-number">10</text>',
     forward:
       '<path class="stroke" d="M19 8a8 8 0 1 0 1 7m-1-12v5h-5"/><text x="12" y="15" text-anchor="middle" class="skip-number">10</text>',
@@ -52,7 +52,7 @@ export function mountControls(
    <button id="play-toggle" class="icon-button" title="Play (K)" aria-label="Play">${svg('play')}</button>
    <button id="mute-toggle" class="icon-button" title="Unmute (M)" aria-label="Unmute">${svg('muted')}</button>
    <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
-   <input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback position" hidden/><span id="playback-time" class="playback-time" hidden></span><span class="control-spacer"></span>
+   <span id="playback-time" class="playback-time" hidden></span><input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback position" hidden/><span id="control-spacer" class="control-spacer"></span>
    <button id="quality-toggle" class="icon-button" title="Quality" aria-label="Quality" aria-expanded="false" aria-controls="quality-menu" disabled>${svg('quality')}<span class="quality-copy"><span id="quality-mode">Auto</span><span id="quality-resolution">—</span></span></button>
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>
@@ -307,20 +307,12 @@ export function mountControls(
     const p = getPlayer(),
       list = qualityMenu.querySelector<HTMLElement>('.track-options')!;
     list.replaceChildren();
-    if (p?.qualityLevels?.length)
-      option(
-        list,
-        '-1',
-        `Auto · ${qualityName(p)}`,
-        p.autoQuality,
-        async () => {
-          await p.selectQuality(-1);
-          syncQuality();
-          closeMenus();
-          quality.focus();
-        },
-      );
-    for (const level of p?.qualityLevels ?? [])
+    for (const level of [...(p?.qualityLevels ?? [])].sort(
+      (a, b) =>
+        (Number(b.resolution?.split('x')[1]) || 0) -
+          (Number(a.resolution?.split('x')[1]) || 0) ||
+        b.bandwidth - a.bandwidth,
+    ))
       option(
         list,
         String(level.id),
@@ -338,6 +330,19 @@ export function mountControls(
             if (p === getPlayer()) report(e.message);
             closeMenus();
           }
+        },
+      );
+    if (p?.qualityLevels?.length)
+      option(
+        list,
+        '-1',
+        `Auto · ${qualityName(p)}`,
+        p.autoQuality,
+        async () => {
+          await p.selectQuality(-1);
+          syncQuality();
+          closeMenus();
+          quality.focus();
         },
       );
     qualityMenu.hidden = !open;
@@ -577,6 +582,23 @@ export function mountControls(
     el('quality-resolution').textContent = p?.qualityLevels?.length
       ? qualityName(p)
       : '—';
+    const level = p?.qualityLevels?.[p.currentQuality];
+    const height =
+      video.videoHeight || Number(level?.resolution?.split('x')[1]) || 0;
+    el('quality-badge').textContent =
+      height >= 4320
+        ? '8K'
+        : height >= 2160
+          ? '4K'
+          : height >= 1440
+            ? 'QHD'
+            : height >= 1080
+              ? 'FHD'
+              : height >= 720
+                ? 'HD'
+                : height > 0
+                  ? 'SD'
+                  : '—';
     quality.title = `Quality: ${qualityLabel}`;
     const autoOption =
       qualityMenu.querySelector<HTMLElement>('[data-track="-1"]');
@@ -609,6 +631,7 @@ export function mountControls(
     el('live-button').hidden = !p?.isLive;
     seek.hidden = !p || p.isLive;
     el('playback-time').hidden = seek.hidden;
+    el('control-spacer').hidden = !seek.hidden;
     if (!seek.hidden) {
       seek.max = String(Number.isFinite(video.duration) ? video.duration : 0);
       seek.value = String(video.currentTime);

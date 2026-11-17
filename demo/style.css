@@ -1064,8 +1064,9 @@ body[data-embed] .screen {
     visibility 0.18s;
 }
 .center-controls .center-button {
-  width: 48px;
-  height: 48px;
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: #0b101844;
   border: 1px solid #ffffff20;
@@ -1080,13 +1081,18 @@ body[data-embed] .screen {
   border-color: #ffffff60;
 }
 .center-controls .center-play {
-  width: 64px;
-  height: 64px;
+  width: 80px;
+  height: 80px;
   background: #111b2699;
 }
+.center-controls .center-button svg {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
 .center-controls .center-play svg {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
 }
 .skip-number {
   font:
@@ -1129,12 +1135,12 @@ body[data-embed] .screen {
     gap: 16px;
   }
   .center-controls .center-button {
-    width: 40px;
-    height: 40px;
+    width: 48px;
+    height: 48px;
   }
   .center-controls .center-play {
-    width: 52px;
-    height: 52px;
+    width: 64px;
+    height: 64px;
   }
   #quality-toggle {
     min-width: 67px;
@@ -1169,5 +1175,26 @@ body[data-embed] .screen {
 @media (max-width: 600px) {
   #quality-toggle.unavailable {
     min-width: 32px;
+  }
+}
+
+.quality-badge {
+  font:
+    700 7px Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  fill: currentColor;
+  stroke: none;
+  letter-spacing: -0.2px;
+}
+@media (max-width: 600px) {
+  .center-controls .center-button svg {
+    width: 32px;
+    height: 32px;
+  }
+  .center-controls .center-play svg {
+    width: 36px;
+    height: 36px;
   }
 }
