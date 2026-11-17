@@ -21,7 +21,7 @@ ThePlayer brings multilingual audio, broadcast captions and live playback contro
 - **Live over MoQ:** WebTransport delivery, cached startup and a four-second target reserve.
 - **Audio language selection:** switch audio tracks while retaining the video timeline and connection.
 - **Broadcast subtitles:** selectable DVB, teletext and in-band CEA-708 services, with a shared canvas renderer.
-- **In-video controls:** transparent audio/CC menus, LIVE indicator, fullscreen and a MediaInfo overlay.
+- **In-video controls:** matching quality/audio/CC menus, Auto/current-quality readout, center play/pause and ±10 s controls, LIVE indicator, fullscreen and a branded MediaInfo overlay.
 - **An independent library:** explicit source configuration; no Origin/Relay dashboard dependency.
 - **A modular foundation:** separate core, engines, subtitles, controls and demo.
 
@@ -153,12 +153,12 @@ See [architecture](docs/architecture.md) for extension boundaries and events.
 ## Current support and limits
 
 - MoQ uses `moq-lite-06` and this project's `origin-cmaf-v1` catalog. Generic MoQ transport compatibility alone does not guarantee compatible catalogs or media tracks.
-- Video/audio must be supported by the browser's Media Source Extensions. MoQ audio switching retains the video connection and timeline; HLS supports external AAC-LC audio renditions and manual quality selection.
+- Video/audio must be supported by the browser's Media Source Extensions. MoQ audio switching retains the video connection and timeline; HLS supports external AAC audio renditions, Auto ABR and manual quality selection.
 - Buffer policy targets a four-second reserve, with cached startup where available. Actual buffer health varies with fragment/GOP delivery; it is not a fixed end-to-end latency guarantee.
 - DVB and teletext subtitles arrive as timed bitmap cues from the Origin. CEA-708 is decoded from AVC SEI, including P16 characters, per-window positioning, alignment and explicit row structure.
 - CEA-708 is not a complete conformance implementation: all typography, colors, vertical writing, effects and delayed commands are not yet supported. See the vendor notes.
 - Browser autoplay policies may require muted startup or a user gesture.
-- HLS is experimental: no LL-HLS part playback, automatic ABR, TTML or DRM yet. DASH remains planned.
+- HLS is experimental: no LL-HLS part playback, TTML or DRM yet. DASH remains planned.
 
 ## Optional deployment configuration
 
@@ -184,7 +184,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Extend the original HLS engine: LL-HLS, automatic ABR and TTML.
+- Extend the original HLS engine: LL-HLS, further ABR recovery and TTML.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
 - Package the controls as a self-contained UI component.
@@ -193,3 +193,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 ## License
 
 Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE`, the included upstream notices and `vendor/mux.js/LICENSE` for bundled dependencies.
+
+### Playback shortcuts
+
+Space or K toggles play/pause; Left/Right seeks by ten seconds within the available timeline. The center controls offer the same actions. Live streams can seek only within their available DVR/buffer window. Shortcuts apply to the active player and leave text fields and menu selection keys alone. Unavailable audio/CC controls use an ordinary cursor, not a loading indicator.

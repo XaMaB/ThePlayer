@@ -135,7 +135,11 @@ try {
     await page.goto(
       base +
         '/embed.html?' +
-        new URLSearchParams({ src: base + '/fixture/' + source, transport }),
+        new URLSearchParams({
+          src: base + '/fixture/' + source,
+          transport,
+          quality: '0',
+        }),
     );
     try {
       await page.waitForFunction(

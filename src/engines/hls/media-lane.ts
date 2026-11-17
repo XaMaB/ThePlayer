@@ -26,7 +26,7 @@ export class MediaLane {
   discontinuity = -1;
   next = 0;
   refreshedAt = performance.now();
-  private decoder = new TsTransmuxer();
+  private decoder: TsTransmuxer;
   private preparedDiscontinuity = -1;
   private initCache?: { key: string; data: Uint8Array };
   private appendedInit?: Uint8Array;
@@ -39,7 +39,10 @@ export class MediaLane {
       key: Key | undefined,
       sequence: number,
     ) => Promise<Uint8Array>,
-  ) {}
+    audioCodec?: string,
+  ) {
+    this.decoder = new TsTransmuxer(audioCodec);
+  }
   ahead(time: number) {
     return this.buffer ? bufferedAhead(this.buffer.buffered, time) : 0;
   }

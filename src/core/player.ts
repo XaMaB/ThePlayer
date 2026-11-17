@@ -17,6 +17,8 @@ export interface PlaybackEngine extends EventTarget {
   readonly isLive?: boolean;
   readonly qualityLevels?: any[];
   readonly selectedQuality?: number;
+  readonly currentQuality?: number;
+  readonly autoQuality?: boolean;
   selectQuality?(index: number): Promise<void>;
   seekToLive?(): void;
   init(): Promise<void>;
@@ -171,6 +173,12 @@ export class PlayerCore extends EventTarget {
   }
   get selectedQuality() {
     return this.engine?.selectedQuality ?? -1;
+  }
+  get currentQuality() {
+    return this.engine?.currentQuality ?? this.selectedQuality;
+  }
+  get autoQuality() {
+    return this.engine?.autoQuality ?? false;
   }
   async selectQuality(index: number) {
     if (!this.engine?.selectQuality)

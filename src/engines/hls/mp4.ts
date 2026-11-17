@@ -100,6 +100,50 @@ const child = (data: Uint8Array, type: string) => {
 };
 const read32 = (data: Uint8Array, offset: number) =>
   new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(offset);
+/** Walk ISO elementary-stream descriptors, including variable-length sizes. */
+function audioObjectType(data: Uint8Array): number {
+  for (let at = 0; at < data.length; ) {
+    const tag = data[at++];
+    let length = 0,
+      last = 0;
+    for (let n = 0; n < 4; n++) {
+      if (at >= data.length) throw new Error('Truncated ES descriptor');
+      last = data[at++];
+      length = length * 128 + (last & 127);
+      if (!(last & 128)) break;
+    }
+    if (last & 128 || at + length > data.length)
+      throw new Error('Invalid ES descriptor size');
+    const body = data.subarray(at, at + length);
+    at += length;
+    if (tag === 5) {
+      if (body.length < 2) throw new Error('Truncated AudioSpecificConfig');
+      const type = body[0] >>> 3;
+      if (![2, 5].includes(type))
+        throw new Error('Unsupported AAC object type');
+      return type;
+    }
+    if (tag === 3) {
+      if (body.length < 3) throw new Error('Truncated ES descriptor');
+      const flags = body[2];
+      let offset = 3;
+      if (flags & 128) offset += 2;
+      if (flags & 64) {
+        if (offset >= body.length) throw new Error('Truncated ES URL');
+        offset += 1 + body[offset];
+      }
+      if (flags & 32) offset += 2;
+      if (offset > body.length) throw new Error('Truncated ES flags');
+      return audioObjectType(body.subarray(offset));
+    }
+    if (tag === 4) {
+      if (body.length < 13 || body[0] !== 0x40)
+        throw new Error('Unsupported audio decoder descriptor');
+      return audioObjectType(body.subarray(13));
+    }
+  }
+  throw new Error('Missing AudioSpecificConfig');
+}
 export function inspectInit(data: Uint8Array): Track[] {
   const moov = child(data, 'moov');
   return boxes(moov)
@@ -126,12 +170,7 @@ export function inspectInit(data: Uint8Array): Track[] {
           ).join('');
       } else if (entry.type === 'mp4a') {
         const esds = child(entry.body.subarray(28), 'esds');
-        let objectType = 2;
-        for (let i = 4; i < esds.length - 2; i++)
-          if (esds[i] === 5 && esds[i + 1] === 2) {
-            objectType = esds[i + 2] >>> 3;
-            break;
-          }
+        const objectType = audioObjectType(esds.subarray(4));
         codec = 'mp4a.40.' + objectType;
       } else
         throw new Error(

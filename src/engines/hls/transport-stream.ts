@@ -1,3 +1,4 @@
+import { sampleRates, aacConfiguration } from './aac';
 import {
   concat,
   u32,
@@ -235,15 +236,12 @@ function nals(data: Uint8Array): Uint8Array[] {
   if (start >= 0) out.push(data.subarray(start));
   return out.filter((n) => n.length);
 }
-const sampleRates = [
-  96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025,
-  8000, 7350,
-];
 export class TsTransmuxer {
   private sps?: Uint8Array;
   private pps?: Uint8Array;
   private clock?: number;
   private serial = 0;
+  constructor(private audioCodec = 'mp4a.40.2') {}
   reset() {
     this.clock = undefined;
   }
@@ -351,23 +349,21 @@ export class TsTransmuxer {
           at + length > bytes.length
         )
           throw new Error('Unsupported AAC configuration or incomplete frame');
+        const config = aacConfiguration(index, channels, this.audioCodec);
         if (!track)
           track = {
             id: 2,
             kind: 'audio',
-            timescale: rate,
+            timescale: config.rate,
             channels,
-            codec: 'mp4a.40.2',
-            asc: new Uint8Array([
-              (objectType << 3) | (index >>> 1),
-              ((index & 1) << 7) | (channels << 3),
-            ]),
+            codec: config.codec,
+            asc: config.asc,
           };
-        if (track.timescale !== rate || track.channels !== channels)
+        if (track.timescale !== config.rate || track.channels !== channels)
           throw new Error('AAC configuration changed within a segment');
         samples.push({
           data: bytes.slice(at + header, at + length),
-          duration: 1024,
+          duration: config.duration,
           cts: 0,
           key: true,
         });

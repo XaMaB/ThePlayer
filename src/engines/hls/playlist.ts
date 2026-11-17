@@ -39,6 +39,10 @@ export interface Rendition {
   language: string;
   url?: string;
   default: boolean;
+  autoselect: boolean;
+  forced: boolean;
+  associatedLanguage?: string;
+  characteristics: string[];
 }
 export interface Playlist {
   url: string;
@@ -290,6 +294,31 @@ export function parsePlaylist(
         break;
       case '#EXT-X-MEDIA': {
         const a = attributes(value);
+        if (
+          !a.TYPE ||
+          !['AUDIO', 'VIDEO', 'SUBTITLES', 'CLOSED-CAPTIONS'].includes(
+            a.TYPE,
+          ) ||
+          !a['GROUP-ID'] ||
+          !a.NAME
+        )
+          throw new Error('Invalid EXT-X-MEDIA identity');
+        for (const flag of ['DEFAULT', 'AUTOSELECT', 'FORCED'])
+          if (a[flag] !== undefined && !['YES', 'NO'].includes(a[flag]))
+            throw new Error(`Invalid ${flag}`);
+        if (a.DEFAULT === 'YES' && a.AUTOSELECT === 'NO')
+          throw new Error('DEFAULT=YES requires AUTOSELECT=YES when present');
+        if (a.FORCED !== undefined && a.TYPE !== 'SUBTITLES')
+          throw new Error('FORCED is only valid for SUBTITLES');
+        if (a.TYPE === 'SUBTITLES' && !a.URI)
+          throw new Error('SUBTITLES requires URI');
+        const group = p.renditions.filter(
+          (r) => r.type === a.TYPE && r.group === a['GROUP-ID'],
+        );
+        if (group.some((r) => r.name === a.NAME))
+          throw new Error('Duplicate rendition NAME');
+        if (a.DEFAULT === 'YES' && group.some((r) => r.default))
+          throw new Error('Multiple DEFAULT renditions in group');
         p.renditions.push({
           type: a.TYPE,
           group: a['GROUP-ID'],
@@ -297,6 +326,10 @@ export function parsePlaylist(
           language: a.LANGUAGE ?? 'und',
           url: a.URI ? uri(a.URI) : undefined,
           default: a.DEFAULT === 'YES',
+          autoselect: a.AUTOSELECT === 'YES',
+          forced: a.FORCED === 'YES',
+          associatedLanguage: a['ASSOC-LANGUAGE'],
+          characteristics: a.CHARACTERISTICS?.split(',') ?? [],
         });
         break;
       }

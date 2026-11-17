@@ -154,6 +154,7 @@ async function openChannel(next: any) {
             protocol: 'hls',
             url: next.url,
             network: { transport: next.transport ?? 'fetch' },
+            quality: next.quality ?? 'auto',
           }
         : {
             relayUrl: next.relayUrl,
@@ -195,6 +196,11 @@ async function openChannel(next: any) {
           2,
         ),
       );
+    });
+    player.addEventListener('subtitlechange', (e: any) => {
+      if (token !== operation) return;
+      selectedLanguage = e.detail?.name ?? '';
+      updateSubtitleMenu(player.subtitleTracks);
     });
     player.addEventListener('subtitletracks', (e: any) => {
       if (token === operation) updateSubtitleMenu(e.detail);
@@ -247,6 +253,7 @@ function sourceForm(next: any) {
       protocol: 'hls',
       url: next.url,
       network: { transport: next.transport ?? 'fetch' },
+      quality: next.quality ?? 'auto',
     };
     text(
       'snippet',
@@ -412,6 +419,10 @@ if (query.has('src')) {
     protocol: 'hls',
     url: query.get('src'),
     transport: query.get('transport') ?? 'fetch',
+    quality:
+      query.has('quality') && query.get('quality') !== 'auto'
+        ? Number(query.get('quality'))
+        : 'auto',
     source: true,
     status: 'live',
   };

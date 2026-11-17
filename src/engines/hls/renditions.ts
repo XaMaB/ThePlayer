@@ -1,6 +1,6 @@
 import type { Playlist, Variant } from './playlist';
 
-/** The demuxers currently support AVC and AAC-LC; filter declared unsupported codecs. */
+/** The demuxers currently support AVC, AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
 export function compatibleVariants(variants: Variant[]): Variant[] {
   return variants.filter(
     (v) =>
@@ -8,7 +8,7 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
       v.codecs
         .split(',')
         .every((codec) =>
-          /^(avc[13]\.[0-9a-f]{6}|mp4a\.40\.2)$/i.test(codec.trim()),
+          /^(avc[13]\.[0-9a-f]{6}|mp4a\.40\.[25])$/i.test(codec.trim()),
         ),
   );
 }

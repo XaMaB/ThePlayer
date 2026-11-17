@@ -1,3 +1,5 @@
+import { selectRendition } from './selection';
+import { AbrController } from './abr';
 import { bufferedAhead, nextGapPosition } from './buffer';
 import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
@@ -25,6 +27,10 @@ export interface HlsSource {
   network?: NetworkOptions;
   targetBuffer?: number;
   autoplay?: boolean;
+  quality?: 'auto' | number;
+  audioLanguage?: string;
+  subtitleLanguage?: string;
+  preferredLanguages?: string[];
 }
 /** Original baseline HLS engine; no hls.js, VHS or Shaka code/dependency. */
 export class HlsEngine extends EventTarget {
@@ -38,6 +44,8 @@ export class HlsEngine extends EventTarget {
     requests: 0,
     retries: 0,
     bandwidth: 0,
+    quality: {} as Record<string, unknown>,
+    abrWarning: '',
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
     startup: { firstFrameMs: null as number | null },
     buffer: {} as Record<string, unknown>,
@@ -49,6 +57,17 @@ export class HlsEngine extends EventTarget {
   selectedAudioTrack = '';
   qualityLevels: any[] = [];
   selectedQuality = 0;
+  autoQuality = true;
+  private abr = new AbrController();
+  private qualityTimeline = [{ at: 0, id: 0 }];
+  get currentQuality() {
+    return (
+      this.qualityTimeline.findLast(
+        (item) => item.at <= this.video.currentTime + 0.02,
+      )?.id ?? this.selectedQuality
+    );
+  }
+  private abrRetryAt = 0;
   private abort = new AbortController();
   private client: ResourceClient;
   private get playlist() {
@@ -67,6 +86,7 @@ export class HlsEngine extends EventTarget {
   private subtitleAbort?: AbortController;
   private textTrack?: TextTrack;
   private selectedSubtitle = '';
+  private subtitleManual = false;
   private subtitleCounters = new SubtitleCounters();
   private keys = new Map<string, Promise<CryptoKey>>();
   private loadTime = 0;
@@ -154,12 +174,16 @@ export class HlsEngine extends EventTarget {
       throw new Error('Unsupported HLS feature: ' + p.unsupported.join(', '));
     return p;
   }
-  private lane(p: Playlist, role: 'main' | 'audio') {
+  private lane(p: Playlist, role: 'main' | 'audio', codecs?: string) {
     return new MediaLane(
       p,
       role,
       (r) => this.client.get(r),
       (data, key, sequence) => this.decrypt(data, key, sequence),
+      codecs
+        ?.split(',')
+        .find((codec) => codec.trim().startsWith('mp4a.'))
+        ?.trim(),
     );
   }
   async init() {
@@ -177,7 +201,7 @@ export class HlsEngine extends EventTarget {
         );
       if (!usable.length) throw new Error('No supported AVC/AAC rendition');
       usable.sort((a, b) => a.bandwidth - b.bandwidth);
-      const variant = usable[0];
+      let variant = usable[0];
       // Restrict switches to one audio/subtitle group until cross-group transitions are implemented.
       this.qualityLevels = usable
         .filter(
@@ -190,6 +214,17 @@ export class HlsEngine extends EventTarget {
             ? `${v.resolution.split('x')[1]}p · ${(v.bandwidth / 1e6).toFixed(2)} Mb/s`
             : `${(v.bandwidth / 1e6).toFixed(2)} Mb/s`,
         }));
+      if (typeof this.source.quality === 'number') {
+        if (
+          !Number.isInteger(this.source.quality) ||
+          !this.qualityLevels[this.source.quality]
+        )
+          throw new Error('Unknown initial HLS quality');
+        this.autoQuality = false;
+        this.selectedQuality = this.source.quality;
+        this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
+        variant = this.qualityLevels[this.selectedQuality];
+      }
       p = await this.readPlaylist(variant.url);
       this.audioTracks = this.master.renditions
         .filter((r) => r.type === 'AUDIO' && r.group === variant.audio && r.url)
@@ -204,6 +239,7 @@ export class HlsEngine extends EventTarget {
             r.type === 'SUBTITLES' && r.group === variant.subtitles && r.url,
         )
         .map((r, index) => ({
+          ...r,
           name: 'hls-sub-' + index,
           language: r.language,
           label: r.name,
@@ -211,15 +247,24 @@ export class HlsEngine extends EventTarget {
           url: r.url,
         }));
     }
-    this.main = this.lane(p, 'main');
+    this.main = this.lane(
+      p,
+      'main',
+      this.qualityLevels[this.selectedQuality]?.codecs,
+    );
     this.isLive = p.live;
     this.main.next = this.startIndex(p);
-    const audioTrack =
-      this.audioTracks.find((t) => t.default) ?? this.audioTracks[0];
+    const audioTrack = selectRendition(this.audioTracks, 'audio', {
+      language: this.source.audioLanguage,
+      systemLanguages: this.source.preferredLanguages ?? navigator.languages,
+    });
+    if (this.audioTracks.length && !audioTrack)
+      throw new Error('No automatic audio rendition; specify audioLanguage');
     if (audioTrack) {
       this.audio = this.lane(
         alignRendition(await this.readPlaylist(audioTrack.url), p),
         'audio',
+        this.qualityLevels[this.selectedQuality]?.codecs,
       );
       this.audio.next = segmentAt(
         this.audio.playlist,
@@ -328,9 +373,10 @@ export class HlsEngine extends EventTarget {
       this.operation(buffer, action),
     );
     this.diagnostics.objects++;
-    if (lane.role === 'main')
-      this.diagnostics.bandwidth =
-        (prepared.bytes * 8) / Math.max(0.001, prepared.elapsed / 1000);
+    if (lane.role === 'main') {
+      this.abr.observe(prepared.bytes, prepared.elapsed);
+      this.diagnostics.bandwidth = this.abr.estimate;
+    }
   }
   private async run() {
     // Install every SourceBuffer before appending media, preserving shared A/V ownership.
@@ -349,6 +395,7 @@ export class HlsEngine extends EventTarget {
       lane.next++;
     }
     this.publishCatalog();
+    this.selectAutomaticSubtitles();
     while (!this.abort.signal.aborted && !this.failed) {
       if (this.switches.length) {
         const request = this.switches.shift()!;
@@ -361,6 +408,29 @@ export class HlsEngine extends EventTarget {
         continue;
       }
       for (const lane of this.lanes()) await this.refresh(lane);
+      if (
+        this.autoQuality &&
+        !this.initial &&
+        !this.video.paused &&
+        performance.now() >= this.abrRetryAt
+      ) {
+        const next = this.abr.choose(
+          this.qualityLevels,
+          this.selectedQuality,
+          this.ahead(),
+          this.targetBuffer,
+          performance.now(),
+        );
+        if (next !== this.selectedQuality) {
+          try {
+            await this.switchRendition('quality', next);
+          } catch (error) {
+            this.diagnostics.abrWarning =
+              error instanceof Error ? error.message : String(error);
+            this.abrRetryAt = performance.now() + 10000;
+          }
+        }
+      }
       const p = this.main!.playlist;
       if (this.isLive !== p.live) {
         this.isLive = p.live;
@@ -476,16 +546,45 @@ export class HlsEngine extends EventTarget {
     const choice =
       kind === 'audio' ? this.audioTracks[index] : this.qualityLevels[index];
     const p = alignRendition(await this.readPlaylist(choice.url), old.playlist);
-    const lane = this.lane(p, old.role);
+    const lane = this.lane(
+      p,
+      old.role,
+      kind === 'quality'
+        ? choice.codecs
+        : this.qualityLevels[this.selectedQuality]?.codecs,
+    );
     let prepared: PreparedSegment | undefined,
       boundary = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
-      boundary = switchBoundary(p, this.video.currentTime);
+      const lead =
+        this.abr.estimate && choice.bandwidth
+          ? Math.min(
+              10,
+              ((choice.bandwidth * p.targetDuration) / this.abr.estimate) *
+                1.25,
+            )
+          : 0;
+      const bufferedEnd =
+        this.video.currentTime + old.ahead(this.video.currentTime);
+      // Do not schedule beyond the media we can play while prefetching. A long
+      // lead at low bandwidth would otherwise leave an unfilled segment hole.
+      boundary = switchBoundary(
+        p,
+        Math.max(
+          this.video.currentTime,
+          Math.min(this.video.currentTime + lead, bufferedEnd - 0.16),
+        ),
+      );
       lane.next = segmentAt(p, boundary);
       const token = this.generation;
       prepared = await lane.prepare();
       this.assertLayout(prepared, lane);
-      if (token === this.generation && this.video.currentTime < boundary - 0.03)
+      if (
+        token === this.generation &&
+        (this.video.currentTime < boundary - 0.03 ||
+          (this.video.readyState < 3 &&
+            this.video.currentTime <= boundary + 0.1))
+      )
         break;
       prepared = undefined;
     }
@@ -508,9 +607,15 @@ export class HlsEngine extends EventTarget {
       this.audio = lane;
       this.selectedAudioTrack = choice.name;
       this.emit('audiochange', { ...choice, effectiveAt: boundary });
+      if (!this.subtitleManual) this.selectAutomaticSubtitles();
     } else {
       this.main = lane;
       this.selectedQuality = index;
+      this.qualityTimeline = this.qualityTimeline.filter(
+        (item) => item.at < boundary,
+      );
+      this.qualityTimeline.push({ at: boundary, id: index });
+      this.abr.switched(performance.now());
       this.emit('qualitychange', { ...choice, effectiveAt: boundary });
     }
     this.diagnostics.switches.push({
@@ -522,11 +627,25 @@ export class HlsEngine extends EventTarget {
     this.publishCatalog();
   }
   async selectQuality(index: number) {
+    if (index === -1) {
+      this.autoQuality = true;
+      this.abrRetryAt = 0;
+      this.emit('qualitychange', { auto: true });
+      return;
+    }
     if (!Number.isInteger(index) || !this.qualityLevels[index])
       throw new Error('Unknown HLS quality');
+    this.autoQuality = false;
+    this.emit('qualitychange', { auto: false });
     await this.enqueueSwitch('quality', index);
   }
   private updateDiagnostics() {
+    this.diagnostics.quality = {
+      mode: this.autoQuality ? 'auto' : 'manual',
+      current: this.currentQuality,
+      scheduled: this.selectedQuality,
+      bandwidthEstimate: this.abr.estimate,
+    };
     this.diagnostics.bytes = this.client.bytes;
     this.diagnostics.requests = this.client.requests;
     this.diagnostics.retries = this.client.retries;
@@ -654,7 +773,21 @@ export class HlsEngine extends EventTarget {
     if (index < 0) throw new Error('Unknown HLS audio track');
     await this.enqueueSwitch('audio', index);
   }
-  selectSubtitleTrack(name: string) {
+  private selectAutomaticSubtitles() {
+    const audio = this.audioTracks.find(
+      (t) => t.name === this.selectedAudioTrack,
+    );
+    const track = selectRendition(this.subtitleTracks, 'subtitles', {
+      language: this.source.subtitleLanguage,
+      systemLanguages:
+        this.source.preferredLanguages ??
+        (audio?.language ? [audio.language] : navigator.languages),
+    });
+    if ((track?.name ?? '') !== this.selectedSubtitle)
+      this.selectSubtitleTrack(track?.name ?? '', true);
+  }
+  selectSubtitleTrack(name: string, automatic = false) {
+    if (!automatic) this.subtitleManual = true;
     const track = this.subtitleTracks.find((t) => t.name === name);
     if (name && !track) throw new Error('Unknown HLS subtitle track');
     this.subtitleAbort?.abort();

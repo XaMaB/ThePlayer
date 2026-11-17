@@ -48,7 +48,9 @@ try {
     );
     try {
       await page.goto(
-        base + '/embed.html?' + new URLSearchParams({ src: source.url }),
+        base +
+          '/embed.html?' +
+          new URLSearchParams({ src: source.url, quality: '0' }),
       );
       await page.waitForFunction(
         () =>
@@ -114,6 +116,36 @@ try {
           framesBefore + 100,
         'Frames must continue rendering after switch',
       );
+      if (source.id === 'mux-bbb') {
+        assert.equal(
+          levels.length,
+          5,
+          'All AVC/AAC and HE-AAC profiles must be available',
+        );
+        for (const index of [2, 3, 4, 0]) {
+          const beforeAudio = await page.evaluate(
+            () => document.querySelector('video').webkitAudioDecodedByteCount,
+          );
+          await page.evaluate((i) => window.player.selectQuality(i), index);
+          const boundary = await page.evaluate(
+            () => window.player.diagnostics.switches.at(-1).effectiveAt,
+          );
+          const width = Number(levels[index].resolution.split('x')[0]);
+          await page.waitForFunction(
+            ({ boundary, width }) =>
+              document.querySelector('video').currentTime > boundary + 1 &&
+              document.querySelector('video').videoWidth === width,
+            { boundary, width },
+            { timeout: 30000 },
+          );
+          assert.ok(
+            (await page.evaluate(
+              () => document.querySelector('video').webkitAudioDecodedByteCount,
+            )) > beforeAudio,
+            'Audio decoding must continue across AAC profiles',
+          );
+        }
+      }
       const tracks = await page.evaluate(() => window.player.subtitleTracks);
       if (tracks.length) {
         await page.evaluate(() =>

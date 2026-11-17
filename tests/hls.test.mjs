@@ -147,7 +147,7 @@ test('HTTP client retries, slices ignored range requests and aborts pending read
 
 const { compatibleVariants, alignRendition, segmentAt, switchBoundary } =
   await module('renditions');
-test('codec filtering excludes declared HE-AAC/HEVC and Dolby alternatives', () => {
+test('codec filtering accepts HE-AAC v1 and excludes HEVC and Dolby', () => {
   const variants = [
     { url: 'a', bandwidth: 1, codecs: 'avc1.64001f,mp4a.40.2' },
     { url: 'b', bandwidth: 2, codecs: 'avc1.64001f,mp4a.40.5' },
@@ -155,7 +155,7 @@ test('codec filtering excludes declared HE-AAC/HEVC and Dolby alternatives', () 
   ];
   assert.deepEqual(
     compatibleVariants(variants).map((v) => v.url),
-    ['a'],
+    ['a', 'b'],
   );
 });
 test('renditions with different media sequence numbers align by program date', () => {
@@ -251,4 +251,147 @@ test('gap recovery only crosses tiny holes at the playback boundary', () => {
     ),
     undefined,
   );
+});
+
+const { AbrController } = await module('abr');
+test('ABR needs evidence and buffer before upgrading, and limits upgrade churn', () => {
+  const abr = new AbrController(),
+    levels = [
+      { bandwidth: 300000 },
+      { bandwidth: 800000 },
+      { bandwidth: 2000000 },
+    ];
+  abr.observe(500000, 1000);
+  assert.equal(abr.choose(levels, 0, 12, 12, 1000), 0);
+  abr.observe(500000, 1000);
+  assert.equal(abr.choose(levels, 0, 1, 12, 2000), 0);
+  assert.equal(abr.choose(levels, 0, 8, 12, 3000), 1);
+  abr.switched(3000);
+  assert.equal(abr.choose(levels, 1, 12, 12, 5000), 1);
+  assert.equal(abr.choose(levels, 1, 12, 12, 12000), 2);
+});
+test('ABR reacts downwards to sustained slow delivery without waiting for upgrade cooldown', () => {
+  const abr = new AbrController(),
+    levels = [
+      { bandwidth: 300000 },
+      { bandwidth: 800000 },
+      { bandwidth: 2000000 },
+    ];
+  abr.observe(500000, 1000);
+  abr.observe(500000, 1000);
+  abr.switched(1000);
+  abr.observe(100000, 8000);
+  assert.equal(abr.choose(levels, 2, 1, 12, 2000), 0);
+  assert.ok(abr.estimate > 0);
+});
+const { aacConfiguration } = await module('aac');
+test('HE-AAC ASC signals SBR and preserves the duration of its LC core', () => {
+  const lc = aacConfiguration(7, 2),
+    he = aacConfiguration(7, 2, 'mp4a.40.5');
+  assert.equal(lc.rate, 22050);
+  assert.equal(he.rate, 44100);
+  assert.equal(lc.duration / lc.rate, he.duration / he.rate);
+  assert.equal(he.asc[0] >>> 3, 5);
+  assert.deepEqual([...he.asc], [0x2b, 0x92, 0x08, 0x00]);
+  assert.throws(() => aacConfiguration(0, 2, 'mp4a.40.5'), /output rate/);
+});
+
+const { selectRendition } = await module('selection');
+const renditionMaster = (body) =>
+  `#EXTM3U\n${body}\n#EXT-X-STREAM-INF:BANDWIDTH=100000\nv.m3u8`;
+test('DEFAULT/AUTOSELECT defaults and required group constraints follow EXT-X-MEDIA', () => {
+  const p = parsePlaylist(
+    renditionMaster(
+      '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",LANGUAGE="en",DEFAULT=YES,URI="en.m3u8"',
+    ),
+    base,
+  );
+  assert.equal(p.renditions[0].default, true);
+  assert.equal(p.renditions[0].autoselect, false);
+  for (const attrs of [
+    'DEFAULT=YES,AUTOSELECT=NO',
+    'AUTOSELECT=MAYBE',
+    'FORCED=NO',
+  ])
+    assert.throws(() =>
+      parsePlaylist(
+        renditionMaster(
+          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="A",${attrs}`,
+        ),
+        base,
+      ),
+    );
+  assert.throws(
+    () =>
+      parsePlaylist(
+        renditionMaster(
+          '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="A",DEFAULT=YES\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="B",DEFAULT=YES',
+        ),
+        base,
+      ),
+    /Multiple DEFAULT/,
+  );
+});
+test('selection honors explicit preferences, defaults and manual-only renditions', () => {
+  const tracks = [
+    { language: 'en', default: true, autoselect: true },
+    { language: 'bg', default: false, autoselect: false },
+    { language: 'es', default: false, autoselect: true },
+  ];
+  assert.equal(
+    selectRendition(tracks, 'audio', { systemLanguages: ['bg'] }),
+    tracks[0],
+  );
+  assert.equal(selectRendition(tracks, 'audio', { language: 'bg' }), tracks[1]);
+  assert.equal(
+    selectRendition(tracks.slice(1), 'audio', {
+      systemLanguages: ['bg', 'es-MX'],
+    }),
+    tracks[2],
+  );
+  assert.equal(
+    selectRendition([tracks[1]], 'audio', { systemLanguages: ['bg'] }),
+    undefined,
+  );
+});
+test('subtitle Off wins; forced environmental selection excludes full non-default subtitles', () => {
+  const full = {
+    language: 'en',
+    default: false,
+    autoselect: true,
+    forced: false,
+  };
+  const forced = { ...full, forced: true };
+  assert.equal(
+    selectRendition([full], 'subtitles', { systemLanguages: ['en'] }),
+    undefined,
+  );
+  assert.equal(
+    selectRendition([full, forced], 'subtitles', {
+      systemLanguages: ['en-US'],
+    }),
+    forced,
+  );
+  assert.equal(
+    selectRendition([{ ...full, default: true }], 'subtitles', {
+      language: 'off',
+    }),
+    undefined,
+  );
+  assert.equal(selectRendition([full], 'subtitles', { language: 'en' }), full);
+});
+test('MP4 descriptors preserve the explicit HE-AAC object type', async () => {
+  const { initialization, inspectInit } = await module('mp4');
+  const config = aacConfiguration(7, 2, 'mp4a.40.5');
+  const data = initialization([
+    {
+      id: 2,
+      kind: 'audio',
+      timescale: config.rate,
+      channels: 2,
+      codec: config.codec,
+      asc: config.asc,
+    },
+  ]);
+  assert.equal(inspectInit(data)[0].codec, 'mp4a.40.5');
 });

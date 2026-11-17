@@ -1,3 +1,5 @@
+let keyboardOwner: HTMLElement | undefined;
+
 /** In-video controls shared by the playground and standalone embed. No timeline for live TV. */
 export function mountControls(
   screen: HTMLElement,
@@ -5,6 +7,9 @@ export function mountControls(
   getPlayer: () => any,
   report: (message: string) => void,
 ) {
+  // The existing ThePlayer mark, inline so embeds do not need an asset URL.
+  const brand =
+    '<span class="player-brand"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M42 48h148v32h-58v128H98V80H42zM150 100l70 44-70 44z" fill="currentColor"/><path d="M42 112h28m-28 32h18m-18 32h28" stroke="currentColor" stroke-width="8" stroke-linecap="round" opacity=".55"/></svg><strong>ThePlayer</strong></span>';
   const originalChildren = new Set(screen.children);
   const abort = new AbortController();
   const listen = (
@@ -13,6 +18,11 @@ export function mountControls(
     handler: (event: any) => void,
   ) => target.addEventListener(type, handler, { signal: abort.signal });
   const icons = {
+    quality:
+      '<rect class="stroke" x="2" y="5" width="20" height="14" rx="3"/><path class="stroke" d="M6 9v6m5-6v6M6 12h5m4-3v6h1a3 3 0 0 0 0-6z"/>',
+    back: '<path class="stroke" d="M5 8a8 8 0 1 1-1 7M5 3v5h5"/><text x="12" y="15" text-anchor="middle" class="skip-number">10</text>',
+    forward:
+      '<path class="stroke" d="M19 8a8 8 0 1 0 1 7m-1-12v5h-5"/><text x="12" y="15" text-anchor="middle" class="skip-number">10</text>',
     audio:
       '<path class="stroke" d="M4 14v-3a8 8 0 0 1 16 0v3M4 12H2v7h5v-7zm16 0h2v7h-5v-7z"/>',
     play: '<path d="m9 5 11 7-11 7z"/>',
@@ -32,12 +42,18 @@ export function mountControls(
     'beforeend',
     `
   <button id="live-button" hidden class="live-indicator" title="Return to live" aria-label="Return to live"><span></span>LIVE</button>
+  <div class="center-controls" role="group" aria-label="Quick playback controls">
+   <button id="skip-back" class="icon-button center-button" title="Back 10 seconds (←)" aria-label="Back 10 seconds">${svg('back')}</button>
+   <button id="center-play" class="icon-button center-button center-play" title="Play / Pause (Space)" aria-label="Play">${svg('play')}</button>
+   <button id="skip-forward" class="icon-button center-button" title="Forward 10 seconds (→)" aria-label="Forward 10 seconds">${svg('forward')}</button>
+   <span id="seek-feedback" class="seek-feedback" role="status" aria-live="polite"></span>
+  </div>
   <div class="video-controls" role="group" aria-label="Playback controls">
    <button id="play-toggle" class="icon-button" title="Play (K)" aria-label="Play">${svg('play')}</button>
    <button id="mute-toggle" class="icon-button" title="Unmute (M)" aria-label="Unmute">${svg('muted')}</button>
    <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
    <input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback position" hidden/><span id="playback-time" class="playback-time" hidden></span><span class="control-spacer"></span>
-   <button id="quality-toggle" class="icon-button" title="Quality" aria-label="Quality" aria-expanded="false" aria-controls="quality-menu" disabled>HD</button>
+   <button id="quality-toggle" class="icon-button" title="Quality" aria-label="Quality" aria-expanded="false" aria-controls="quality-menu" disabled>${svg('quality')}<span class="quality-copy"><span id="quality-mode">Auto</span><span id="quality-resolution">—</span></span></button>
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>
    <button id="info-toggle" class="icon-button" title="Player options" aria-label="Player options" aria-haspopup="menu" aria-expanded="false">${svg('more')}</button>
@@ -46,10 +62,10 @@ export function mountControls(
   <div id="cc-menu" class="video-popup track-menu" hidden><strong>Subtitles</strong><select id="subtitle-select" hidden aria-hidden="true"><option value="">Off</option></select><div class="track-options" role="menu" aria-label="Subtitle tracks"></div></div>
   <div id="quality-menu" class="video-popup track-menu" hidden><strong>Quality</strong><div class="track-options" role="menu" aria-label="Quality levels"></div></div>
   <div id="audio-menu" class="video-popup track-menu" hidden><strong>Audio language</strong><div class="track-options" role="menu" aria-label="Audio tracks"></div></div>
-  <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
+  <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><div class="context-brand">${brand}</div><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
   <section id="stats-overlay" class="stats-overlay" aria-label="mediainfo" hidden>
-   <div class="stats-title"><strong>mediainfo</strong><button id="stats-close" aria-label="Close stats" title="Close stats">×</button></div>
-   <dl><dt>Resolution</dt><dd id="stats-resolution">—</dd><dt>Frames / dropped</dt><dd><span id="frames">0</span> / <span id="dropped">0</span></dd>
+   <div class="stats-title">${brand}<span>mediainfo</span><button id="stats-close" aria-label="Close stats" title="Close stats">×</button></div>
+   <dl><dt>Quality</dt><dd id="stats-quality">—</dd><dt>Resolution</dt><dd id="stats-resolution">—</dd><dt>Frames / dropped</dt><dd><span id="frames">0</span> / <span id="dropped">0</span></dd>
    <dt>Buffer health</dt><dd><span id="buffer">0.00</span> s <span id="buffer-detail">· cache reserve</span></dd>
    <dt>Received payload</dt><dd><span id="bitrate">—</span> Mb/s</dd><dt>First picture</dt><dd id="stats-first-picture">—</dd><dt>4 s reserve ready</dt><dd id="stats-reserve-ready">—</dd><dt>Media objects</dt><dd id="stats-objects">0</dd>
    <dt title="Received subtitle messages, including clears, refreshes and cached events. Counters reset on channel connect.">Received events</dt><dd id="cue-count">0</dd><dt title="Nonempty subtitle appearances drawn on the video. Unchanged refreshes and redraws are not counted again.">Displayed subtitles</dt><dd id="subtitle-displayed">0</dd><dt>Transport</dt><dd id="stats-transport">—</dd>
@@ -71,6 +87,8 @@ export function mountControls(
     qualityMenu = el('quality-menu');
   let hideTimer: ReturnType<typeof setTimeout>;
   let previous: any = null;
+  let feedbackTimer: ReturnType<typeof setTimeout>;
+  keyboardOwner ??= screen;
   screen.tabIndex = 0;
   screen.setAttribute('aria-label', 'Video player');
   const closeMenus = () => {
@@ -94,7 +112,7 @@ export function mountControls(
         qualityMenu.hidden &&
         menu.hidden &&
         !screen.querySelector(
-          '.video-controls:focus-within, .live-indicator:focus-visible',
+          '.video-controls:focus-within, .center-controls:focus-within, .live-indicator:focus-visible',
         )
       )
         screen.classList.add('controls-hidden');
@@ -113,7 +131,12 @@ export function mountControls(
   function sync() {
     play.innerHTML = svg(video.paused ? 'play' : 'pause');
     play.setAttribute('aria-label', video.paused ? 'Play' : 'Pause');
-    play.title = video.paused ? 'Play (K)' : 'Pause (K)';
+    play.title = video.paused ? 'Play (Space / K)' : 'Pause (Space / K)';
+    el('center-play').innerHTML = svg(video.paused ? 'play' : 'pause');
+    el('center-play').setAttribute(
+      'aria-label',
+      video.paused ? 'Play' : 'Pause',
+    );
     mute.innerHTML = svg(
       video.muted || video.volume === 0 ? 'muted' : 'volume',
     );
@@ -123,7 +146,11 @@ export function mountControls(
     showControls();
   }
   play.onclick = () => void togglePlay();
-  listen(video, 'click', () => void togglePlay());
+  el('center-play').onclick = () => void togglePlay();
+  listen(video, 'click', () => {
+    screen.focus({ preventScroll: true });
+    void togglePlay();
+  });
   mute.onclick = () => {
     video.muted = !video.muted;
     if (!video.muted && video.volume === 0) video.volume = 1;
@@ -152,6 +179,18 @@ export function mountControls(
     mark.textContent = checked ? '✓' : '';
     const text = document.createElement('span');
     text.textContent = label;
+    if (container.closest('#quality-menu')) {
+      text.className = 'quality-option-label';
+      const [primary, secondary] = label.split(' · ');
+      const first = document.createElement('span'),
+        second = document.createElement('span');
+      first.className = value === '-1' ? 'quality-mode' : 'quality-resolution';
+      second.className =
+        value === '-1' ? 'quality-resolution' : 'quality-bitrate';
+      first.textContent = primary;
+      second.textContent = secondary ?? '';
+      text.replaceChildren(first, second);
+    }
     button.append(mark, text);
     if (format) {
       const badge = document.createElement('span');
@@ -256,23 +295,43 @@ export function mountControls(
     if (open)
       audioMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
   };
+  const qualityName = (p: any) => {
+    const level = p?.qualityLevels?.[p.currentQuality];
+    return level?.resolution
+      ? `${level.resolution.split('x')[1]}p`
+      : (level?.label ?? '—');
+  };
   quality.onclick = () => {
     const open = qualityMenu.hidden;
     closeMenus();
     const p = getPlayer(),
       list = qualityMenu.querySelector<HTMLElement>('.track-options')!;
     list.replaceChildren();
+    if (p?.qualityLevels?.length)
+      option(
+        list,
+        '-1',
+        `Auto · ${qualityName(p)}`,
+        p.autoQuality,
+        async () => {
+          await p.selectQuality(-1);
+          syncQuality();
+          closeMenus();
+          quality.focus();
+        },
+      );
     for (const level of p?.qualityLevels ?? [])
       option(
         list,
         String(level.id),
         level.label,
-        p.selectedQuality === level.id,
+        !p.autoQuality && p.selectedQuality === level.id,
         async () => {
           for (const button of list.querySelectorAll('button'))
             button.disabled = true;
           try {
             await p.selectQuality(level.id);
+            syncQuality();
             closeMenus();
             quality.focus();
           } catch (e: any) {
@@ -384,8 +443,18 @@ export function mountControls(
     )
       closeMenus();
   });
+  listen(screen, 'pointerenter', () => {
+    keyboardOwner = screen;
+    showControls();
+  });
+  listen(screen, 'pointerdown', () => {
+    keyboardOwner = screen;
+  });
   listen(screen, 'pointermove', showControls);
-  listen(screen, 'focusin', showControls);
+  listen(screen, 'focusin', () => {
+    keyboardOwner = screen;
+    showControls();
+  });
   listen(screen, 'pointerleave', () => {
     if (
       !video.paused &&
@@ -396,8 +465,29 @@ export function mountControls(
     )
       screen.classList.add('controls-hidden');
   });
-  listen(screen, 'keydown', (e) => {
-    if ((e.target as HTMLElement).matches('input,select')) return;
+  listen(document, 'keydown', (e) => {
+    if (
+      keyboardOwner !== screen ||
+      !getPlayer() ||
+      e.defaultPrevented ||
+      e.altKey ||
+      e.ctrlKey ||
+      e.metaKey
+    )
+      return;
+    const target = e.target as HTMLElement;
+    if (target !== document.body && !screen.contains(target)) return;
+    if (
+      target.closest(
+        'input,select,textarea,[contenteditable="true"],[role="textbox"]',
+      )
+    )
+      return;
+    if (
+      target.closest('.video-popup') &&
+      [' ', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+    )
+      return;
     if (e.key === 'Escape') {
       closeMenus();
       showStats(false);
@@ -408,12 +498,20 @@ export function mountControls(
       openMenu();
       return;
     }
-    if (e.target !== screen && [' ', 'Enter'].includes(e.key)) return;
+    if (e.target !== screen && e.key === 'Enter') return;
     switch (e.key.toLowerCase()) {
       case ' ':
       case 'k':
         e.preventDefault();
-        void togglePlay();
+        if (!e.repeat) void togglePlay();
+        break;
+      case 'arrowleft':
+        e.preventDefault();
+        skipBy(-10);
+        break;
+      case 'arrowright':
+        e.preventDefault();
+        skipBy(10);
         break;
       case 'm':
         mute.click();
@@ -426,6 +524,40 @@ export function mountControls(
         break;
     }
   });
+  function seekBounds() {
+    const p = getPlayer();
+    if (!p || !video.readyState) return;
+    if (!p.isLive && Number.isFinite(video.duration))
+      return { start: 0, end: video.duration };
+    const ranges = p.protocol === 'hls' ? video.seekable : video.buffered;
+    if (!ranges.length) return;
+    const start = ranges.start(0),
+      end = ranges.end(ranges.length - 1) - 0.1;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return;
+    return { start, end };
+  }
+  function skipBy(seconds: number) {
+    const bounds = seekBounds();
+    if (!bounds) return;
+    const target = Math.max(
+      bounds.start,
+      Math.min(bounds.end, video.currentTime + seconds),
+    );
+    const delta = target - video.currentTime;
+    video.currentTime = target;
+    el('seek-feedback').textContent =
+      `${delta < 0 ? '−' : '+'}${Math.abs(delta).toFixed(Math.abs(delta) < 9.9 ? 1 : 0)} s`;
+    el('seek-feedback').classList.add('visible');
+    clearTimeout(feedbackTimer);
+    feedbackTimer = setTimeout(
+      () => el('seek-feedback').classList.remove('visible'),
+      900,
+    );
+    showControls();
+  }
+  el('skip-back').onclick = () => skipBy(-10);
+  el('skip-forward').onclick = () => skipBy(10);
   const seek = el('seek-bar') as HTMLInputElement;
   seek.oninput = () => {
     video.currentTime = Number(seek.value);
@@ -434,6 +566,27 @@ export function mountControls(
     const n = Math.max(0, Math.floor(seconds));
     return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
   };
+  function syncQuality() {
+    const p = getPlayer();
+    const qualityLabel = p?.qualityLevels?.length
+      ? `${p.autoQuality ? 'Auto · ' : ''}${qualityName(p)}`
+      : '—';
+    el('stats-quality').textContent = qualityLabel;
+    quality.classList.toggle('unavailable', !p?.qualityLevels?.length);
+    el('quality-mode').textContent = p?.autoQuality ? 'Auto' : 'Quality';
+    el('quality-resolution').textContent = p?.qualityLevels?.length
+      ? qualityName(p)
+      : '—';
+    quality.title = `Quality: ${qualityLabel}`;
+    const autoOption =
+      qualityMenu.querySelector<HTMLElement>('[data-track="-1"]');
+    if (autoOption) {
+      autoOption.querySelector('.quality-resolution')!.textContent =
+        qualityName(p);
+      autoOption.setAttribute('aria-checked', String(p?.autoQuality));
+      autoOption.firstElementChild!.textContent = p?.autoQuality ? '✓' : '';
+    }
+  }
   const statsTimer = setInterval(() => {
     (quality as HTMLButtonElement).disabled =
       (getPlayer()?.qualityLevels?.length ?? 0) < 2;
@@ -441,6 +594,18 @@ export function mountControls(
     const p = getPlayer(),
       q = video.getVideoPlaybackQuality(),
       d = p?.diagnostics;
+    syncQuality();
+    const bounds = seekBounds();
+    (el('skip-back') as HTMLButtonElement).disabled =
+      !bounds || video.currentTime <= bounds.start + 0.1;
+    (el('skip-forward') as HTMLButtonElement).disabled =
+      !bounds || video.currentTime >= bounds.end - 0.1;
+    audio.title = p?.audioTracks?.length
+      ? 'Audio language'
+      : 'No alternate audio tracks';
+    cc.title = p?.subtitleTracks?.length
+      ? 'Subtitles (C)'
+      : 'No subtitles available';
     el('live-button').hidden = !p?.isLive;
     seek.hidden = !p || p.isLive;
     el('playback-time').hidden = seek.hidden;
@@ -511,6 +676,8 @@ export function mountControls(
       abort.abort();
       observer.disconnect();
       clearTimeout(hideTimer);
+      clearTimeout(feedbackTimer);
+      if (keyboardOwner === screen) keyboardOwner = undefined;
       clearInterval(statsTimer);
       for (const child of Array.from(screen.children))
         if (!originalChildren.has(child)) child.remove();

@@ -22,10 +22,12 @@ export class ResourceClient {
     resource: Resource,
   ): Promise<{ data: Uint8Array; url: string; elapsed: number }> {
     let last: unknown;
+    const started = performance.now();
     for (let attempt = 0; attempt <= (this.options.retries ?? 2); attempt++) {
       this.signal.throwIfAborted();
       try {
-        return await this.once(resource);
+        const result = await this.once(resource);
+        return { ...result, elapsed: performance.now() - started };
       } catch (error) {
         last = error;
         this.signal.throwIfAborted();
