@@ -15,6 +15,9 @@ export interface PlaybackEngine extends EventTarget {
   readonly subtitleTracks: any[];
   readonly selectedAudioTrack: string;
   readonly isLive?: boolean;
+  readonly qualityLevels?: any[];
+  readonly selectedQuality?: number;
+  selectQuality?(index: number): Promise<void>;
   seekToLive?(): void;
   init(): Promise<void>;
   play(): Promise<void>;
@@ -37,6 +40,8 @@ const events = [
   'error',
   'autoplayblocked',
   'audiochange',
+  'qualitylevels',
+  'qualitychange',
   'subtitletracks',
   'subtitlechange',
   'subtitlemetrics',
@@ -160,6 +165,17 @@ export class PlayerCore extends EventTarget {
   }
   get selectedAudioTrack() {
     return this.engine?.selectedAudioTrack ?? '';
+  }
+  get qualityLevels() {
+    return this.engine?.qualityLevels ?? [];
+  }
+  get selectedQuality() {
+    return this.engine?.selectedQuality ?? -1;
+  }
+  async selectQuality(index: number) {
+    if (!this.engine?.selectQuality)
+      throw new Error('Quality selection is not supported');
+    await this.engine.selectQuality(index);
   }
   subtitleHistory(name: string) {
     return this.engine?.subtitleHistory?.(name) ?? [];

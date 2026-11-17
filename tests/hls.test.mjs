@@ -144,3 +144,111 @@ test('HTTP client retries, slices ignored range requests and aborts pending read
     await new Promise((r) => server.close(r));
   }
 });
+
+const { compatibleVariants, alignRendition, segmentAt, switchBoundary } =
+  await module('renditions');
+test('codec filtering excludes declared HE-AAC/HEVC and Dolby alternatives', () => {
+  const variants = [
+    { url: 'a', bandwidth: 1, codecs: 'avc1.64001f,mp4a.40.2' },
+    { url: 'b', bandwidth: 2, codecs: 'avc1.64001f,mp4a.40.5' },
+    { url: 'c', bandwidth: 3, codecs: 'hvc1.1.6.L93,ac-3' },
+  ];
+  assert.deepEqual(
+    compatibleVariants(variants).map((v) => v.url),
+    ['a'],
+  );
+});
+test('renditions with different media sequence numbers align by program date', () => {
+  const reference = parsePlaylist(
+    vod(
+      '#EXT-X-PROGRAM-DATE-TIME:2026-01-01T00:00:10Z\n#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts',
+      20,
+    ),
+    base,
+  );
+  reference.segments = reference.segments.map((s) => ({
+    ...s,
+    start: s.start + 30,
+  }));
+  const audio = parsePlaylist(
+    vod(
+      '#EXT-X-PROGRAM-DATE-TIME:2026-01-01T00:00:12Z\n#EXTINF:2,\na.aac',
+      400,
+    ),
+    base,
+  );
+  assert.equal(alignRendition(audio, reference).segments[0].start, 32);
+  assert.equal(segmentAt(reference, 31), 0);
+  assert.equal(switchBoundary(reference, 30), 32);
+});
+test('live rendition switch rejects unrelated timelines; VOD uses presentation positions', () => {
+  const a = parsePlaylist(vod('#EXTINF:2,\na.ts', 1), base),
+    b = parsePlaylist(vod('#EXTINF:2,\nb.ts', 99), base);
+  assert.throws(() => alignRendition(a, b), /overlapping/);
+  a.live = false;
+  b.live = false;
+  assert.equal(alignRendition(a, b).segments[0].start, 0);
+  assert.throws(() => switchBoundary(a, 1.9), /No future/);
+});
+
+const { bufferedAhead, nextGapPosition } = await module('buffer');
+const ranges = (items) => ({
+  length: items.length,
+  start: (i) => items[i][0],
+  end: (i) => items[i][1],
+});
+test('buffer accounting merges frame-sized holes, but not missing segments', () => {
+  assert.equal(
+    bufferedAhead(
+      ranges([
+        [0, 10],
+        [10.033, 30],
+      ]),
+      7,
+    ),
+    23,
+  );
+  assert.equal(
+    bufferedAhead(
+      ranges([
+        [0, 10],
+        [11, 30],
+      ]),
+      7,
+    ),
+    3,
+  );
+  assert.equal(bufferedAhead(ranges([[10, 20]]), 0), 0);
+});
+test('gap recovery only crosses tiny holes at the playback boundary', () => {
+  assert.equal(
+    nextGapPosition(
+      ranges([
+        [0, 10],
+        [10.033, 30],
+      ]),
+      9.99,
+    ),
+    10.033 + 0.001,
+  );
+  assert.equal(
+    nextGapPosition(
+      ranges([
+        [0, 10],
+        [11, 30],
+      ]),
+      10,
+    ),
+    undefined,
+  );
+  assert.equal(
+    nextGapPosition(
+      ranges([
+        [0, 10],
+        [10.033, 30],
+      ]),
+      7,
+    ),
+    undefined,
+  );
+});

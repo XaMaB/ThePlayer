@@ -1,6 +1,6 @@
 # HLS implementation plan
 
-Status: original experimental baseline implemented. See [current support](hls-support.md) and [architecture research](hls-research.md). The stages below describe the full intended scope, not the capabilities of the baseline.
+Status: original experimental baseline, separate AAC audio and manual quality switching implemented. Automatic ABR, LL-HLS and TTML remain subsequent stages. See [current support](hls-support.md) and [architecture research](hls-research.md). The stages below describe the full intended scope, not the capabilities of the baseline.
 
 ## Specification baseline
 

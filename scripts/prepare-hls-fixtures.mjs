@@ -13,7 +13,7 @@ const ffmpeg = (...args) =>
     ['-hide_banner', '-loglevel', 'error', '-y', ...args],
     { stdio: 'inherit' },
   );
-for (const kind of ['ts', 'fmp4', 'bframes']) {
+for (const kind of ['ts', 'fmp4', 'bframes', 'bframes-high']) {
   const dir = path.join(root, kind);
   await mkdir(dir, { recursive: true });
   ffmpeg(
@@ -22,7 +22,9 @@ for (const kind of ['ts', 'fmp4', 'bframes']) {
     '-f',
     'lavfi',
     '-i',
-    'testsrc2=size=320x180:rate=25',
+    kind === 'bframes-high'
+      ? 'testsrc2=size=640x360:rate=25'
+      : 'testsrc2=size=320x180:rate=25',
     '-f',
     'lavfi',
     '-i',
@@ -34,7 +36,7 @@ for (const kind of ['ts', 'fmp4', 'bframes']) {
     '-threads',
     '2',
     '-preset',
-    kind === 'bframes' ? 'fast' : 'ultrafast',
+    kind.startsWith('bframes') ? 'fast' : 'ultrafast',
     '-g',
     '50',
     '-keyint_min',
@@ -125,3 +127,164 @@ for (let sequence = 0; sequence < 9; sequence++) {
 }
 await writeFile(path.join(implicit, 'index.m3u8'), playlist);
 await writeFile(path.join(implicit, 'key.bin'), key);
+
+// Independent video and audio renditions with aligned presentation timestamps.
+for (const [name, width, height] of [
+  ['video-low', 320, 180],
+  ['video-high', 640, 360],
+]) {
+  const dir = path.join(root, name);
+  await mkdir(dir, { recursive: true });
+  ffmpeg(
+    '-filter_threads',
+    '1',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=size=${width}x${height}:rate=25`,
+    '-t',
+    '36',
+    '-an',
+    '-c:v',
+    'libx264',
+    '-threads',
+    '2',
+    '-preset',
+    'ultrafast',
+    '-g',
+    '50',
+    '-keyint_min',
+    '50',
+    '-sc_threshold',
+    '0',
+    '-pix_fmt',
+    'yuv420p',
+    '-f',
+    'hls',
+    '-hls_time',
+    '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_type',
+    'fmp4',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.m4s'),
+    path.join(dir, 'index.m3u8'),
+  );
+}
+for (const [name, frequency] of [
+  ['audio-en', 440],
+  ['audio-es', 880],
+]) {
+  const dir = path.join(root, name);
+  await mkdir(dir, { recursive: true });
+  ffmpeg(
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=${frequency}:sample_rate=48000`,
+    '-t',
+    '36',
+    '-vn',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '96k',
+    '-f',
+    'hls',
+    '-hls_time',
+    '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_type',
+    'fmp4',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.m4s'),
+    path.join(dir, 'index.m3u8'),
+  );
+}
+await writeFile(
+  path.join(root, 'renditions.m3u8'),
+  `#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="audio-en/index.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Spanish",LANGUAGE="es",DEFAULT=NO,AUTOSELECT=YES,URI="audio-es/index.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=500000,CODECS="avc1.42c00c,mp4a.40.2",RESOLUTION=320x180,AUDIO="audio"
+video-low/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=1500000,CODECS="avc1.42c01e,mp4a.40.2",RESOLUTION=640x360,AUDIO="audio"
+video-high/index.m3u8
+`,
+);
+
+// Deliberately give the high rendition a different decode-time epoch.
+// Both variants still describe the same presentation positions in their playlists.
+const shifted = path.join(root, 'video-shifted');
+await mkdir(shifted, { recursive: true });
+const timeBase = JSON.parse(
+  execFileSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'stream=time_base',
+      '-of',
+      'json',
+      path.join(root, 'video-high/init.mp4'),
+    ],
+    { encoding: 'utf8' },
+  ),
+).streams[0].time_base;
+const scale = Number(timeBase.split('/')[1]) / Number(timeBase.split('/')[0]);
+function shiftTfdt(data) {
+  for (let at = 0; at < data.length; ) {
+    const size = data.readUInt32BE(at),
+      type = data.toString('ascii', at + 4, at + 8);
+    if (size < 8 || at + size > data.length)
+      throw new Error('Invalid fixture box');
+    const body = data.subarray(at + 8, at + size);
+    if (type === 'moof' || type === 'traf') shiftTfdt(body);
+    if (type === 'tfdt') {
+      if (body[0] === 1)
+        body.writeBigUInt64BE(body.readBigUInt64BE(4) + BigInt(120 * scale), 4);
+      else body.writeUInt32BE(body.readUInt32BE(4) + 120 * scale, 4);
+    }
+    at += size;
+  }
+}
+await writeFile(
+  path.join(shifted, 'init.mp4'),
+  await readFile(path.join(root, 'video-high/init.mp4')),
+);
+for (let i = 0; i < 18; i++) {
+  const name = `segment${String(i).padStart(2, '0')}.m4s`,
+    data = await readFile(path.join(root, 'video-high', name));
+  shiftTfdt(data);
+  await writeFile(path.join(shifted, name), data);
+}
+await writeFile(
+  path.join(shifted, 'index.m3u8'),
+  await readFile(path.join(root, 'video-high/index.m3u8')),
+);
+const renditionManifest = await readFile(
+  path.join(root, 'renditions.m3u8'),
+  'utf8',
+);
+await writeFile(
+  path.join(root, 'renditions.m3u8'),
+  renditionManifest.replace(
+    'video-high/index.m3u8',
+    'video-shifted/index.m3u8',
+  ),
+);
+
+await writeFile(
+  path.join(root, 'ts-renditions.m3u8'),
+  `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=320x180
+bframes/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=640x360
+bframes-high/index.m3u8
+`,
+);

@@ -1,3 +1,4 @@
+import { bufferedAhead, nextGapPosition } from './buffer';
 import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
   parsePlaylist,
@@ -8,8 +9,13 @@ import {
   type Key,
 } from './playlist';
 import { ResourceClient, delay, type NetworkOptions } from './network';
-import { inspectInit, decodeTime, type Track } from './mp4';
-import { TsTransmuxer } from './transport-stream';
+import { MediaLane, type PreparedSegment } from './media-lane';
+import {
+  compatibleVariants,
+  alignRendition,
+  segmentAt,
+  switchBoundary,
+} from './renditions';
 import { nativeCue, parseVtt } from './subtitles';
 
 export interface HlsSource {
@@ -32,6 +38,7 @@ export class HlsEngine extends EventTarget {
     requests: 0,
     retries: 0,
     bandwidth: 0,
+    switches: [] as { kind: string; name: string; effectiveAt: number }[],
     startup: { firstFrameMs: null as number | null },
     buffer: {} as Record<string, unknown>,
   };
@@ -41,21 +48,17 @@ export class HlsEngine extends EventTarget {
   subtitleTracks: any[] = [];
   selectedAudioTrack = '';
   qualityLevels: any[] = [];
-  selectedQuality = -1;
+  selectedQuality = 0;
   private abort = new AbortController();
   private client: ResourceClient;
-  private playlist?: Playlist;
+  private get playlist() {
+    return this.main?.playlist;
+  }
   private master?: Playlist;
   private media?: MediaSource;
   private mediaUrl?: string;
-  private buffer?: SourceBuffer;
-  private tracks: Track[] = [];
-  private mapId = '';
-  private codec = '';
-  private transmuxer = new TsTransmuxer();
-  private timelineOffset = 0;
-  private discontinuity = -1;
-  private next = 0;
+  private main?: MediaLane;
+  private audio?: MediaLane;
   private generation = 0;
   private initial = true;
   private started = false;
@@ -66,8 +69,19 @@ export class HlsEngine extends EventTarget {
   private selectedSubtitle = '';
   private subtitleCounters = new SubtitleCounters();
   private keys = new Map<string, Promise<CryptoKey>>();
-  private loadedAt = 0;
   private loadTime = 0;
+  private offsets = new Map<number, number>();
+  private switches: {
+    kind: 'audio' | 'quality';
+    index: number;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }[] = [];
+  private get timelineOffset() {
+    return this.main
+      ? (this.offsets.get(this.main.discontinuity) ?? this.main.offset)
+      : 0;
+  }
   constructor(
     readonly video: HTMLVideoElement,
     readonly source: HlsSource,
@@ -119,6 +133,7 @@ export class HlsEngine extends EventTarget {
   private fail(error: unknown) {
     if (!this.abort.signal.aborted) {
       this.failed = true;
+      for (const request of this.switches.splice(0)) request.reject(error);
       this.state('error');
       this.emit(
         'error',
@@ -139,6 +154,14 @@ export class HlsEngine extends EventTarget {
       throw new Error('Unsupported HLS feature: ' + p.unsupported.join(', '));
     return p;
   }
+  private lane(p: Playlist, role: 'main' | 'audio') {
+    return new MediaLane(
+      p,
+      role,
+      (r) => this.client.get(r),
+      (data, key, sequence) => this.decrypt(data, key, sequence),
+    );
+  }
   async init() {
     this.state('connecting');
     this.loadTime = performance.now();
@@ -147,20 +170,34 @@ export class HlsEngine extends EventTarget {
     let p = await this.readPlaylist(this.source.url);
     if (p.variants.length) {
       this.master = p;
-      const usable = p.variants.filter(
-        (v) =>
-          !v.audio ||
-          !p.renditions.some(
-            (r) => r.type === 'AUDIO' && r.group === v.audio && r.url,
-          ),
-      );
-      if (!usable.length)
-        throw new Error(
-          'External HLS audio renditions are not yet implemented',
+      let usable = compatibleVariants(p.variants);
+      if (usable.some((v) => v.resolution || v.codecs?.includes('avc')))
+        usable = usable.filter(
+          (v) => v.resolution || v.codecs?.includes('avc'),
         );
-      const variant = [...usable].sort((a, b) => a.bandwidth - b.bandwidth)[0];
-      // The baseline selects a rendition once. Do not advertise ABR until switching is tested.
+      if (!usable.length) throw new Error('No supported AVC/AAC rendition');
+      usable.sort((a, b) => a.bandwidth - b.bandwidth);
+      const variant = usable[0];
+      // Restrict switches to one audio/subtitle group until cross-group transitions are implemented.
+      this.qualityLevels = usable
+        .filter(
+          (v) => v.audio === variant.audio && v.subtitles === variant.subtitles,
+        )
+        .map((v, id) => ({
+          ...v,
+          id,
+          label: v.resolution
+            ? `${v.resolution.split('x')[1]}p · ${(v.bandwidth / 1e6).toFixed(2)} Mb/s`
+            : `${(v.bandwidth / 1e6).toFixed(2)} Mb/s`,
+        }));
       p = await this.readPlaylist(variant.url);
+      this.audioTracks = this.master.renditions
+        .filter((r) => r.type === 'AUDIO' && r.group === variant.audio && r.url)
+        .map((r, index) => ({
+          ...r,
+          name: 'hls-audio-' + index,
+          label: r.name,
+        }));
       this.subtitleTracks = this.master.renditions
         .filter(
           (r) =>
@@ -174,10 +211,22 @@ export class HlsEngine extends EventTarget {
           url: r.url,
         }));
     }
-    this.playlist = p;
+    this.main = this.lane(p, 'main');
     this.isLive = p.live;
-    this.loadedAt = performance.now();
-    this.next = this.startIndex(p);
+    this.main.next = this.startIndex(p);
+    const audioTrack =
+      this.audioTracks.find((t) => t.default) ?? this.audioTracks[0];
+    if (audioTrack) {
+      this.audio = this.lane(
+        alignRendition(await this.readPlaylist(audioTrack.url), p),
+        'audio',
+      );
+      this.audio.next = segmentAt(
+        this.audio.playlist,
+        p.segments[this.main.next].start,
+      );
+      this.selectedAudioTrack = audioTrack.name;
+    }
     this.state('buffering');
     this.media = new MediaSource();
     this.mediaUrl = URL.createObjectURL(this.media);
@@ -187,6 +236,8 @@ export class HlsEngine extends EventTarget {
     this.media.duration = p.live ? Infinity : p.duration;
     this.emit('streamchange', { live: this.isLive });
     this.emit('subtitletracks', this.subtitleTracks);
+    this.emit('qualitylevels', this.qualityLevels);
+    this.emit('audiochange', audioTrack ?? null);
     void this.run().catch((error) => this.fail(error));
   }
   private startIndex(p: Playlist) {
@@ -206,64 +257,163 @@ export class HlsEngine extends EventTarget {
                 ),
             )
           : 0;
-    return Math.max(
-      0,
-      p.segments.findIndex((s) => s.start + s.duration > time),
-    );
+    return Math.min(p.segments.length - 1, segmentAt(p, time));
+  }
+  private lanes() {
+    return [this.main, this.audio].filter((lane): lane is MediaLane => !!lane);
   }
   private onSeek() {
-    if (this.initial || !this.playlist) return;
-    const time = this.video.currentTime;
-    if (
-      this.buffer &&
-      Array.from({ length: this.buffer.buffered.length }, (_, i) => [
-        this.buffer!.buffered.start(i),
-        this.buffer!.buffered.end(i),
-      ]).some(([start, end]) => time >= start && time < end - 0.1)
-    )
-      return;
-    const index = this.playlist.segments.findIndex(
-      (s) => time >= s.start && time < s.start + s.duration,
-    );
-    if (index < 0) return;
+    if (this.initial || !this.main) return;
     this.generation++;
-    this.next = index;
+    for (const lane of this.lanes())
+      if (lane.ahead(this.video.currentTime) < 0.1)
+        lane.next = segmentAt(lane.playlist, this.video.currentTime);
     this.ended = false;
   }
   private ahead() {
-    const b = this.video.buffered,
-      t = this.video.currentTime;
-    for (let i = 0; i < b.length; i++)
-      if (t >= b.start(i) - 0.1 && t <= b.end(i)) return b.end(i) - t;
-    return 0;
+    return bufferedAhead(this.video.buffered, this.video.currentTime);
+  }
+
+  private async refresh(lane: MediaLane) {
+    const p = lane.playlist;
+    if (
+      !p.live ||
+      performance.now() - lane.refreshedAt < p.targetDuration * 1000
+    )
+      return;
+    const token = this.generation,
+      nextSequence =
+        p.segments[lane.next]?.sequence ?? p.segments.at(-1)!.sequence + 1;
+    const updated = alignPlaylist(await this.readPlaylist(p.url), p);
+    lane.playlist = updated;
+    lane.refreshedAt = performance.now();
+    lane.next =
+      token === this.generation
+        ? updated.segments.findIndex((s) => s.sequence >= nextSequence)
+        : segmentAt(updated, this.video.currentTime);
+    if (lane.next < 0) lane.next = updated.segments.length;
+  }
+  private assertLayout(prepared: PreparedSegment, lane: MediaLane) {
+    if (
+      lane.role === 'main' &&
+      this.audio &&
+      prepared.tracks.some((t) => t.kind === 'audio')
+    )
+      throw new Error('External audio requires a video-only main rendition');
+    const codecs = prepared.tracks.map((t) => t.codec).join(',');
+    if (
+      !MediaSource.isTypeSupported(
+        `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codecs}"`,
+      )
+    )
+      throw new Error('Unsupported rendition codec');
+  }
+  private async appendPrepared(lane: MediaLane, prepared: PreparedSegment) {
+    this.assertLayout(prepared, lane);
+    lane.configure(this.media!, prepared);
+    const offset =
+      lane.role === 'audio'
+        ? this.offsets.get(prepared.segment.discontinuity)
+        : lane.discontinuity !== prepared.segment.discontinuity
+          ? prepared.segment.start - prepared.rawStart
+          : lane.offset;
+    if (offset === undefined)
+      throw new Error('Audio discontinuity has no video clock anchor');
+    if (
+      lane.role === 'main' &&
+      !this.offsets.has(prepared.segment.discontinuity)
+    )
+      this.offsets.set(prepared.segment.discontinuity, offset);
+    await lane.append(prepared, offset, (buffer, action) =>
+      this.operation(buffer, action),
+    );
+    this.diagnostics.objects++;
+    if (lane.role === 'main')
+      this.diagnostics.bandwidth =
+        (prepared.bytes * 8) / Math.max(0.001, prepared.elapsed / 1000);
   }
   private async run() {
+    // Install every SourceBuffer before appending media, preserving shared A/V ownership.
+    const first = await Promise.all(
+      this.lanes().map(async (lane) => ({
+        lane,
+        prepared: await lane.prepare(),
+      })),
+    );
+    for (const { lane, prepared } of first) {
+      this.assertLayout(prepared, lane);
+      lane.configure(this.media!, prepared);
+    }
+    for (const { lane, prepared } of first) {
+      await this.appendPrepared(lane, prepared);
+      lane.next++;
+    }
+    this.publishCatalog();
     while (!this.abort.signal.aborted && !this.failed) {
-      let p = this.playlist!;
-      if (
-        p.live &&
-        performance.now() - this.loadedAt >= p.targetDuration * 1000
-      ) {
-        const nextSequence =
-          p.segments[this.next]?.sequence ?? p.segments.at(-1)!.sequence + 1;
-        const updated = await this.readPlaylist(p.url);
-        p = this.playlist = alignPlaylist(updated, p);
-        this.loadedAt = performance.now();
-        this.next = p.segments.findIndex((s) => s.sequence >= nextSequence);
-        if (this.next < 0) this.next = p.segments.length;
-        if (this.isLive !== p.live) {
-          this.isLive = p.live;
-          this.emit('streamchange', { live: p.live });
-          if (!p.live)
-            this.media!.duration =
-              p.segments.at(-1)!.start + p.segments.at(-1)!.duration;
+      if (this.switches.length) {
+        const request = this.switches.shift()!;
+        try {
+          await this.switchRendition(request.kind, request.index);
+          request.resolve();
+        } catch (error) {
+          request.reject(error);
         }
+        continue;
+      }
+      for (const lane of this.lanes()) await this.refresh(lane);
+      const p = this.main!.playlist;
+      if (this.isLive !== p.live) {
+        this.isLive = p.live;
+        this.emit('streamchange', { live: p.live });
+        if (!p.live)
+          this.media!.duration =
+            p.segments.at(-1)!.start + p.segments.at(-1)!.duration;
+      }
+      if (this.initial && this.video.buffered.length) {
+        this.video.currentTime = this.video.buffered.start(0) + 0.001;
+        this.initial = false;
+        if (this.source.autoplay !== false) void this.play();
+      }
+      if (!this.video.paused && this.video.readyState < 3) {
+        const position = nextGapPosition(
+          this.video.buffered,
+          this.video.currentTime,
+        );
+        if (position !== undefined) this.video.currentTime = position;
       }
       this.updateDiagnostics();
-      if (this.ahead() >= this.targetBuffer || this.next >= p.segments.length) {
+      if (this.media?.readyState === 'open' && p.live) {
+        const last = p.segments.at(-1)!;
+        this.media.setLiveSeekableRange(
+          p.segments[0].start,
+          last.start + last.duration,
+        );
+      }
+      const candidates = this.lanes()
+        .filter(
+          (lane) =>
+            lane.next < lane.playlist.segments.length &&
+            lane.ahead(this.video.currentTime) < this.targetBuffer,
+        )
+        .sort(
+          (a, b) =>
+            a.ahead(this.video.currentTime) - b.ahead(this.video.currentTime),
+        );
+      let lane = candidates[0];
+      if (
+        lane?.role === 'audio' &&
+        !this.offsets.has(lane.playlist.segments[lane.next].discontinuity)
+      ) {
+        if (this.main!.next < this.main!.playlist.segments.length)
+          lane = this.main!;
+        else throw new Error('Audio/video discontinuities do not match');
+      }
+      if (!lane) {
         if (
           !p.live &&
-          this.next >= p.segments.length &&
+          this.lanes().every(
+            (l) => !l.playlist.live && l.next >= l.playlist.segments.length,
+          ) &&
           !this.ended &&
           this.media?.readyState === 'open'
         ) {
@@ -273,107 +423,108 @@ export class HlsEngine extends EventTarget {
         await delay(150, this.abort.signal);
         continue;
       }
-      const segment = p.segments[this.next],
-        token = this.generation;
-      if (segment.gap) {
-        throw new Error('HLS GAP recovery is not yet implemented');
-      }
-      const response = await this.client.get(segment);
-      let data = await this.decrypt(
-        response.data,
-        segment.key,
-        segment.sequence,
-      );
+      const token = this.generation;
+      const prepared = await lane.prepare();
       if (token !== this.generation) continue;
-      let init: Uint8Array | undefined, rawStart: number;
-      const discontinuity = segment.discontinuity !== this.discontinuity;
-      if (discontinuity) {
-        this.transmuxer.reset();
-        this.mapId = '';
-      }
-      if (segment.map) {
-        const id = JSON.stringify(segment.map);
-        if (id !== this.mapId) {
-          const map = await this.client.get(segment.map);
-          if (segment.key && !segment.key.iv)
-            throw new Error('Encrypted initialization needs an explicit IV');
-          init = await this.decrypt(map.data, segment.key, segment.sequence);
-          this.tracks = inspectInit(init);
-          this.mapId = id;
-        }
-        rawStart = decodeTime(data, this.tracks);
-      } else if (data[0] === 0x47) {
-        const result = this.transmuxer.transmux(data, segment.duration);
-        this.tracks = result.tracks;
-        data = result.media;
-        rawStart = result.start;
-        if (
-          !this.buffer ||
-          discontinuity ||
-          this.codec !== this.tracks.map((t) => t.codec).join(',')
-        )
-          init = result.init;
-      } else throw new Error('Expected MPEG-TS or fMP4 with EXT-X-MAP');
-      if (token !== this.generation) continue;
-      const codec = this.tracks.map((t) => t.codec).join(','),
-        mime = `${this.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codec}"`;
-      if (!MediaSource.isTypeSupported(mime))
-        throw new Error('Unsupported browser codec: ' + codec);
-      if (!this.buffer) {
-        this.buffer = this.media!.addSourceBuffer(mime);
-        this.buffer.mode = 'segments';
-      } else if (codec !== this.codec) {
-        this.buffer.changeType(mime);
-      }
-      this.codec = codec;
-      if (discontinuity) {
-        this.timelineOffset = segment.start - rawStart;
-        this.buffer.timestampOffset = this.timelineOffset;
-        this.discontinuity = segment.discontinuity;
-      }
-      if (init) await this.append(init);
-      await this.append(data);
-      this.next++;
-      this.diagnostics.objects++;
-      this.diagnostics.bandwidth =
-        (response.data.length * 8) / Math.max(0.001, response.elapsed / 1000);
-      this.catalog = {
-        profile: 'hls',
-        tracks: this.tracks.map((t) => ({ ...t, role: t.kind })),
-        subtitles: this.subtitleTracks,
-      };
-      if (!this.started) {
-        this.emit('catalog', this.catalog);
-        this.started = true;
-        this.video.requestVideoFrameCallback(() => {
-          if (!this.abort.signal.aborted)
-            this.diagnostics.startup.firstFrameMs =
-              performance.now() - this.loadTime;
-        });
-      }
-      if (this.initial && this.video.buffered.length) {
-        this.video.currentTime = this.video.buffered.start(0) + 0.001;
-        this.initial = false;
-        if (this.source.autoplay !== false) void this.play();
-      }
-      if (this.media?.readyState === 'open' && p.live) {
-        const last = p.segments.at(-1)!;
-        this.media.setLiveSeekableRange(
-          p.segments[0].start,
-          last.start + last.duration,
-        );
-      }
+      await this.appendPrepared(lane, prepared);
+      if (token === this.generation) lane.next++;
       const cutoff = this.video.currentTime - 30;
       if (
         cutoff > 0 &&
-        this.buffer.buffered.length &&
-        this.buffer.buffered.start(0) < cutoff
-      ) {
-        const done = this.event(this.buffer, 'updateend');
-        this.buffer.remove(0, cutoff);
-        await done;
-      }
+        lane.buffer!.buffered.length &&
+        lane.buffer!.buffered.start(0) < cutoff
+      )
+        await this.operation(lane.buffer!, () =>
+          lane.buffer!.remove(0, cutoff),
+        );
     }
+  }
+  private publishCatalog() {
+    this.catalog = {
+      profile: 'hls',
+      tracks: this.lanes().flatMap((lane) =>
+        lane.tracks.map((t) => ({ ...t, role: t.kind })),
+      ),
+      subtitles: this.subtitleTracks,
+    };
+    this.emit('catalog', this.catalog);
+    if (!this.started) {
+      this.started = true;
+      this.video.requestVideoFrameCallback(() => {
+        if (!this.abort.signal.aborted)
+          this.diagnostics.startup.firstFrameMs =
+            performance.now() - this.loadTime;
+      });
+    }
+  }
+  private enqueueSwitch(kind: 'audio' | 'quality', index: number) {
+    if (this.abort.signal.aborted || this.failed)
+      return Promise.reject(new Error('HLS engine is not active'));
+    return new Promise<void>((resolve, reject) => {
+      this.switches.push({ kind, index, resolve, reject });
+    });
+  }
+  private async switchRendition(kind: 'audio' | 'quality', index: number) {
+    const old = kind === 'audio' ? this.audio : this.main;
+    if (!old) throw new Error('Rendition is not ready');
+    if (
+      (kind === 'quality' && index === this.selectedQuality) ||
+      (kind === 'audio' &&
+        this.audioTracks[index].name === this.selectedAudioTrack)
+    )
+      return;
+    const choice =
+      kind === 'audio' ? this.audioTracks[index] : this.qualityLevels[index];
+    const p = alignRendition(await this.readPlaylist(choice.url), old.playlist);
+    const lane = this.lane(p, old.role);
+    let prepared: PreparedSegment | undefined,
+      boundary = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      boundary = switchBoundary(p, this.video.currentTime);
+      lane.next = segmentAt(p, boundary);
+      const token = this.generation;
+      prepared = await lane.prepare();
+      this.assertLayout(prepared, lane);
+      if (token === this.generation && this.video.currentTime < boundary - 0.03)
+        break;
+      prepared = undefined;
+    }
+    if (!prepared)
+      throw new Error('Playback advanced beyond the switching boundary; retry');
+    this.abort.signal.throwIfAborted();
+    lane.inheritBuffer(old);
+    lane.offset = old.offset;
+    lane.discontinuity = kind === 'quality' ? -1 : old.discontinuity;
+    // Let MSE replace overlapping samples in the switching segment. Removing at
+    // the playlist boundary first can erase the last old frame before the new
+    // rendition's first presentation timestamp (DTS and PTS may differ).
+    await this.operation(old.buffer!, () =>
+      old.buffer!.remove(boundary + prepared!.segment.duration, Infinity),
+    );
+    await this.appendPrepared(lane, prepared);
+    lane.next++;
+    this.ended = false;
+    if (kind === 'audio') {
+      this.audio = lane;
+      this.selectedAudioTrack = choice.name;
+      this.emit('audiochange', { ...choice, effectiveAt: boundary });
+    } else {
+      this.main = lane;
+      this.selectedQuality = index;
+      this.emit('qualitychange', { ...choice, effectiveAt: boundary });
+    }
+    this.diagnostics.switches.push({
+      kind,
+      name: kind === 'audio' ? choice.name : String(index),
+      effectiveAt: boundary,
+    });
+    this.diagnostics.switches = this.diagnostics.switches.slice(-20);
+    this.publishCatalog();
+  }
+  async selectQuality(index: number) {
+    if (!Number.isInteger(index) || !this.qualityLevels[index])
+      throw new Error('Unknown HLS quality');
+    await this.enqueueSwitch('quality', index);
   }
   private updateDiagnostics() {
     this.diagnostics.bytes = this.client.bytes;
@@ -452,16 +603,41 @@ export class HlsEngine extends EventTarget {
       if (this.abort.signal.aborted) stop();
     });
   }
-  private async append(data: Uint8Array) {
+  private operation(buffer: SourceBuffer, action: () => void) {
     this.abort.signal.throwIfAborted();
-    const done = this.event(this.buffer!, 'updateend');
-    try {
-      this.buffer!.appendBuffer(data as BufferSource);
-    } catch (error) {
-      void done.catch(() => {});
-      throw error;
-    }
-    await done;
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        buffer.removeEventListener('updateend', done);
+        buffer.removeEventListener('error', bad);
+        this.abort.signal.removeEventListener('abort', stop);
+      };
+      const done = () => {
+          cleanup();
+          resolve();
+        },
+        bad = () => {
+          cleanup();
+          reject(new Error('HLS SourceBuffer operation failed'));
+        },
+        stop = () => {
+          cleanup();
+          reject(this.abort.signal.reason);
+        };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('HLS SourceBuffer timeout'));
+      }, 15000);
+      buffer.addEventListener('updateend', done, { once: true });
+      buffer.addEventListener('error', bad, { once: true });
+      this.abort.signal.addEventListener('abort', stop, { once: true });
+      try {
+        action();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    });
   }
   async play() {
     try {
@@ -473,8 +649,10 @@ export class HlsEngine extends EventTarget {
       else if ((error as Error).name !== 'AbortError') this.fail(error);
     }
   }
-  async selectAudioTrack(_name: string) {
-    throw new Error('Alternate HLS audio is not yet implemented');
+  async selectAudioTrack(name: string) {
+    const index = this.audioTracks.findIndex((t) => t.name === name);
+    if (index < 0) throw new Error('Unknown HLS audio track');
+    await this.enqueueSwitch('audio', index);
   }
   selectSubtitleTrack(name: string) {
     const track = this.subtitleTracks.find((t) => t.name === name);
@@ -513,16 +691,32 @@ export class HlsEngine extends EventTarget {
         this.source.network ?? {},
         abort.signal,
       );
-      const seen = new Set<string>();
+      const seen = new Map<string, number>();
+      let p: Playlist | undefined,
+        refreshedAt = 0;
       while (!abort.signal.aborted) {
-        const response = await client.get({ url: track.url });
-        const p = parsePlaylist(
-          new TextDecoder().decode(response.data),
-          response.url,
-        );
+        if (
+          !p ||
+          (p.live && performance.now() - refreshedAt >= p.targetDuration * 1000)
+        ) {
+          const response = await client.get({ url: track.url });
+          const updated = parsePlaylist(
+            new TextDecoder().decode(response.data),
+            response.url,
+            this.master?.variables,
+          );
+          p = p && updated.live ? alignPlaylist(updated, p) : updated;
+          refreshedAt = performance.now();
+        }
+        const time = this.video.currentTime;
         for (const segment of p.segments) {
           const id = segment.url + JSON.stringify(segment.range);
-          if (seen.has(id)) continue;
+          if (
+            seen.has(id) ||
+            segment.start + segment.duration < time - 5 ||
+            segment.start > time + this.targetBuffer
+          )
+            continue;
           if (segment.key || segment.map)
             throw new Error(
               'Encrypted/WebVTT-in-MP4 subtitles are not yet supported',
@@ -538,17 +732,14 @@ export class HlsEngine extends EventTarget {
             this.subtitleCounters.receive();
           }
           update();
-          seen.add(id);
+          seen.set(id, segment.start + segment.duration);
         }
-        if (!p.live) break;
         for (const cue of Array.from(textTrack.cues ?? []))
           if (cue.endTime < this.video.currentTime - 30)
             textTrack.removeCue(cue);
-        const current = new Set(
-          p.segments.map((s) => s.url + JSON.stringify(s.range)),
-        );
-        for (const key of seen) if (!current.has(key)) seen.delete(key);
-        await delay(p.targetDuration * 1000, abort.signal);
+        for (const [id, end] of seen)
+          if (end < this.video.currentTime - 30) seen.delete(id);
+        await delay(500, abort.signal);
       }
     })()
       .catch((error) => {
@@ -569,6 +760,8 @@ export class HlsEngine extends EventTarget {
   async destroy() {
     if (this.abort.signal.aborted) return;
     this.abort.abort();
+    for (const request of this.switches.splice(0))
+      request.reject(new DOMException('Player closed', 'AbortError'));
     this.subtitleAbort?.abort();
     if (this.textTrack) {
       this.textTrack.mode = 'disabled';

@@ -1,3 +1,4 @@
+import { hlsExamples } from './hls-examples.mjs';
 import { SubtitleRenderer } from '../src/subtitles/renderer';
 import { mountControls } from '../src/ui/controls';
 import { ThePlayer } from '../src/player';
@@ -436,3 +437,17 @@ if (!document.body.hasAttribute('data-embed')) {
   void refresh();
 }
 Object.defineProperty(window, 'player', { get: () => player });
+
+const examples = document.getElementById('hls-example') as HTMLSelectElement;
+for (const example of hlsExamples) {
+  const option = document.createElement('option');
+  option.value = example.id;
+  option.textContent = example.name;
+  examples.append(option);
+}
+examples.addEventListener('change', () => {
+  const example = hlsExamples.find((item) => item.id === examples.value);
+  if (example)
+    (document.getElementById('hls-url') as HTMLInputElement).value =
+      example.url;
+});

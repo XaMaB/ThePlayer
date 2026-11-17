@@ -115,6 +115,8 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['renditions.m3u8', 'fetch'],
+    ['ts-renditions.m3u8', 'fetch'],
     ['ts/index.m3u8', 'fetch'],
     ['fmp4/index.m3u8', 'xhr'],
     ['encrypted/index.m3u8', 'fetch'],
@@ -164,6 +166,153 @@ try {
         await page.locator('#seek-bar').evaluate((e) => e.hidden),
         live,
       );
+
+      if (source === 'ts-renditions.m3u8') {
+        const frames = await page.evaluate(
+          () =>
+            document.querySelector('video').getVideoPlaybackQuality()
+              .totalVideoFrames,
+        );
+        await page.evaluate(() => window.player.selectQuality(1));
+        const boundary = await page.evaluate(
+          () => window.player.diagnostics.switches.at(-1).effectiveAt,
+        );
+        await page.waitForFunction(
+          (t) =>
+            document.querySelector('video').currentTime > t + 5 &&
+            document.querySelector('video').videoWidth === 640,
+          boundary,
+          { timeout: 20000 },
+        );
+        assert.ok(
+          (await page.evaluate(
+            () =>
+              document.querySelector('video').getVideoPlaybackQuality()
+                .totalVideoFrames,
+          )) >
+            frames + 100,
+        );
+        assert.ok(
+          (await page.evaluate(() => window.player.diagnostics.buffer.ahead)) <
+            16,
+        );
+      }
+      if (source === 'renditions.m3u8') {
+        assert.equal(
+          await page.evaluate(() => window.player.audioTracks.length),
+          2,
+        );
+        assert.equal(
+          await page.evaluate(() => window.player.qualityLevels.length),
+          2,
+        );
+        const mediaSource = await page.evaluate(
+          () => document.querySelector('video').src,
+        );
+        await page.evaluate(async () => {
+          const video = document.querySelector('video');
+          video.muted = false;
+          const context = new AudioContext(),
+            analyser = context.createAnalyser();
+          analyser.fftSize = 4096;
+          context.createMediaElementSource(video).connect(analyser);
+          analyser.connect(context.destination);
+          await context.resume();
+          window.testAudio = { context, analyser };
+        });
+        const tone = () =>
+          page.evaluate(() => {
+            const { context, analyser } = window.testAudio,
+              bins = new Float32Array(analyser.frequencyBinCount);
+            analyser.getFloatFrequencyData(bins);
+            let peak = 1;
+            for (let i = 2; i < bins.length; i++)
+              if (bins[i] > bins[peak]) peak = i;
+            return (peak * context.sampleRate) / analyser.fftSize;
+          });
+        await page.waitForTimeout(200);
+        assert.ok(
+          Math.abs((await tone()) - 440) < 30,
+          'English track must decode the 440 Hz fixture',
+        );
+        await page.locator('#screen').hover();
+        await page.locator('#audio-toggle').click();
+        await page.locator('#audio-menu [data-track="hls-audio-1"]').click();
+        await page.waitForFunction(
+          () => window.player.selectedAudioTrack === 'hls-audio-1',
+          null,
+          { timeout: 15000 },
+        );
+        const audioAt = await page.evaluate(
+          () => window.player.diagnostics.switches.at(-1).effectiveAt,
+        );
+        await page.waitForFunction(
+          (t) => document.querySelector('video').currentTime > t + 0.4,
+          audioAt,
+          { timeout: 12000 },
+        );
+        assert.ok(
+          Math.abs((await tone()) - 880) < 30,
+          'Spanish track must decode the 880 Hz fixture',
+        );
+        assert.equal(
+          await page.evaluate(() => document.querySelector('video').src),
+          mediaSource,
+        );
+        await page.locator('#screen').hover();
+        await page.locator('#quality-toggle').click();
+        await page.locator('#quality-menu [data-track="1"]').click();
+        await page.waitForFunction(
+          () =>
+            window.player.selectedQuality === 1 &&
+            document.querySelector('video').videoWidth === 640,
+          null,
+          { timeout: 15000 },
+        );
+        assert.equal(
+          await page.evaluate(() => document.querySelector('video').src),
+          mediaSource,
+        );
+        assert.ok(
+          Math.abs((await tone()) - 880) < 30,
+          'Quality change must keep selected audio',
+        );
+        await page.evaluate(() => document.querySelector('video').pause());
+        await page.evaluate(() =>
+          window.player.selectAudioTrack('hls-audio-0'),
+        );
+        assert.equal(
+          await page.evaluate(() => document.querySelector('video').paused),
+          true,
+        );
+        await page.evaluate(() => window.player.selectQuality(0));
+        assert.equal(
+          await page.evaluate(() => document.querySelector('video').paused),
+          true,
+        );
+        await page.evaluate(() => window.player.play());
+        const backAt = await page.evaluate(() =>
+          Math.max(
+            ...window.player.diagnostics.switches
+              .slice(-2)
+              .map((s) => s.effectiveAt),
+          ),
+        );
+        await page.waitForFunction(
+          (t) => document.querySelector('video').currentTime > t + 0.4,
+          backAt,
+          { timeout: 12000 },
+        );
+        assert.ok(
+          Math.abs((await tone()) - 440) < 30,
+          'Switching back must decode the original audio',
+        );
+        assert.equal(
+          await page.evaluate(() => document.querySelector('video').videoWidth),
+          320,
+        );
+        await page.evaluate(() => window.testAudio.context.close());
+      }
       if (source === 'fmp4/index.m3u8') {
         await page.evaluate(
           () => (document.querySelector('video').currentTime = 14),

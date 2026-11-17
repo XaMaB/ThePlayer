@@ -103,6 +103,11 @@
               >
               <div id="hls-fields" hidden>
                 <label
+                  >Public test streams<select id="hls-example">
+                    <option value="">Choose an example…</option>
+                  </select></label
+                >
+                <label
                   >Playlist URL<input
                     id="hls-url"
                     type="url"
@@ -116,8 +121,9 @@
                 >
                 <p class="notice">
                   Original HLS engine preview: AVC/AAC, TS/fMP4, live/VOD,
-                  AES-128 and WebVTT. LL-HLS parts, ABR, alternate audio and
-                  TTML are not implemented yet.
+                  AES-128, WebVTT, separate AAC audio and manual quality
+                  selection. LL-HLS parts, automatic ABR and TTML are not
+                  implemented yet.
                 </p>
               </div>
               <div id="moq-fields">

@@ -37,12 +37,14 @@ export function mountControls(
    <button id="mute-toggle" class="icon-button" title="Unmute (M)" aria-label="Unmute">${svg('muted')}</button>
    <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
    <input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback position" hidden/><span id="playback-time" class="playback-time" hidden></span><span class="control-spacer"></span>
+   <button id="quality-toggle" class="icon-button" title="Quality" aria-label="Quality" aria-expanded="false" aria-controls="quality-menu" disabled>HD</button>
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>
    <button id="info-toggle" class="icon-button" title="Player options" aria-label="Player options" aria-haspopup="menu" aria-expanded="false">${svg('more')}</button>
    <button id="fullscreen" class="icon-button" title="Fullscreen (F)" aria-label="Fullscreen">${svg('fullscreen')}</button>
   </div>
   <div id="cc-menu" class="video-popup track-menu" hidden><strong>Subtitles</strong><select id="subtitle-select" hidden aria-hidden="true"><option value="">Off</option></select><div class="track-options" role="menu" aria-label="Subtitle tracks"></div></div>
+  <div id="quality-menu" class="video-popup track-menu" hidden><strong>Quality</strong><div class="track-options" role="menu" aria-label="Quality levels"></div></div>
   <div id="audio-menu" class="video-popup track-menu" hidden><strong>Audio language</strong><div class="track-options" role="menu" aria-label="Audio tracks"></div></div>
   <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
   <section id="stats-overlay" class="stats-overlay" aria-label="mediainfo" hidden>
@@ -65,11 +67,15 @@ export function mountControls(
     stats = el('stats-overlay');
   const audio = el('audio-toggle'),
     audioMenu = el('audio-menu');
+  const quality = el('quality-toggle'),
+    qualityMenu = el('quality-menu');
   let hideTimer: ReturnType<typeof setTimeout>;
   let previous: any = null;
   screen.tabIndex = 0;
   screen.setAttribute('aria-label', 'Video player');
   const closeMenus = () => {
+    qualityMenu.hidden = true;
+    quality.setAttribute('aria-expanded', 'false');
     ccMenu.hidden = true;
     audioMenu.hidden = true;
     audio.setAttribute('aria-expanded', 'false');
@@ -85,6 +91,7 @@ export function mountControls(
         !video.paused &&
         ccMenu.hidden &&
         audioMenu.hidden &&
+        qualityMenu.hidden &&
         menu.hidden &&
         !screen.querySelector(
           '.video-controls:focus-within, .live-indicator:focus-visible',
@@ -249,7 +256,38 @@ export function mountControls(
     if (open)
       audioMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
   };
-  for (const panel of [ccMenu, audioMenu])
+  quality.onclick = () => {
+    const open = qualityMenu.hidden;
+    closeMenus();
+    const p = getPlayer(),
+      list = qualityMenu.querySelector<HTMLElement>('.track-options')!;
+    list.replaceChildren();
+    for (const level of p?.qualityLevels ?? [])
+      option(
+        list,
+        String(level.id),
+        level.label,
+        p.selectedQuality === level.id,
+        async () => {
+          for (const button of list.querySelectorAll('button'))
+            button.disabled = true;
+          try {
+            await p.selectQuality(level.id);
+            closeMenus();
+            quality.focus();
+          } catch (e: any) {
+            if (p === getPlayer()) report(e.message);
+            closeMenus();
+          }
+        },
+      );
+    qualityMenu.hidden = !open;
+    quality.setAttribute('aria-expanded', String(open));
+    showControls();
+    if (open)
+      qualityMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  };
+  for (const panel of [ccMenu, audioMenu, qualityMenu])
     listen(panel, 'keydown', (e) => {
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(e.key))
         return;
@@ -257,7 +295,12 @@ export function mountControls(
       e.stopPropagation();
       if (e.key === 'Escape') {
         closeMenus();
-        (panel === ccMenu ? cc : audio).focus();
+        (panel === qualityMenu
+          ? quality
+          : panel === ccMenu
+            ? cc
+            : audio
+        ).focus();
         return;
       }
       const buttons = Array.from(
@@ -336,7 +379,7 @@ export function mountControls(
   listen(document, 'pointerdown', (e) => {
     if (
       !(e.target as HTMLElement).closest(
-        '#cc-menu,#cc-toggle,#audio-menu,#audio-toggle,#player-menu,#info-toggle',
+        '#quality-menu,#quality-toggle,#cc-menu,#cc-toggle,#audio-menu,#audio-toggle,#player-menu,#info-toggle',
       )
     )
       closeMenus();
@@ -344,7 +387,13 @@ export function mountControls(
   listen(screen, 'pointermove', showControls);
   listen(screen, 'focusin', showControls);
   listen(screen, 'pointerleave', () => {
-    if (!video.paused && ccMenu.hidden && audioMenu.hidden && menu.hidden)
+    if (
+      !video.paused &&
+      ccMenu.hidden &&
+      audioMenu.hidden &&
+      qualityMenu.hidden &&
+      menu.hidden
+    )
       screen.classList.add('controls-hidden');
   });
   listen(screen, 'keydown', (e) => {
@@ -386,6 +435,8 @@ export function mountControls(
     return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
   };
   const statsTimer = setInterval(() => {
+    (quality as HTMLButtonElement).disabled =
+      (getPlayer()?.qualityLevels?.length ?? 0) < 2;
     (audio as HTMLButtonElement).disabled = !getPlayer()?.audioTracks?.length;
     const p = getPlayer(),
       q = video.getVideoPlaybackQuality(),

@@ -21,7 +21,8 @@
     "export": "node scripts/export.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
-    "test:hls": "node tests/hls-browser.mjs"
+    "test:hls": "node tests/hls-browser.mjs",
+    "test:hls:public": "node tests/hls-public.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",
