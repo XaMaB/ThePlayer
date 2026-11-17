@@ -9,7 +9,7 @@ Status: original HLS engine with AVC/HEVC/AAC TS/fMP4, AV1 fMP4, audio-only, ABR
 | TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue |
 | ABR / buffer policy     | Emergency request abort, bounded fallback and temporary rendition quarantine implemented                                     |
 | LL-HLS                  | fMP4 parts, blocking/delta and bounded preloads implemented; expanded interoperability remains                               |
-| Subtitles               | WebVTT and fMP4 CEA-608 implemented subsets; broader carriage, CEA-708 HLS and TTML/IMSC pending                             |
+| Subtitles               | WebVTT, stpp/TTML, wvtt and fMP4 CEA-608 subsets implemented; broader CEA carriage and advanced text features pending        |
 | Protection / extensions | AES-128 implemented; sample encryption, EME, steering/interstitials/metadata pending                                         |
 | Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                        |
 
@@ -55,3 +55,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.11.0-alpha.1 adds request-progress-based emergency downshifts and failed-rendition quarantine. Tests inject delayed first bytes, throttled bodies and HTTP 503 for Fetch/XHR, checking continued playback, cancellation and exclusion from subsequent automatic choices. LL-HLS is the next stage.
 
 0.12.0-alpha.1 adds the first LL-HLS fMP4 delivery implementation and an isolated build/test output directory. Continue with subtitle carriage/rendering, protection/extensions and broader LL-HLS interoperability; the overall plan is still active.
+
+0.13.0-alpha.1 adds original TTML/IMSC text and wvtt sample handling, layout/timing tests, encrypted text and WebVTT styling/clock improvements. Continue with CEA carriage/708 and remaining text-profile details, then protection/extensions and stabilization.

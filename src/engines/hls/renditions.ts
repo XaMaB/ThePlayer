@@ -33,6 +33,9 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
           .split(',')
           .every(
             (codec) =>
+              /^(?:wvtt|stpp(?:\.ttml(?:\.(?:im1t|etd1)(?:\|(?:im1t|etd1))*)?)?)$/.test(
+                codec,
+              ) ||
               !!normalizeAv1Codec(codec) ||
               /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
                 codec,
@@ -105,9 +108,19 @@ export function browserVariants(
   variants: Variant[],
   supports: (mime: string) => boolean,
 ): Variant[] {
-  return compatibleVariants(variants).filter(
-    (v) =>
-      !v.codecs ||
-      supports(`${hasVideo(v) ? 'video' : 'audio'}/mp4; codecs="${v.codecs}"`),
-  );
+  return compatibleVariants(variants)
+    .map((v) => ({
+      ...v,
+      codecs: v.codecs
+        ?.split(',')
+        .filter((codec) => !/^(?:stpp(?:\.|$)|wvtt$)/.test(codec))
+        .join(','),
+    }))
+    .filter(
+      (v) =>
+        !v.codecs ||
+        supports(
+          `${hasVideo(v) ? 'video' : 'audio'}/mp4; codecs="${v.codecs}"`,
+        ),
+    );
 }

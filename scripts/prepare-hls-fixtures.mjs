@@ -608,3 +608,5 @@ for (const [source, mode, name] of [
 }
 
 await import('./prepare-ll-hls-fixtures.mjs');
+
+await import('./prepare-text-fixtures.mjs');

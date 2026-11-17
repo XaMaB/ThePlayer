@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.13.0-alpha.1
+
+- Extract stpp/TTML and wvtt samples with checked MP4 timing and byte bounds.
+- Render positioned TTML text regions and timed spans, preserving styling and subtitle selection/seek behavior.
+- Support AES-128 text media/init and separate text codec declarations from MSE audio/video checks.
+- Add scoped WebVTT styles, region placement, line/position anchors, cue deduplication and timestamp-map rollover.
+- Validate Fetch/XHR text playback, layout geometry, safe XML and encrypted subtitles; add an isolated HTTPS test-server option.
+
 ## 0.12.0-alpha.1
 
 - Play LL-HLS fMP4 parts before their parent segments are complete, preserving dependent pictures and independent startup points.

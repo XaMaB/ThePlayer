@@ -222,7 +222,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Extend the original HLS engine: broader LL-HLS interoperability, TTML/IMSC1 and protection/extensions.
+- Extend the original HLS engine: broader LL-HLS interoperability, additional TTML/IMSC features, HLS CEA-708 and protection/extensions.
 - Extend HLS caption carriage beyond fMP4 CEA-608, including TS/SEI and CEA-708.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
@@ -239,4 +239,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.12.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.13.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

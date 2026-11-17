@@ -1,3 +1,6 @@
+import { TtmlRenderer } from './ttml-renderer';
+import { parseTtml } from './ttml';
+import { textMetadata, textSamples } from './text-mp4';
 import { PlaylistLoader } from './playlist-reload';
 import { LiveProgress, reconcileLive } from './live';
 import { Cea608Timeline } from './cea608-timeline';
@@ -26,7 +29,13 @@ import {
   segmentAt,
   switchBoundary,
 } from './renditions';
-import { nativeCue, parseVtt } from './subtitles';
+import {
+  nativeCue,
+  parseVtt,
+  vttHeaders,
+  WebVttStyles,
+  type VttRegionData,
+} from './subtitles';
 
 export interface HlsSource {
   [key: string]: unknown;
@@ -126,6 +135,8 @@ export class HlsEngine extends EventTarget {
   private failed = false;
   private subtitleAbort?: AbortController;
   private textTrack?: TextTrack;
+  private ttmlRenderer?: TtmlRenderer;
+  private vttStyles?: WebVttStyles;
   private selectedSubtitle = '';
   private subtitleManual = false;
   private subtitleCounters = new SubtitleCounters();
@@ -1272,6 +1283,10 @@ export class HlsEngine extends EventTarget {
     if (name && !track) throw new Error('Unknown HLS subtitle track');
     this.subtitleAbort?.abort();
     this.subtitleAbort = undefined;
+    this.ttmlRenderer?.destroy();
+    this.ttmlRenderer = undefined;
+    this.vttStyles?.destroy();
+    this.vttStyles = undefined;
     this.selectedSubtitle = name;
     if (this.textTrack) {
       this.textTrack.mode = 'disabled';
@@ -1288,6 +1303,7 @@ export class HlsEngine extends EventTarget {
     const textTrack = this.textTrack;
     textTrack.mode = 'showing';
     const update = () => {
+      if (this.ttmlRenderer) return;
       const text = Array.from(textTrack.activeCues ?? [])
         .map((c) => (c as VTTCue).text)
         .join('\n');
@@ -1314,6 +1330,10 @@ export class HlsEngine extends EventTarget {
         abort.signal,
       );
       const seen = new Map<string, number>();
+      const seenCues = new Map<string, number>();
+      let initialization:
+        | { key: string; metadata: ReturnType<typeof textMetadata> }
+        | undefined;
       let p: Playlist | undefined,
         refreshedAt = 0;
       while (!abort.signal.aborted) {
@@ -1334,25 +1354,101 @@ export class HlsEngine extends EventTarget {
         for (const segment of p.segments) {
           const id = segment.url + JSON.stringify(segment.range);
           if (
+            segment.gap ||
             seen.has(id) ||
             segment.start + segment.duration < time - 5 ||
             segment.start > time + this.targetBuffer
           )
             continue;
-          if (segment.key || segment.map)
-            throw new Error(
-              'Encrypted/WebVTT-in-MP4 subtitles are not yet supported',
-            );
           const response = await client.get(segment);
+          let data = response.data;
+          if (segment.key)
+            data = await this.decrypt(data, segment.key, segment.sequence);
           abort.signal.throwIfAborted();
-          const cues = parseVtt(
-            new TextDecoder().decode(response.data),
-            this.timelineOffset,
-          );
+          const offset =
+            this.offsets.get(segment.discontinuity) ?? this.timelineOffset;
+          let regions = new Map<string, VttRegionData>();
+          let cues: ReturnType<typeof parseVtt> = [],
+            documents: ReturnType<typeof parseTtml>[] = [];
+          if (segment.map) {
+            const key = JSON.stringify([segment.map, segment.key]);
+            if (initialization?.key !== key) {
+              let bytes = (await client.get(segment.map)).data;
+              if (segment.key) {
+                if (!segment.key.iv)
+                  throw new Error(
+                    'Encrypted subtitle initialization requires an explicit IV',
+                  );
+                bytes = await this.decrypt(
+                  bytes,
+                  segment.key,
+                  segment.sequence,
+                );
+              }
+              initialization = { key, metadata: textMetadata(bytes) };
+            }
+            const format =
+              initialization.metadata[0].format === 'stpp' ? 'ttml' : 'webvtt';
+            if (track.format !== format) {
+              track.format = format;
+              this.emit('subtitletracks', this.subtitleTracks);
+              this.emit('subtitlechange', track);
+            }
+            ({ cues, documents } = textSamples(
+              data,
+              initialization.metadata,
+              offset,
+              segment.range?.offset ?? 0,
+            ));
+          } else {
+            const text = new TextDecoder('utf-8', { fatal: true }).decode(data);
+            if (text.trimStart().startsWith('<'))
+              documents = [
+                parseTtml(
+                  text,
+                  segment.start,
+                  segment.start + segment.duration,
+                  0,
+                ),
+              ];
+            else {
+              cues = parseVtt(text, offset, this.video.currentTime);
+              const headers = vttHeaders(text);
+              regions = headers.regions;
+              if (headers.styles.length) {
+                this.vttStyles ??= new WebVttStyles(this.video);
+                for (const style of headers.styles) this.vttStyles.add(style);
+              }
+            }
+          }
+          abort.signal.throwIfAborted();
+          for (const doc of documents) {
+            textTrack.mode = 'hidden';
+            this.ttmlRenderer ??= new TtmlRenderer(this.video, (text) => {
+              this.subtitleCounters.present(
+                text ? { text, rects: [] } : null,
+                !!text,
+              );
+              this.emit('subtitlemetrics', {
+                received: this.subtitleCounters.received,
+                displayed: this.subtitleCounters.displayed,
+              });
+            });
+            this.ttmlRenderer.add(doc);
+            for (const paragraph of doc.paragraphs) {
+              if (paragraph.runs.some((run) => run.text.trim()))
+                this.subtitleCounters.receive();
+            }
+          }
           for (const cue of cues) {
-            textTrack.addCue(nativeCue(cue));
+            const key = JSON.stringify(cue);
+            if (seenCues.has(key)) continue;
+            seenCues.set(key, cue.end);
+            textTrack.addCue(nativeCue(cue, regions));
             this.subtitleCounters.receive();
           }
+          for (const [key, end] of seenCues)
+            if (end < this.video.currentTime - 30) seenCues.delete(key);
           update();
           seen.set(id, segment.start + segment.duration);
         }
@@ -1417,6 +1513,10 @@ export class HlsEngine extends EventTarget {
     for (const request of this.switches.splice(0))
       request.reject(new DOMException('Player closed', 'AbortError'));
     this.subtitleAbort?.abort();
+    this.ttmlRenderer?.destroy();
+    this.ttmlRenderer = undefined;
+    this.vttStyles?.destroy();
+    this.vttStyles = undefined;
     if (this.textTrack) {
       this.textTrack.mode = 'disabled';
       for (const cue of Array.from(this.textTrack.cues ?? []))

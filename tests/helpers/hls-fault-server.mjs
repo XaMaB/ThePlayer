@@ -1,4 +1,17 @@
-import { createServer } from 'node:http';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { readFileSync } from 'node:fs';
+const createServer =
+  process.env.TLS_KEY && process.env.TLS_CERT
+    ? (handler) =>
+        createHttpsServer(
+          {
+            key: readFileSync(process.env.TLS_KEY),
+            cert: readFileSync(process.env.TLS_CERT),
+          },
+          handler,
+        )
+    : createHttpServer;
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +42,10 @@ export function faultServer({
       );
       let root = dist,
         relative = url.pathname.slice(1);
+      if (url.pathname.startsWith('/fixture/')) {
+        root = fixtures;
+        relative = url.pathname.slice(9);
+      }
       if (match) {
         const [, , scenario, resource] = match;
         root = fixtures;

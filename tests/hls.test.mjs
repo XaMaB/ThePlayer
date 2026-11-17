@@ -1160,3 +1160,37 @@ test('Rendition reports default to the local edge and request the reported peer 
   assert.equal(result.url, reference.reports[0].url);
   assert.equal(loader.diagnostics.renditionReports, 1);
 });
+
+test('Subtitle codec declarations do not enter the audio/video MSE capability request', async () => {
+  const { browserVariants } = await module('renditions');
+  const queried = [];
+  const variants = browserVariants(
+    [
+      {
+        url: 'x',
+        bandwidth: 500000,
+        codecs: 'avc1.42c00c,mp4a.40.2,stpp.ttml.im1t,wvtt',
+      },
+    ],
+    (mime) => {
+      queried.push(mime);
+      return true;
+    },
+  );
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0].codecs, 'avc1.42c00c,mp4a.40.2');
+  assert.equal(queried[0], 'video/mp4; codecs="avc1.42c00c,mp4a.40.2"');
+});
+
+test('WebVTT timestamp maps unwrap the 33-bit media clock around the current playback position', () => {
+  const wrap = 2 ** 33 / 90000;
+  const text =
+    'WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:90000\n\n00:00:00.000 --> 00:00:01.000\nAfter wrap\n';
+  const cue = parseVtt(text, 0, wrap + 1)[0];
+  assert.equal(cue.start, wrap + 1);
+  assert.equal(cue.end, wrap + 2);
+  assert.throws(
+    () => parseVtt('WEBVTT\n\n00:61.000 --> 00:62.000\nbad'),
+    /timestamp/,
+  );
+});
