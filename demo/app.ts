@@ -1,3 +1,4 @@
+import { hlsExamples } from './hls-examples.mjs';
 import { SubtitleRenderer } from '../src/subtitles/renderer';
 import { mountControls } from '../src/ui/controls';
 import { ThePlayer } from '../src/player';
@@ -106,7 +107,7 @@ function updateSubtitleMenu(subs: any[]) {
           ? s.language && s.language !== 'und'
             ? (langs[s.language] ?? s.language) + ' · ' + s.label
             : s.label
-          : (langs[s.language] ?? s.language);
+          : (s.label ?? langs[s.language] ?? s.language);
         return `<option value="${escape(s.name)}" data-format="${escape(s.format)}">${escape(label)}</option>`;
       })
       .join('');
@@ -133,23 +134,42 @@ async function openChannel(next: any) {
     updateSubtitleCounters();
     $('placeholder').hidden = false;
     $('retry').hidden = true;
-    text('player-message', 'Connecting over WebTransport…');
-    if (!('WebTransport' in window) || !window.isSecureContext)
+    text(
+      'player-message',
+      next.protocol === 'hls'
+        ? 'Loading HLS playlist…'
+        : 'Connecting over WebTransport…',
+    );
+    if (
+      next.protocol !== 'hls' &&
+      (!('WebTransport' in window) || !window.isSecureContext)
+    )
       throw new Error(
         'A browser with WebTransport and HTTPS (or localhost) is required.',
       );
-    player = new ThePlayer(video, {
-      relayUrl: next.relayUrl,
-      namespace: next.namespace,
-      catalogTrack: next.catalogTrack,
-      certificateHash: next.certificateHash ?? state?.certificateHash,
-    });
+    player = new ThePlayer(
+      video,
+      next.protocol === 'hls'
+        ? {
+            protocol: 'hls',
+            url: next.url,
+            network: { transport: next.transport ?? 'fetch' },
+            quality: next.quality ?? 'auto',
+            media: next.media,
+          }
+        : {
+            relayUrl: next.relayUrl,
+            namespace: next.namespace,
+            catalogTrack: next.catalogTrack,
+            certificateHash: next.certificateHash ?? state?.certificateHash,
+          },
+    );
     player.addEventListener('statechange', (e: any) => {
       if (token !== operation) return;
       text('playback-state', e.detail.toUpperCase());
       text(
         'transport-state',
-        e.detail === 'playing' ? 'moq-dev · connected' : e.detail,
+        e.detail === 'playing' ? `${player.stack} · connected` : e.detail,
       );
     });
     player.addEventListener('error', (e: any) => {
@@ -178,13 +198,25 @@ async function openChannel(next: any) {
         ),
       );
     });
+    player.addEventListener('subtitlechange', (e: any) => {
+      if (token !== operation) return;
+      selectedLanguage = e.detail?.name ?? '';
+      updateSubtitleMenu(player.subtitleTracks);
+    });
     player.addEventListener('subtitletracks', (e: any) => {
       if (token === operation) updateSubtitleMenu(e.detail);
     });
     player.addEventListener('captionwarning', (e: any) => {
       if (token === operation) error(e.detail.message);
     });
-    renderer.attach(player);
+    player.addEventListener('subtitlemetrics', (e: any) => {
+      if (token !== operation) return;
+      diagnostics.cuesReceived = e.detail.received;
+      diagnostics.cuesRendered = e.detail.displayed;
+      text('cue-count', e.detail.received);
+      text('subtitle-displayed', e.detail.displayed);
+    });
+    if (next.protocol !== 'hls') renderer.attach(player);
     await player.init();
     if (token !== operation) return;
     client = player;
@@ -207,20 +239,32 @@ video.addEventListener('error', () =>
   error(video.error?.message ?? 'Video decoder error'),
 );
 $('retry').addEventListener('click', () => {
-  if (player && video.paused) void player.play();
+  if (player && video.paused && player.diagnostics?.state !== 'error')
+    void player.play();
   else if (channel) void openChannel(channel);
 });
-$('live-button').addEventListener('click', () => {
-  if (video.buffered.length)
-    video.currentTime = Math.max(
-      video.buffered.start(video.buffered.length - 1),
-      video.buffered.end(video.buffered.length - 1) -
-        (player?.targetBuffer ?? 2.5),
-    );
-  void player?.play();
-});
+$('live-button').addEventListener('click', () => player?.seekToLive());
 
 function sourceForm(next: any) {
+  ($('source-protocol') as HTMLSelectElement).value = next.protocol ?? 'moq';
+  updateSourceFields();
+  if (next.protocol === 'hls') {
+    ($('hls-url') as HTMLInputElement).value = next.url;
+    connectedSource = {
+      protocol: 'hls',
+      url: next.url,
+      network: { transport: next.transport ?? 'fetch' },
+      quality: next.quality ?? 'auto',
+      media: next.media,
+    };
+    text(
+      'snippet',
+      `import {ThePlayer} from './player.js';\nconst player = new ThePlayer(video);\nawait player.load(${JSON.stringify(connectedSource, null, 2)});`,
+    );
+    text('channel-title', next.name ?? 'HLS source');
+    return;
+  }
+
   ($('relay-url') as HTMLInputElement).value = next.relayUrl;
   ($('namespace') as HTMLInputElement).value = next.namespace ?? '';
   ($('hash') as HTMLInputElement).value =
@@ -244,6 +288,25 @@ $('source-form').addEventListener('submit', (e) => {
   manual = true;
   selectedChannelId = '';
   const value = (id: string) => ($(id) as HTMLInputElement).value.trim();
+  if (($('source-protocol') as HTMLSelectElement).value === 'hls') {
+    try {
+      const url = new URL(value('hls-url'));
+      if (!['http:', 'https:'].includes(url.protocol))
+        throw new Error('HLS requires HTTP(S)');
+      const next = {
+        protocol: 'hls',
+        url: url.href,
+        transport: value('hls-transport'),
+        source: true,
+        status: 'live',
+      };
+      sourceForm(next);
+      void openChannel(next);
+    } catch (e: any) {
+      error(e.message);
+    }
+    return;
+  }
   const next = {
     name: 'Custom source',
     status: 'live',
@@ -341,7 +404,35 @@ async function refresh() {
 setInterval(() => {
   diagnostics.frames = video.getVideoPlaybackQuality().totalVideoFrames;
 }, 500);
+function updateSourceFields() {
+  const hls = ($('source-protocol') as HTMLSelectElement).value === 'hls';
+  $('hls-fields').hidden = !hls;
+  $('moq-fields').hidden = hls;
+  ($('hls-url') as HTMLInputElement).required = hls;
+  for (const id of ['relay-url', 'namespace', 'catalog'])
+    ($(id) as HTMLInputElement).required = !hls;
+}
+$('source-protocol').addEventListener('change', updateSourceFields);
+updateSourceFields();
 const query = new URLSearchParams(location.search);
+if (query.has('src')) {
+  manual = true;
+  const next = {
+    protocol: 'hls',
+    url: query.get('src'),
+    transport: query.get('transport') ?? 'fetch',
+    media: query.get('media') ?? undefined,
+    quality:
+      query.has('quality') && query.get('quality') !== 'auto'
+        ? Number(query.get('quality'))
+        : 'auto',
+    source: true,
+    status: 'live',
+  };
+  sourceForm(next);
+  void openChannel(next);
+}
+
 if (query.has('relay') && query.has('namespace')) {
   manual = true;
   const next = {
@@ -360,3 +451,17 @@ if (!document.body.hasAttribute('data-embed')) {
   void refresh();
 }
 Object.defineProperty(window, 'player', { get: () => player });
+
+const examples = document.getElementById('hls-example') as HTMLSelectElement;
+for (const example of hlsExamples) {
+  const option = document.createElement('option');
+  option.value = example.id;
+  option.textContent = example.name;
+  examples.append(option);
+}
+examples.addEventListener('change', () => {
+  const example = hlsExamples.find((item) => item.id === examples.value);
+  if (example)
+    (document.getElementById('hls-url') as HTMLInputElement).value =
+      example.url;
+});

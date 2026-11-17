@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const upstream = process.env.MOQ_SOURCE ?? path.join(root, '.cache/moq');
 const options = {
   noEmit: true,
+  resolveJsonModule: true,
   strict: true,
   allowJs: true,
   checkJs: false,

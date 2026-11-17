@@ -14,6 +14,15 @@ export interface PlaybackEngine extends EventTarget {
   readonly audioTracks: any[];
   readonly subtitleTracks: any[];
   readonly selectedAudioTrack: string;
+  readonly isLive?: boolean;
+  readonly mediaMode?: 'video' | 'audio';
+  readonly availableMediaModes?: ('video' | 'audio')[];
+  readonly qualityLevels?: any[];
+  readonly selectedQuality?: number;
+  readonly currentQuality?: number;
+  readonly autoQuality?: boolean;
+  selectQuality?(index: number): Promise<void>;
+  seekToLive?(): void;
   init(): Promise<void>;
   play(): Promise<void>;
   destroy(): Promise<void>;
@@ -25,17 +34,21 @@ export interface PlaybackEngine extends EventTarget {
 export type EngineFactory = (
   video: HTMLVideoElement,
   source: any,
-) => PlaybackEngine;
+) => PlaybackEngine | Promise<PlaybackEngine>;
 export type EngineRegistry = Readonly<Record<string, EngineFactory>>;
 
 const events = [
   'statechange',
+  'streamchange',
   'catalog',
   'error',
   'autoplayblocked',
   'audiochange',
+  'qualitylevels',
+  'qualitychange',
   'subtitletracks',
   'subtitlechange',
+  'subtitlemetrics',
   'caption',
   'captionwarning',
 ];
@@ -68,7 +81,11 @@ export class PlayerCore extends EventTarget {
       if (!factory)
         throw new Error(`No playback engine registered for ${protocol}`);
       await this.release();
-      const engine = factory(this.video, source);
+      const engine = await factory(this.video, source);
+      if (this.closed) {
+        await engine.destroy();
+        throw new Error('ThePlayer has been destroyed');
+      }
       this.engine = engine;
       this.listeners = new AbortController();
       for (const name of events) {
@@ -109,6 +126,23 @@ export class PlayerCore extends EventTarget {
     });
   }
 
+  get isLive() {
+    return this.engine?.isLive ?? this.engine?.protocol === 'moq';
+  }
+  seekToLive() {
+    if (!this.isLive) return;
+    if (this.engine?.seekToLive) {
+      this.engine.seekToLive();
+      return;
+    }
+    const b = this.video.buffered;
+    if (b.length)
+      this.video.currentTime = Math.max(
+        b.start(b.length - 1),
+        b.end(b.length - 1) - this.targetBuffer,
+      );
+    void this.play();
+  }
   get protocol() {
     return this.engine?.protocol ?? '';
   }
@@ -135,6 +169,41 @@ export class PlayerCore extends EventTarget {
   }
   get selectedAudioTrack() {
     return this.engine?.selectedAudioTrack ?? '';
+  }
+  get mediaMode() {
+    return this.engine?.mediaMode ?? 'video';
+  }
+  get availableMediaModes() {
+    return this.engine?.availableMediaModes ?? [];
+  }
+  async selectMediaMode(media: 'video' | 'audio') {
+    if (this.protocol !== 'hls' || !this.availableMediaModes.includes(media))
+      throw new Error('Media mode is unavailable');
+    if (this.mediaMode === media) return;
+    await this.load({
+      ...this.source,
+      media,
+      quality: 'auto',
+      startTime: this.isLive ? undefined : this.video.currentTime,
+      autoplay: !this.video.paused,
+    });
+  }
+  get qualityLevels() {
+    return this.engine?.qualityLevels ?? [];
+  }
+  get selectedQuality() {
+    return this.engine?.selectedQuality ?? -1;
+  }
+  get currentQuality() {
+    return this.engine?.currentQuality ?? this.selectedQuality;
+  }
+  get autoQuality() {
+    return this.engine?.autoQuality ?? false;
+  }
+  async selectQuality(index: number) {
+    if (!this.engine?.selectQuality)
+      throw new Error('Quality selection is not supported');
+    await this.engine.selectQuality(index);
   }
   subtitleHistory(name: string) {
     return this.engine?.subtitleHistory?.(name) ?? [];

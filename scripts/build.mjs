@@ -4,6 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+const { version } = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const upstream = process.env.MOQ_SOURCE ?? path.join(root, '.cache/moq');
 const revision = 'caf6ebc05d0b56a5689af1df431dd13804aaa1a2';
@@ -34,9 +37,12 @@ await build({
     app: 'demo/app.ts',
     player: 'src/player.ts',
     core: 'src/core/player.ts',
+    hls: 'src/engines/hls/engine.ts',
   },
   outdir: 'dist',
   bundle: true,
+  splitting: true,
+  chunkNames: 'chunks/[name]-[hash]',
   format: 'esm',
   target: 'es2022',
   minify: true,
@@ -45,7 +51,7 @@ await build({
   nodePaths: [path.join(root, 'node_modules')],
   banner: {
     js:
-      '/*! ThePlayer includes modified mux.js 6.3.0. Copyright Brightcove.\n' +
+      `/*! ThePlayer v${version} includes modified mux.js 6.3.0. Copyright Brightcove.\n` +
       license +
       '\n*/',
   },
@@ -59,3 +65,8 @@ const embed = (await readFile(path.join(root, 'demo/index.html'), 'utf8'))
   .replace('<body>', '<body data-embed>')
   .replace('ThePlayer · Demo', 'ThePlayer · Embed');
 await writeFile(path.join(root, 'dist/embed.html'), embed);
+
+await writeFile(
+  path.join(root, 'dist/version.json'),
+  JSON.stringify({ name: 'ThePlayer', version }) + '\n',
+);
