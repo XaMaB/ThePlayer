@@ -1,16 +1,33 @@
 import type { Playlist, Variant } from './playlist';
 
+/** Older HLS masters spell AVC profile/level as decimal bytes (avc1.66.30).
+ * Only playlist metadata is normalized; decoder configuration comes from SPS/avcC.
+ */
+export function normalizeCodec(value: string): string {
+  const codec = value.trim().toLowerCase();
+  const legacy = /^avc1\.(\d{1,3})\.(\d{1,3})$/.exec(codec);
+  if (!legacy) return codec;
+  const profile = Number(legacy[1]),
+    level = Number(legacy[2]);
+  if (profile < 1 || profile > 255 || level < 1 || level > 255) return codec;
+  return `avc1.${profile.toString(16).padStart(2, '0')}00${level.toString(16).padStart(2, '0')}`;
+}
 /** The demuxers currently support AVC, AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
 export function compatibleVariants(variants: Variant[]): Variant[] {
-  return variants.filter(
-    (v) =>
-      !v.codecs ||
-      v.codecs
-        .split(',')
-        .every((codec) =>
-          /^(avc[13]\.[0-9a-f]{6}|mp4a\.40\.[25])$/i.test(codec.trim()),
-        ),
-  );
+  return variants
+    .map((v) => ({
+      ...v,
+      codecs: v.codecs?.split(',').map(normalizeCodec).join(','),
+    }))
+    .filter(
+      (v) =>
+        !v.codecs ||
+        v.codecs
+          .split(',')
+          .every((codec) =>
+            /^(avc[13]\.[0-9a-f]{6}|mp4a\.40\.[25])$/.test(codec),
+          ),
+    );
 }
 /** Align rendition playlists using presentation time, never assuming matching array indices. */
 export function alignRendition(next: Playlist, reference: Playlist): Playlist {

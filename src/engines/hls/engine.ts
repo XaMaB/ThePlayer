@@ -195,7 +195,15 @@ export class HlsEngine extends EventTarget {
     if (p.variants.length) {
       this.master = p;
       let usable = compatibleVariants(p.variants);
-      if (usable.some((v) => v.resolution || v.codecs?.includes('avc')))
+      if (
+        p.variants.some(
+          (v) =>
+            v.resolution ||
+            /(?:^|,)\s*(?:avc[13]|hvc1|hev1|av01|vp0[89])\./i.test(
+              v.codecs ?? '',
+            ),
+        )
+      )
         usable = usable.filter(
           (v) => v.resolution || v.codecs?.includes('avc'),
         );

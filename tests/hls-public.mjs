@@ -116,11 +116,11 @@ try {
           framesBefore + 100,
         'Frames must continue rendering after switch',
       );
-      if (source.id === 'mux-bbb') {
+      if (source.id === 'mux-bbb' || source.id === 'unified-tos') {
         assert.equal(
           levels.length,
           5,
-          'All AVC/AAC and HE-AAC profiles must be available',
+          'All five supported AVC profiles must be available',
         );
         for (const index of [2, 3, 4, 0]) {
           const beforeAudio = await page.evaluate(

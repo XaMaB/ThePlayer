@@ -108,3 +108,9 @@ All eight entries on [Mux's test-stream index](https://test-streams.mux.dev/) we
 | Tears of Steel with IMSC     | Unsupported     | `stpp.ttml.im1t` in CODECS currently excludes the variant; no claim of video or caption playback |
 
 The six passing Mux sources are available in the demo presets alongside Apple's example. Run `npm run test:hls:mux` to repeat the catalog audit; `HLS_PUBLIC_SOURCE=mux-imsc` can select one case. Results go to ignored `test-results/mux-audit.json`. Known unsupported cases are recorded as **unsupported**, never passed; unexpected failures make the command exit nonzero. Public availability, contents and CORS can change, so this audit is separate from deterministic CI. Media stays hosted by Mux and is not redistributed.
+
+## Unified Streaming legacy AVC example
+
+The demo includes the Unified Streaming Tears of Steel `.mp4/.m3u8` master. Its AVC entries use decimal profile/level aliases such as `avc1.66.30`, `avc1.77.31` and `avc1.100.40`; these are normalized for variant filtering. The actual decoder configuration still comes from the media SPS/avcC, not synthesized playlist flags. Apple's [archived HLS codec guidance](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/StreamingMediaGuide/FrequentlyAskedQuestions/FrequentlyAskedQuestions.html) documents the older spelling.
+
+The master advertises five AVC video variants, three HEVC video variants and two audio-only variants. The current AVC ladder excludes HEVC and does not treat audio-only renditions as video qualities. A video presentation with no supported video variant now fails explicitly instead of silently selecting audio only. This master does not advertise subtitle renditions. Run `HLS_PUBLIC_SOURCE=unified-tos npm run test:hls:public` for playback and transitions through all five AVC qualities.

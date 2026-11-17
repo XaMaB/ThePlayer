@@ -395,3 +395,20 @@ test('MP4 descriptors preserve the explicit HE-AAC object type', async () => {
   ]);
   assert.equal(inspectInit(data)[0].codec, 'mp4a.40.5');
 });
+
+const { normalizeCodec } = await module('renditions');
+test('legacy decimal AVC profile/level metadata is normalized without changing the playlist', () => {
+  assert.equal(normalizeCodec('avc1.66.30'), 'avc1.42001e');
+  assert.equal(normalizeCodec('avc1.77.31'), 'avc1.4d001f');
+  assert.equal(normalizeCodec('avc1.100.40'), 'avc1.640028');
+  const input = [
+    { url: 'low', bandwidth: 493000, codecs: 'mp4a.40.2, avc1.66.30' },
+    { url: 'hevc', bandwidth: 1024000, codecs: 'mp4a.40.2,hvc1.1.6.L150.90' },
+    { url: 'invalid', bandwidth: 1, codecs: 'avc1.256.30' },
+  ];
+  assert.deepEqual(
+    compatibleVariants(input).map((v) => v.codecs),
+    ['mp4a.40.2,avc1.42001e'],
+  );
+  assert.equal(input[0].codecs, 'mp4a.40.2, avc1.66.30');
+});

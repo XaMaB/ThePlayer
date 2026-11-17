@@ -42,4 +42,10 @@ export const hlsExamples = [
     url: 'https://test-streams.mux.dev/pts_shift/master.m3u8',
     reference: 'https://test-streams.mux.dev/',
   },
+  {
+    id: 'unified-tos',
+    name: 'Unified Tears of Steel · legacy AVC / five qualities',
+    url: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/.m3u8',
+    reference: 'https://demo.unified-streaming.com/',
+  },
 ];
