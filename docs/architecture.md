@@ -60,9 +60,13 @@ Bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` con
 
 MPEG-TS samples pass through the original AVC/HEVC/AAC demux/remux path. fMP4 initialization is inspected for AVC, HEVC, AV1 and AAC configuration before MSE appends. Browser decoders perform the actual audio/video decoding. Quality transitions fill the previous rendition through the switching boundary; the engine's buffering policy is separate from MoQ's GOP/group policy.
 
-External WebVTT uses the subtitle rendition loader. For fMP4 CEA-608, `c608-mp4.ts` extracts timestamped `cdat` pairs, `cea608.ts` decodes channel memories/commands, and `cea608-timeline.ts` checkpoints history for seeking and quality changes. The engine maps rows and columns to native text cues. Caption descriptors are excluded from MSE without moving A/V payload offsets. Unsupported `c708` tracks remain excluded rather than decoded.
+External WebVTT uses the subtitle rendition loader. For fMP4 CEA-608, `c608-mp4.ts` extracts timestamped `cdat` pairs, `cea608.ts` decodes channel memories/commands, and `cea608-timeline.ts` checkpoints history for seeking and quality changes. The engine maps rows and columns to native text cues. Caption descriptors are excluded from MSE without moving A/V payload offsets. `c708-mp4.ts` reads CDP from separate c708/ccdp tracks. `cea-sei.ts` also extracts ATSC caption data from clear AVC/HEVC SEI. Original CEA-708 packet, service, timeline and renderer modules decode and render services with media-clock window geometry and P16 handling.
 
-HLS captions use browser TextTracks; MoQ bitmap/CEA-708 captions use `SubtitleRenderer`. They share selection and metric conventions but have different rendering paths. See the [HLS support matrix](hls-support.md) for exact carriage, codec and caption limitations.
+HLS WebVTT/CEA-608 uses browser TextTracks; TTML and CEA-708 use their own DOM renderers; MoQ bitmap/CEA-708 captions use `SubtitleRenderer`. They share selection and metric conventions but have different rendering paths. See the [HLS support matrix](hls-support.md) for exact carriage, codec and caption limitations.
+
+## HLS protection
+
+Whole-resource AES-128 and AES-256-GCM decryption happens before demux/inspection. TS SAMPLE-AES decrypts AVC/AAC elementary samples before transmuxing. fMP4 cenc/cbcs stays encrypted through SourceBuffer append; the browser CDM performs decryption through `eme.ts`. Identity playlist keys use ClearKey automatically; explicit DRM configurations provide keys or an application-owned license callback. MediaSource and temporary key sessions share one engine lifetime, with bounded license requests and teardown cancellation. ClearKey tests do not certify commercial CDMs.
 
 ## Extending HLS or adding DASH
 

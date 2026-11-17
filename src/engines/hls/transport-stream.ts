@@ -241,14 +241,17 @@ export function demux(bytes: Uint8Array): Pes[] {
               if ([0x1b, 0x24, 0x0f, 0xdb, 0xcf].includes(type)) {
                 if (
                   Array.from(discovered).some(
-                    ([id, kind]) => id !== elementary && kind === type,
+                    ([id, kind]) =>
+                      id !== elementary &&
+                      [0x0f, 0xcf].includes(kind) ===
+                        [0x0f, 0xcf].includes(type),
                   )
                 )
                   throw new Error(
                     'Multiple same-kind elementary streams are not yet supported',
                   );
                 discovered.set(elementary, type);
-              } else if ([0x03, 0x04, 0x81, 0x87].includes(type))
+              } else if ([0x03, 0x04, 0x81, 0x87, 0xc1, 0xc2].includes(type))
                 throw new Error('TS supports AVC/HEVC/AAC only');
               i = next;
             }

@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.18.0-alpha.1
+
+- Recognize protected encv/enca sample entries and cenc/cbcs track defaults while preserving encrypted bytes for the CDM.
+- Add temporary EME sessions with ClearKey, an abortable license callback, license timeouts, key-status errors and teardown cleanup.
+- Load identity SAMPLE-AES/SAMPLE-AES-CTR fMP4 keys automatically through ClearKey when the browser supports the scheme; validate rotating KIDs and CBCS constant IVs.
+- Generate original CENC/CBCS AVC/AAC fixtures; compare all decoded audio/video hashes and timestamps with FFmpeg, and exercise playback, seeks, license failures and cleanup through Fetch/XHR.
+- Commercial key systems, FairPlay-specific handling and persistent/offline licenses are not validated by these ClearKey tests.
+
 ## 0.17.0-alpha.1
 
 - Decrypt identity SAMPLE-AES AVC/AAC in MPEG-TS before transmuxing, including key rotation and explicit/sequence IVs.

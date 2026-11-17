@@ -54,6 +54,7 @@ export interface Sample {
   key: boolean;
 }
 export interface Track {
+  encryption?: { scheme: 'cenc' | 'cbcs'; kid: Uint8Array };
   id: number;
   kind: 'video' | 'audio';
   timescale: number;
@@ -163,6 +164,35 @@ export function inspectInit(data: Uint8Array): Track[] {
           : 'audio';
       const stsd = child(child(child(mdia, 'minf'), 'stbl'), 'stsd');
       const entry = boxes(stsd.subarray(8))[0];
+      let encryption: Track['encryption'];
+      if (entry.type === 'encv' || entry.type === 'enca') {
+        const sinf = child(
+          entry.body.subarray(entry.type === 'encv' ? 78 : 28),
+          'sinf',
+        );
+        const original = child(sinf, 'frma'),
+          schm = child(sinf, 'schm');
+        const scheme = String.fromCharCode(...schm.subarray(4, 8));
+        if (scheme !== 'cenc' && scheme !== 'cbcs')
+          throw new Error('Unsupported protection scheme ' + scheme);
+        const tenc = child(child(sinf, 'schi'), 'tenc');
+        if (tenc.length < 24 || tenc[0] > 1 || tenc[6] !== 1)
+          throw new Error('Invalid protected track defaults');
+        if (
+          ![0, 8, 16].includes(tenc[7]) ||
+          (scheme === 'cenc' && tenc[7] === 0)
+        )
+          throw new Error('Invalid encryption IV size');
+        if (
+          tenc[7] === 0 &&
+          (tenc.length < 25 ||
+            ![8, 16].includes(tenc[24]) ||
+            tenc.length !== 25 + tenc[24])
+        )
+          throw new Error('Invalid constant encryption IV');
+        encryption = { scheme, kid: tenc.slice(8, 24) };
+        entry.type = String.fromCharCode(...original);
+      }
       let codec: string;
       if (entry.type === 'avc1' || entry.type === 'avc3') {
         const avcc = child(entry.body.subarray(78), 'avcC');
@@ -196,6 +226,7 @@ export function inspectInit(data: Uint8Array): Track[] {
         kind,
         timescale: read32(mdhd, mdhd[0] === 1 ? 20 : 12),
         codec,
+        ...(encryption ? { encryption } : {}),
       } as Track;
     });
 }

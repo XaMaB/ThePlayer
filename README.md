@@ -90,7 +90,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 | AES-256-GCM                                         | Whole-resource authenticated encryption; embedded IV/tag, including maps                 |
 | Session keys                                        | Bounded identity-key preload, consumed by media/map decryption                           |
 | SAMPLE-AES TS                                       | AVC/AAC identity keys; rotation and explicit/sequence IV, byte-exact and browser tests   |
-| DRM / EME                                           | Not implemented                                                                          |
+| DRM / EME                                           | CENC/CBCS fMP4 through EME; ClearKey, identity keys and license callbacks tested         |
 | Content steering / interstitials / timed metadata   | Not implemented                                                                          |
 | I-frame trick play / image playlists / packed audio | Not implemented                                                                          |
 | Declared GAP segments                               | Skipped without requests; playback resumes at buffered media after the declared interval |

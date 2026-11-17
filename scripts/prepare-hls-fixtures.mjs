@@ -621,3 +621,5 @@ await import('./prepare-cdp-fixtures.mjs');
 await import('./prepare-protection-fixtures.mjs');
 
 await import('./prepare-sample-aes-fixtures.mjs');
+
+await import('./prepare-cenc-fixtures.mjs');

@@ -72,10 +72,11 @@ export class MediaLane {
     if (!segment || segment.gap)
       throw new Error('Missing segment or unsupported HLS GAP');
     const response = await this.load(segment);
-    let data =
-      segment.key?.method === 'SAMPLE-AES'
-        ? response.data
-        : await this.decrypt(response.data, segment.key, segment.sequence);
+    let data = ['SAMPLE-AES', 'SAMPLE-AES-CTR'].includes(
+      segment.key?.method ?? '',
+    )
+      ? response.data
+      : await this.decrypt(response.data, segment.key, segment.sequence);
     if (this.preparedDiscontinuity !== segment.discontinuity) {
       this.decoder.reset();
       this.preparedDiscontinuity = segment.discontinuity;
@@ -85,18 +86,16 @@ export class MediaLane {
     let captionPackets: CaptionPacket[] = [],
       captionError: string | undefined = this.captionMetaError;
     if (segment.map) {
-      if (segment.key?.method === 'SAMPLE-AES')
-        throw new Error('fMP4 SAMPLE-AES requires cbcs support');
       const key = JSON.stringify(segment.map);
       if (this.initCache?.key !== key) {
         if (segment.map.key?.method === 'AES-128' && !segment.map.key.iv)
           throw new Error('Encrypted initialization needs an explicit IV');
         const loaded = await this.load(segment.map);
-        const original = await this.decrypt(
-          loaded.data,
-          segment.map.key,
-          segment.sequence,
-        );
+        const original = ['SAMPLE-AES', 'SAMPLE-AES-CTR'].includes(
+          segment.map.key?.method ?? '',
+        )
+          ? loaded.data
+          : await this.decrypt(loaded.data, segment.map.key, segment.sequence);
         const filtered = filterCaptionInit(original);
         this.captionMeta = [];
         this.captionMetaError = undefined;
@@ -161,8 +160,23 @@ export class MediaLane {
       }
       data = filterCaptionMedia(data, this.ignoredCaptions);
       tracks = inspectInit(init);
+      if (
+        segment.key?.method === 'SAMPLE-AES' ||
+        segment.key?.method === 'SAMPLE-AES-CTR'
+      ) {
+        const expected = segment.key.method === 'SAMPLE-AES' ? 'cbcs' : 'cenc';
+        if (
+          !tracks.some((t) => t.encryption) ||
+          tracks.some((t) => t.encryption && t.encryption.scheme !== expected)
+        )
+          throw new Error(
+            'HLS key method does not match fMP4 protection scheme',
+          );
+      }
       rawStart = decodeTime(data, tracks);
     } else if (data[0] === 0x47) {
+      if (segment.key?.method === 'SAMPLE-AES-CTR')
+        throw new Error('SAMPLE-AES-CTR requires fMP4');
       const pes = demux(data);
       const encrypted = segment.key?.method === 'SAMPLE-AES';
       if (encrypted && !this.decryptSamples)

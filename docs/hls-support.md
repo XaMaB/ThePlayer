@@ -28,7 +28,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 - **TTML/IMSC text and MP4 WebVTT are implemented subsets.** See the text-profile scope below. HLS CEA-708 SEI decoding uses an original implementation separate from the MoQ decoder; see its scope below.
 - TS supports one video/audio stream, supported access-unit timing and complete PES packets. Multi-packet PAT/PMT sections are assembled and CRC-checked. Annex-B NAL units may span PES boundaries, and multiple pictures per PES are supported for the timing profiles below. IDR and immediate AVC intra recovery points are marked as random access; other segment starts preserve continuity and MSE waits for a random access point when required. Unsupported codecs still fail explicitly. More broadcast edge-case testing is needed.
 - AVC, HEVC Main/Main10, AV1 Main 8/10-bit (fMP4) and AAC-LC/declared HE-AAC v1 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. Dolby audio, packed audio, I-frame-only trick-play and image playlists are not supported.
-- SAMPLE-AES supports TS AVC/AAC identity keys. fMP4 cbcs, DRM/EME, content steering, interstitials and timed metadata remain pending.
+- SAMPLE-AES supports TS AVC/AAC identity keys. fMP4 cenc/cbcs uses EME, with ClearKey validated. Content steering, interstitials and timed metadata remain pending.
 - Declared GAP segments have bounded scheduling/playback recovery; see the validation scope below. Live-window loss and detected timeline resets now trigger a bounded coordinated media restart; see below.
 - The network client bounds individual resources at 64 MiB. No server proxy is provided; cross-origin resources need appropriate CORS headers.
 - The player uses MSE. There is no native-HLS fallback in this engine; such a fallback would not test our own parser/pipeline.
@@ -96,18 +96,18 @@ HE-AAC v1 MPEG-TS uses the declared `mp4a.40.5` profile to signal SBR and its do
 
 All eight entries on [Mux's test-stream index](https://test-streams.mux.dev/) were checked in Chromium using ThePlayer's own HLS engine. The check observes rendered frames and continued playback; it exercises a quality transition where available and seeks across the first ad discontinuity for the ad-insertion fixture. This is a bounded smoke test, not validation of an entire asset, every rendition or every ad transition. The dedicated Big Buck Bunny public test separately exercises all five qualities.
 
-| Publisher fixture            | Observed result | Scope / limitation                                                                               |
-| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
-| Big Buck Bunny — adaptive    | Passed          | Playback and quality transition; five profiles available                                         |
-| Big Buck Bunny — 480p        | Passed          | Direct media playlist                                                                            |
-| ARTE China                   | Passed          | Playback and quality transition; six profiles available                                          |
-| Ad insertion in EVENT stream | Passed          | AES-128 and first ad discontinuity; the hosted snapshot is ended                                 |
-| Issue 666                    | Passed          | MPEG-TS byte ranges                                                                              |
-| DK Turntable                 | Passed          | Transition between variants with shifted timestamps                                              |
-| SAMPLE-AES                   | TS AVC/AAC      | Identity keys, explicit/sequence IV, rotation; fMP4 cbcs pending                                 |
-| Tears of Steel with IMSC     | Unsupported     | `stpp.ttml.im1t` in CODECS currently excludes the variant; no claim of video or caption playback |
+| Publisher fixture            | Observed result                    | Scope / limitation                                                                                                           |
+| ---------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Big Buck Bunny — adaptive    | Passed                             | Playback and quality transition; five profiles available                                                                     |
+| Big Buck Bunny — 480p        | Passed                             | Direct media playlist                                                                                                        |
+| ARTE China                   | Passed                             | Playback and quality transition; six profiles available                                                                      |
+| Ad insertion in EVENT stream | Passed                             | AES-128 and first ad discontinuity; the hosted snapshot is ended                                                             |
+| Issue 666                    | Passed                             | MPEG-TS byte ranges                                                                                                          |
+| DK Turntable                 | Passed                             | Transition between variants with shifted timestamps                                                                          |
+| SAMPLE-AES                   | Public fixture failed (2026-11-17) | Hosted segment contains UTF-8 replacement bytes; invalid TS also rejected by FFprobe. Generated TS SAMPLE-AES fixtures pass. |
+| Tears of Steel with IMSC     | Video playback passed (2026-11-17) | 349 rendered frames and continued audio/video playback; this public smoke test does not inspect displayed subtitle text.     |
 
-The six passing Mux sources are available in the demo presets alongside Apple's example. Run `npm run test:hls:mux` to repeat the catalog audit; `HLS_PUBLIC_SOURCE=mux-imsc` can select one case. Results go to ignored `test-results/mux-audit.json`. Known unsupported cases are recorded as **unsupported**, never passed; unexpected failures make the command exit nonzero. Public availability, contents and CORS can change, so this audit is separate from deterministic CI. Media stays hosted by Mux and is not redistributed.
+The original six passing Mux sources are available in the demo presets alongside Apple's example. Run `npm run test:hls:mux` to repeat the catalog audit; `HLS_PUBLIC_SOURCE=mux-imsc` can select one case. Results go to ignored `test-results/mux-audit.json`. Known unsupported cases are recorded as **unsupported**, never passed; unexpected failures make the command exit nonzero. Public availability, contents and CORS can change, so this audit is separate from deterministic CI. Media stays hosted by Mux and is not redistributed.
 
 ## Unified Streaming legacy AVC example
 
@@ -245,4 +245,29 @@ Fetch/XHR fixtures exercise an independently encrypted map, rotating media keys,
 
 Identity SAMPLE-AES supports AVC and ADTS AAC with per-sample CBC reset, AVC skip encryption and outer emulation-prevention removal. Keys rotate by declaration; IVs can be explicit or derived from media sequence. The tests compare every elementary payload and timestamp and the resulting fMP4 against clear originals, then exercise playback and seeking through Fetch/XHR.
 
-This is the MPEG-TS AVC/AAC path only. fMP4 cbcs, CENC/EME, encrypted AC-3/E-AC-3 and Apple audio-setup priming metadata remain pending. The original algorithm follows [Apple's sample encryption specification](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/HLS_Sample_Encryption/Encryption/Encryption.html).
+This is the MPEG-TS AVC/AAC path only. fMP4 cbcs/CENC is covered separately below; encrypted AC-3/E-AC-3 and Apple audio-setup priming metadata remain pending. The original algorithm follows [Apple's sample encryption specification](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/HLS_Sample_Encryption/Encryption/Encryption.html).
+
+## fMP4 protection and EME (0.18)
+
+Protected AVC/AAC fMP4 uses the browser CDM through EME. SAMPLE-AES maps to cbcs and SAMPLE-AES-CTR maps to cenc; mismatched track schemes are rejected. Identity keys are loaded from the playlist and supplied to ClearKey automatically. Other key formats require explicit application DRM configuration. HTTPS (or a browser-trusted local origin), EME support and a CDM supporting the requested codec/scheme are required.
+
+```js
+await player.load({
+  protocol: 'hls',
+  url: 'https://media.example.com/protected.m3u8',
+  drm: {
+    keySystem: 'org.w3.clearkey',
+    clearKeys: {
+      '0123456789abcdef0123456789abcdef': '39393939393939393939393939393939',
+    },
+  },
+});
+```
+
+The values above belong only to the generated test fixture. Applications can instead provide `drm.license(message, messageType, signal)`, returning a promise for a license-response Uint8Array. The application selects its license endpoint and authentication. `licenseTimeoutMs` defaults to 15000; destruction aborts pending requests and closes temporary sessions. Optional `serverCertificate`, `videoRobustness` and `audioRobustness` are passed to the browser's EME APIs.
+
+The tests cover AVC/AAC CENC subsamples and CBCS 1:9 video/full-block audio, per-sample IVs, PSSH, identity keys, direct ClearKey configuration and license callbacks. Independent FFmpeg decoding matches all 1295 audio/video frame hashes and timestamps. Browser tests cover forward/backward seeks, missing KIDs, absent DRM configuration, stalled license callbacks and media-key cleanup through Fetch/XHR. Constant-IV CBCS and alternating KID/key initialization maps are also validated with forward/backward seeks, direct keys, license callbacks and automatic identity keys. Encrypted ABR/rendition transitions remain a further interoperability target.
+
+This does not certify Widevine, PlayReady, FairPlay, persistent/offline licenses or output-protection behavior. These need their own CDM/platform/license validation. Encrypted in-band video SEI captions cannot be decoded by JavaScript before CDM decryption; separate clear subtitle tracks remain usable.
+
+References: [W3C EME](https://www.w3.org/TR/encrypted-media/), [CENC initialization data](https://www.w3.org/TR/eme-initdata-cenc/), ISO/IEC 23001-7.

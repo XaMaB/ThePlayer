@@ -5,7 +5,10 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { muxSources } from './mux-sources.mjs';
-const root = path.resolve(fileURLToPath(new URL('../dist/', import.meta.url)));
+const root = path.resolve(
+  process.env.THEPLAYER_DIST ??
+    fileURLToPath(new URL('../dist/', import.meta.url)),
+);
 const server = createServer(async (req, res) => {
   try {
     const file = path.resolve(

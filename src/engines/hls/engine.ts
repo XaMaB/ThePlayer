@@ -1,3 +1,4 @@
+import { EmeController, type DrmOptions } from './eme';
 import { decryptSamplePes } from './sample-aes';
 import { Cea708Timeline } from './cea708-timeline';
 import { Cea708Renderer } from './cea708-renderer';
@@ -57,6 +58,7 @@ export interface HlsSource {
   subtitleLanguage?: string;
   preferredLanguages?: string[];
   captionEncodings?: Record<number, P16Encoding>;
+  drm?: DrmOptions;
 }
 /** Original baseline HLS engine; no hls.js, VHS or Shaka code/dependency. */
 export class HlsEngine extends EventTarget {
@@ -150,6 +152,8 @@ export class HlsEngine extends EventTarget {
   private subtitleManual = false;
   private subtitleCounters = new SubtitleCounters();
   private keys = new Map<string, Promise<CryptoKey>>();
+  private eme?: EmeController;
+  private identityKeys = new Map<string, Promise<Uint8Array>>();
   private prefetchedKeys = new Map<string, Promise<CryptoKey>>();
   private loadTime = 0;
   private offsets = new Map<number, number>();
@@ -209,6 +213,10 @@ export class HlsEngine extends EventTarget {
     )
       throw new Error(
         'Live recovery timeout must not precede the stale threshold',
+      );
+    if (source.drm)
+      this.eme = new EmeController(video, source.drm, (error) =>
+        this.fail(error),
       );
     this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
     this.playlistLoader = new PlaylistLoader(
@@ -336,9 +344,11 @@ export class HlsEngine extends EventTarget {
             JSON.stringify([key.url, key.method]),
             promise,
           );
-          void promise.catch(() =>
-            this.prefetchedKeys.delete(JSON.stringify([key.url, key.method])),
-          );
+          void promise.catch(() => {
+            const id = JSON.stringify([key.url, key.method]);
+            if (this.prefetchedKeys.get(id) === promise)
+              this.prefetchedKeys.delete(id);
+          });
         }
       let usable = browserVariants(p.variants, (mime) =>
         MediaSource.isTypeSupported(mime),
@@ -574,6 +584,7 @@ export class HlsEngine extends EventTarget {
     if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
     this.offsets.clear();
     this.keys.clear();
+    this.identityKeys.clear();
     this.prefetchedKeys.clear();
     this.gaps = [];
     this.captions608.reset();
@@ -647,12 +658,65 @@ export class HlsEngine extends EventTarget {
     )
       throw new Error('Unsupported browser codec: ' + codecs);
   }
+  private async ensureProtection(
+    prepared: PreparedSegment,
+    capabilities = prepared.tracks,
+  ) {
+    const protectedTracks = prepared.tracks.filter((t) => t.encryption);
+    if (!protectedTracks.length) return;
+    if (this.source.drm) {
+      await this.eme!.ensure(capabilities);
+      return;
+    }
+    const key = prepared.segment.key;
+    if (
+      !key ||
+      key.format !== 'identity' ||
+      !(key.versions ?? [1]).includes(1) ||
+      !key.url ||
+      !['SAMPLE-AES', 'SAMPLE-AES-CTR'].includes(key.method)
+    )
+      throw new Error(
+        'Encrypted fMP4 requires DRM configuration or an identity key',
+      );
+    const id = JSON.stringify([key.url, key.scope, key.method]);
+    let pending = this.identityKeys.get(id);
+    if (!pending) {
+      pending = this.client.get({ url: key.url }).then((result) => {
+        if (result.data.length !== 16)
+          throw new Error('Sample encryption identity key must be 16 bytes');
+        return result.data;
+      });
+      if (this.identityKeys.size >= 32)
+        this.identityKeys.delete(this.identityKeys.keys().next().value!);
+      this.identityKeys.set(id, pending);
+      void pending.catch(() => {
+        if (this.identityKeys.get(id) === pending) this.identityKeys.delete(id);
+      });
+    }
+    const raw = await pending;
+    const hex = (bytes: Uint8Array) =>
+      Array.from(bytes, (n) => n.toString(16).padStart(2, '0')).join('');
+    const clearKeys = Object.fromEntries(
+      protectedTracks.map((t) => [hex(t.encryption!.kid), hex(raw)]),
+    );
+    if (!this.eme)
+      this.eme = new EmeController(
+        this.video,
+        { keySystem: 'org.w3.clearkey', clearKeys },
+        (error) => this.fail(error),
+      );
+    else this.eme.addClearKeys(clearKeys);
+    await this.eme.ensure(capabilities);
+    await this.eme.requestKeyIds(protectedTracks);
+  }
   private async appendPrepared(lane: MediaLane, prepared: PreparedSegment) {
     if (lane.role === 'main')
       this.diagnostics.unsupportedCaptions = prepared.ignoredCaptions.filter(
         (t) => !['c608', 'c708'].includes(t.format),
       );
     this.assertLayout(prepared, lane);
+    await this.ensureProtection(prepared);
     lane.configure(this.media!, prepared);
     let offset =
       lane.role === 'audio'
@@ -799,6 +863,11 @@ export class HlsEngine extends EventTarget {
         prepared: await lane.prepare(),
       })),
     );
+    for (const { prepared } of first)
+      await this.ensureProtection(
+        prepared,
+        first.flatMap((item) => item.prepared.tracks),
+      );
     for (const { lane, prepared } of first) {
       this.assertLayout(prepared, lane);
       lane.configure(this.media!, prepared);
@@ -1240,8 +1309,11 @@ export class HlsEngine extends EventTarget {
     sequence: number,
   ) {
     if (!key) return data;
-    if (key.method === 'SAMPLE-AES')
-      throw new Error('SAMPLE-AES requires an elementary sample decoder');
+    if (key.method === 'SAMPLE-AES' || key.method === 'SAMPLE-AES-CTR') {
+      throw new Error(
+        'Sample encryption requires a sample decoder or DRM configuration',
+      );
+    }
     const imported = await this.importKey(key);
     if (key.method === 'AES-256-GCM') {
       if (data.length < 32) throw new Error('Truncated AES-256-GCM resource');
@@ -1704,7 +1776,10 @@ export class HlsEngine extends EventTarget {
     this.video.load();
     if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
     this.keys.clear();
+    this.identityKeys.clear();
     this.prefetchedKeys.clear();
+    await this.eme?.destroy();
+    this.eme = undefined;
     this.state('closed');
   }
 }
