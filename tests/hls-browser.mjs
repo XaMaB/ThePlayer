@@ -200,7 +200,14 @@ try {
           (await page.evaluate(() => window.__moq.diagnostics.cuesReceived)) >
             0,
         );
+        const displayed = await page.evaluate(
+          () => window.__moq.diagnostics.cuesRendered,
+        );
         await page.evaluate(() => window.player.selectSubtitleTrack(''));
+        assert.equal(
+          await page.evaluate(() => window.__moq.diagnostics.cuesRendered),
+          displayed,
+        );
         assert.ok(
           await page.evaluate(() =>
             Array.from(document.querySelector('video').textTracks).every(

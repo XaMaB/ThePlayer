@@ -208,7 +208,7 @@ async function openChannel(next: any) {
       text('cue-count', e.detail.received);
       text('subtitle-displayed', e.detail.displayed);
     });
-    renderer.attach(player);
+    if (next.protocol !== 'hls') renderer.attach(player);
     await player.init();
     if (token !== operation) return;
     client = player;
