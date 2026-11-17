@@ -1,3 +1,4 @@
+import { captionMetadata, extract608, type CaptionPacket } from './c608-mp4';
 import {
   filterCaptionInit,
   filterCaptionMedia,
@@ -22,6 +23,8 @@ export interface PreparedSegment {
   bytes: number;
   elapsed: number;
   ignoredCaptions: IgnoredCaptionTrack[];
+  captionPackets: CaptionPacket[];
+  captionError?: string;
 }
 /** Each independently loaded rendition owns one SourceBuffer and decoder configuration. */
 export class MediaLane {
@@ -33,6 +36,8 @@ export class MediaLane {
   next = 0;
   refreshedAt = performance.now();
   private decoder: TsTransmuxer;
+  private captionMeta: ReturnType<typeof captionMetadata> = [];
+  private captionMetaError?: string;
   private preparedDiscontinuity = -1;
   private ignoredCaptions: IgnoredCaptionTrack[] = [];
   private initCache?: { key: string; data: Uint8Array };
@@ -65,19 +70,44 @@ export class MediaLane {
       this.preparedDiscontinuity = segment.discontinuity;
     }
     let init: Uint8Array, tracks: Track[], rawStart: number;
+    let captionPackets: CaptionPacket[] = [],
+      captionError: string | undefined = this.captionMetaError;
     if (segment.map) {
       const key = JSON.stringify([segment.map, segment.key]);
       if (this.initCache?.key !== key) {
         if (segment.key && !segment.key.iv)
           throw new Error('Encrypted initialization needs an explicit IV');
         const loaded = await this.load(segment.map);
-        const filtered = filterCaptionInit(
-          await this.decrypt(loaded.data, segment.key, segment.sequence),
+        const original = await this.decrypt(
+          loaded.data,
+          segment.key,
+          segment.sequence,
         );
+        const filtered = filterCaptionInit(original);
+        this.captionMeta = [];
+        this.captionMetaError = undefined;
+        if (filtered.ignored.some((t) => t.format === 'c608')) {
+          try {
+            this.captionMeta = captionMetadata(original);
+          } catch (error) {
+            this.captionMetaError =
+              error instanceof Error ? error.message : String(error);
+          }
+        }
+        captionError = this.captionMetaError;
         this.ignoredCaptions = filtered.ignored;
         this.initCache = { key, data: filtered.data };
       }
       init = this.initCache.data;
+      try {
+        captionPackets = extract608(
+          data,
+          this.captionMeta,
+          segment.range?.offset ?? 0,
+        );
+      } catch (error) {
+        captionError = error instanceof Error ? error.message : String(error);
+      }
       data = filterCaptionMedia(data, this.ignoredCaptions);
       tracks = inspectInit(init);
       rawStart = decodeTime(data, tracks);
@@ -99,6 +129,8 @@ export class MediaLane {
       bytes: response.data.length,
       elapsed: response.elapsed,
       ignoredCaptions: this.ignoredCaptions,
+      captionPackets,
+      captionError,
     };
   }
   configure(media: MediaSource, prepared: PreparedSegment) {

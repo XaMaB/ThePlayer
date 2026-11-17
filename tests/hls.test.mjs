@@ -553,3 +553,190 @@ test('ancillary c608/c708 tracks cannot block A/V or change fragment offsets', a
   const init = initialization([audio]);
   assert.equal(filterCaptionInit(init).data, init);
 });
+
+const { Cea608Decoder, row608Text } = await module('cea608');
+const parity608 = (value) => {
+  let n = value,
+    bits = 0;
+  while (n) {
+    bits ^= n & 1;
+    n >>>= 1;
+  }
+  return value | (bits ? 0 : 128);
+};
+function feed608(decoder, pairs, time = 0) {
+  return pairs.flatMap(([a, b], i) =>
+    decoder.push(parity608(a), parity608(b), time + i / 30),
+  );
+}
+const plain608 = (event) =>
+  event.rows.map((r) => r.cells.map((c) => c?.char ?? ' ').join('')).join('\n');
+test('608 pop-on remains hidden until EOC; duplicate controls, PAC and erasure', () => {
+  const d = new Cea608Decoder();
+  assert.deepEqual(
+    feed608(d, [
+      [0x14, 0x20],
+      [0x14, 0x20],
+      [0x11, 0x54],
+      [0x11, 0x54],
+      [72, 73],
+    ]),
+    [],
+  );
+  const out = feed608(
+    d,
+    [
+      [0x14, 0x2f],
+      [0x14, 0x2f],
+    ],
+    1,
+  );
+  assert.equal(out.length, 1);
+  assert.equal(plain608(out[0]), 'HI');
+  assert.equal(out[0].rows[0].row, 0);
+  assert.equal(out[0].rows[0].column, 8);
+  assert.equal(
+    feed608(
+      d,
+      [
+        [0x14, 0x2c],
+        [0x14, 0x2c],
+      ],
+      2,
+    ).length,
+    1,
+  );
+});
+test('608 roll-up requires CR; PAC moves its base without implicitly scrolling', () => {
+  const d = new Cea608Decoder();
+  feed608(d, [
+    [0x14, 0x25],
+    [0x14, 0x25],
+    [0x14, 0x70],
+    [65, 65],
+  ]);
+  feed608(d, [
+    [0x14, 0x2d],
+    [0x14, 0x2d],
+    [66, 66],
+  ]);
+  let rows = d.screens(0)[0].rows;
+  assert.deepEqual(
+    rows.map((r) => r.row),
+    [13, 14],
+  );
+  assert.equal(plain608(d.screens(0)[0]), 'AA\nBB');
+  feed608(d, [[0x16, 0x40]]);
+  rows = d.screens(0)[0].rows;
+  assert.deepEqual(
+    rows.map((r) => r.row),
+    [5, 6],
+  );
+  assert.equal(plain608(d.screens(0)[0]), 'AA\nBB');
+});
+test('608 extended replacement, special glyphs, channel isolation, parity and escaping', () => {
+  const d = new Cea608Decoder();
+  feed608(d, [
+    [0x14, 0x29],
+    [65, 0],
+    [0x12, 0x20],
+    [0x11, 0x37],
+    [60, 38],
+  ]);
+  assert.equal(plain608(d.screens(0)[0]), 'Á♪<&');
+  assert.match(row608Text(d.screens(0)[0].rows[0]), /&lt;/);
+  feed608(d, [
+    [0x1c, 0x29],
+    [66, 66],
+  ]);
+  assert.equal(plain608(d.screens(0)[1]), 'BB');
+  assert.equal(plain608(d.screens(0)[0]), 'Á♪<&');
+  assert.deepEqual(d.push(0x14, parity608(0x2c), 2), []);
+  assert.equal(d.parityErrors, 1);
+  const copy = d.clone();
+  feed608(copy, [[0x1c, 0x2c]]);
+  assert.equal(plain608(d.screens(0)[1]), 'BB');
+});
+const { Cea608Timeline } = await module('cea608-timeline');
+test('608 timeline replaces buffered future captions and checkpoints long-lived screens', () => {
+  const t = new Cea608Timeline();
+  const packets = (text, time) =>
+    [[0x14, 0x29], ...Array.from(text, (c) => [c.charCodeAt(0), 0])].map(
+      ([a, b], i) => ({
+        first: parity608(a),
+        second: parity608(b),
+        time: time + i / 30,
+      }),
+    );
+  t.update(packets('A', 0), 0, 0, 2, 0, 0);
+  t.update(packets('B', 2), 0, 2, 4, 0, 0);
+  assert.equal(plain608(t.events.at(-1)), 'AB');
+  t.update(packets('C', 2), 0, 2, 4, 0, 0, true);
+  assert.equal(plain608(t.events.at(-1)), 'AC');
+  t.update([], 0, 50, 52, 0, 50);
+  assert.ok(t.events.some((e) => plain608(e) === 'AC'));
+  t.reset();
+  assert.deepEqual(t.events, []);
+});
+
+test('c608 sample extraction honors composition offsets and rejects pointers outside mdat', async () => {
+  const { initialization, boxes, fragment, box } = await module('mp4');
+  const { captionMetadata, extract608 } = await module('c608-mp4');
+  const track = {
+    id: 2,
+    kind: 'audio',
+    timescale: 1000,
+    codec: 'mp4a.40.2',
+    channels: 2,
+    asc: Uint8Array.of(0x11, 0x90),
+  };
+  const init = initialization([track]);
+  const child = (d, t) => boxes(d).find((b) => b.type === t).body;
+  const mdia = child(child(child(init, 'moov'), 'trak'), 'mdia');
+  child(mdia, 'hdlr').set(new TextEncoder().encode('clcp'), 8);
+  const entry = boxes(
+    child(child(child(mdia, 'minf'), 'stbl'), 'stsd').subarray(8),
+  )[0];
+  init.set(
+    new TextEncoder().encode('c608'),
+    entry.body.byteOffset - init.byteOffset - 4,
+  );
+  const metadata = captionMetadata(init);
+  const sample = {
+    data: box('cdat', Uint8Array.of(parity608(0x14), parity608(0x2f))),
+    duration: 1000,
+    cts: -1000,
+    key: true,
+  };
+  const media = fragment(track, [sample], 6000, 1);
+  assert.deepEqual(extract608(media, metadata), [
+    { time: 5, first: parity608(0x14), second: parity608(0x2f) },
+  ]);
+  const run = child(child(child(media, 'moof'), 'traf'), 'trun');
+  new DataView(run.buffer, run.byteOffset, run.byteLength).setInt32(8, 0);
+  assert.throws(() => extract608(media, metadata), /sample bounds/);
+});
+test('608 tab, underline/italics, backspace and delete-to-end stay inside the 32-column row', () => {
+  const d = new Cea608Decoder();
+  feed608(d, [
+    [0x14, 0x29],
+    [0x11, 0x4f],
+    [0x17, 0x23],
+    [65, 66],
+    [0x14, 0x21],
+    [67, 0],
+    [0x14, 0x24],
+  ]);
+  const r = d.screens(0)[0].rows[0];
+  assert.equal(r.column, 3);
+  assert.equal(plain608(d.screens(0)[0]), 'AC');
+  assert.equal(r.cells[0].italic, true);
+  assert.equal(r.cells[0].underline, true);
+  feed608(d, [
+    [0x11, 0x5e],
+    [0x17, 0x23],
+    [65, 66],
+    [67, 68],
+  ]);
+  assert.equal(d.screens(0)[0].rows[0].cells.at(-1).char, 'D');
+});

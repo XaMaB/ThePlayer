@@ -1227,3 +1227,7 @@ body[data-embed] .screen {
   letter-spacing: 0.08em;
   pointer-events: none;
 }
+
+video::cue(.cea608) {
+  font-family: monospace;
+}

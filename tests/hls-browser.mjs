@@ -316,7 +316,43 @@ try {
           await page.evaluate(
             () => window.player.diagnostics.unsupportedCaptions,
           ),
-          [{ id: 99, format: 'c608' }],
+          [],
+        );
+        await page.evaluate(() =>
+          window.player.selectSubtitleTrack('hls-608-1'),
+        );
+        await page.waitForFunction(() =>
+          Array.from(document.querySelector('video').textTracks).some((t) =>
+            Array.from(t.activeCues ?? []).some((c) =>
+              c.getCueAsHTML().textContent.includes('ThePlayer'),
+            ),
+          ),
+        );
+        const placement = await page.evaluate(() =>
+          Array.from(document.querySelector('video').textTracks)
+            .flatMap((t) => Array.from(t.activeCues ?? []))
+            .map((c) => ({
+              line: c.line,
+              position: c.position,
+              align: c.align,
+            })),
+        );
+        assert.equal(placement[0].line, 10);
+        assert.equal(placement[0].position, 30);
+        assert.equal(placement[0].align, 'left');
+        await page.evaluate(() => {
+          document.querySelector('video').currentTime = 12;
+        });
+        await page.waitForFunction(
+          () => document.querySelector('video').currentTime > 12.5,
+        );
+        await page.evaluate(() => window.player.selectSubtitleTrack(''));
+        assert.ok(
+          await page.evaluate(() =>
+            Array.from(document.querySelector('video').textTracks).every(
+              (t) => t.mode === 'disabled',
+            ),
+          ),
         );
         assert.equal(
           await page.locator('#placeholder h2').textContent(),

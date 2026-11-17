@@ -35,19 +35,19 @@ ThePlayer brings multilingual audio, broadcast captions and live playback contro
 
 MoQ defines transport behavior; applications still need a matching catalog and media profile. An arbitrary MoQ relay or publisher is not automatically interoperable with this player.
 
-The DVB, teletext and CEA-708 entries below describe the **MoQ pipeline**. HLS currently supports WebVTT only; see its [separate matrix](docs/hls-support.md).
+The DVB, teletext and CEA-708 entries below describe the **MoQ pipeline**. HLS supports WebVTT and CEA-608 field-1 captions in fMP4 `c608` tracks; see its [separate matrix](docs/hls-support.md).
 
 ## Subtitles
 
-| Format             | Available today                  | Delivery and rendering                                                                       |
-| ------------------ | -------------------------------- | -------------------------------------------------------------------------------------------- |
-| DVB subtitles      | Yes, with a compatible Origin    | Origin-decoded, timestamped bitmap cues; browser canvas preserves their placement            |
-| Teletext subtitles | Yes, with a compatible Origin    | Origin-decoded bitmap cues, selectable by the advertised track/language                      |
-| CEA-708 / DTVCC    | Implemented subset               | Decoded in the browser from AVC/H.264 SEI; service discovery and selectable caption services |
-| CEA-708 P16        | Yes                              | Two-byte operand handling, Cyrillic/Latin Extended support and configurable service encoding |
-| WebVTT             | HLS baseline                     | Segmented text cues and basic browser placement                                              |
-| TTML / IMSC        | Not implemented                  | Planned HLS text/manifest integration                                                        |
-| CEA-608            | Not exposed as a supported track | No supported end-to-end selection/rendering API in this release                              |
+| Format             | Available today               | Delivery and rendering                                                                       |
+| ------------------ | ----------------------------- | -------------------------------------------------------------------------------------------- |
+| DVB subtitles      | Yes, with a compatible Origin | Origin-decoded, timestamped bitmap cues; browser canvas preserves their placement            |
+| Teletext subtitles | Yes, with a compatible Origin | Origin-decoded bitmap cues, selectable by the advertised track/language                      |
+| CEA-708 / DTVCC    | Implemented subset            | Decoded in the browser from AVC/H.264 SEI; service discovery and selectable caption services |
+| CEA-708 P16        | Yes                           | Two-byte operand handling, Cyrillic/Latin Extended support and configurable service encoding |
+| WebVTT             | HLS baseline                  | Segmented text cues and basic browser placement                                              |
+| TTML / IMSC        | Not implemented               | Planned HLS text/manifest integration                                                        |
+| CEA-608            | HLS fMP4 `c608`, CC1/CC2      | Pop-on, paint-on, roll-up, row/column placement and character styles; see HLS limits         |
 
 **CEA-708 layout follows the source.** Window anchors, positioning, justification, explicit rows, column limits and pen size are retained. Captions are synchronized to the video's media clock, including fullscreen letterboxing.
 
@@ -202,4 +202,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.6.0-alpha.2**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.7.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

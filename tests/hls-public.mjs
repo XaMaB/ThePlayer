@@ -199,22 +199,58 @@ try {
         );
       }
       if (source.id === 'apple-dv-atmos') {
-        assert.ok(
-          await page.evaluate(() =>
-            window.player.diagnostics.unsupportedCaptions.some((t) =>
-              t.format.includes('c608'),
-            ),
-          ),
-        );
         assert.equal(
           await page.locator('#placeholder h2').textContent(),
           'ThePlayer',
         );
         await page.evaluate(() => {
+          window.player.selectSubtitleTrack('hls-608-1');
           document.querySelector('video').currentTime = 60;
         });
         await page.waitForFunction(
-          () => document.querySelector('video').currentTime > 63,
+          () =>
+            document.querySelector('video').currentTime > 63 &&
+            Array.from(document.querySelector('video').textTracks).some(
+              (t) =>
+                t.mode === 'showing' &&
+                Array.from(t.activeCues ?? []).some((c) => c.id === 'cea608'),
+            ),
+          null,
+          { timeout: 45000 },
+        );
+        assert.equal(
+          await page.evaluate(
+            () => window.player.diagnostics.captions608.warning,
+          ),
+          '',
+        );
+        assert.equal(
+          await page.evaluate(
+            () => window.player.diagnostics.captions608.parityErrors,
+          ),
+          0,
+        );
+        await page.evaluate(() => window.player.selectQuality(0));
+        await page.waitForFunction(
+          () => window.player.currentQuality === 0,
+          null,
+          { timeout: 30000 },
+        );
+        await page.waitForFunction(
+          () => {
+            const video = document.querySelector('video');
+            return (
+              video.currentTime >
+                window.player.diagnostics.switches.at(-1).effectiveAt + 0.5 &&
+              Array.from(video.textTracks).some(
+                (t) =>
+                  t.mode === 'showing' &&
+                  Array.from(t.activeCues ?? []).some((c) => c.id === 'cea608'),
+              )
+            );
+          },
+          null,
+          { timeout: 45000 },
         );
       }
       const tracks = await page.evaluate(() => window.player.subtitleTracks);

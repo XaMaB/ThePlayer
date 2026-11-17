@@ -33,3 +33,11 @@ Before publishing:
 - Neutralize caption track and fragment descriptors without changing media offsets; record skipped captions in diagnostics. This does not add CEA-608/708 rendering.
 - Keep external WebVTT selection available; verify the Apple Dolby sample through compatible AVC/AAC variants.
 - Replace the remaining MoQ-only placeholder and integration copy with ThePlayer branding and protocol-neutral instructions.
+
+## 0.7.0-alpha.1
+
+- Original CEA-608 field-1 decoder for HLS fMP4 `c608`/`cdat`, with selectable CC1/CC2.
+- Pop-on, paint-on and roll-up memories, PAC placement, character sets, parity and foreground styling.
+- Caption timeline checkpoints, bounded seek preroll and replacement at quality transitions.
+- Native text-track rendering with source row/column anchors; external WebVTT remains selectable.
+- Synthetic unit/browser regressions and actual Apple English CC1 playback. See the support matrix for unsupported carriage and styling features.

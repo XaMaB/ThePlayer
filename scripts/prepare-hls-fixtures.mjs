@@ -466,7 +466,7 @@ await writeFile(
 );
 
 // Structural regression: an unsupported caption track alongside real A/V.
-// The placeholder caption bytes intentionally are not a CEA decoding fixture.
+// Original pop-on caption bytes with odd parity and duplicate controls.
 {
   const { build } = await import('esbuild');
   const bundled = await build({
@@ -528,10 +528,45 @@ await writeFile(
     .split('\n')
     .filter((line) => line.endsWith('.m4s'))) {
     const media = await readFile(path.join(source, name));
+    const parity = (value) => {
+      let n = value,
+        bits = 0;
+      while (n) {
+        bits ^= n & 1;
+        n >>>= 1;
+      }
+      return value | (bits ? 0 : 128);
+    };
+    const pairs = [
+      0x14,
+      0x20,
+      0x14,
+      0x20,
+      0x14,
+      0x2e,
+      0x14,
+      0x2e,
+      0x11,
+      0x54,
+      0x11,
+      0x54,
+      ...Array.from('ThePlayer 608 ', (c) => c.charCodeAt(0)),
+      0x14,
+      0x2f,
+      0x14,
+      0x2f,
+    ];
     const extra = fragment(
       { id: 99, kind: 'audio', timescale: 90000, codec: 'c608' },
-      [{ data: Uint8Array.of(0, 0), duration: 90000, cts: 0, key: true }],
-      0,
+      [
+        {
+          data: box('cdat', Uint8Array.from(pairs, parity)),
+          duration: 90000,
+          cts: 0,
+          key: true,
+        },
+      ],
+      Number(/segment(\d+)/.exec(name)[1]) * 180000,
       999,
     );
     await writeFile(path.join(dir, name), concat(media, extra));

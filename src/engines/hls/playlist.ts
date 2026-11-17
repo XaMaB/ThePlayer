@@ -31,6 +31,7 @@ export interface Variant {
   resolution?: string;
   audio?: string;
   subtitles?: string;
+  closedCaptions?: string;
 }
 export interface Rendition {
   type: string;
@@ -42,6 +43,7 @@ export interface Rendition {
   autoselect: boolean;
   forced: boolean;
   associatedLanguage?: string;
+  instreamId?: string;
   characteristics: string[];
 }
 export interface Playlist {
@@ -185,6 +187,7 @@ export function parsePlaylist(
           resolution: variant.RESOLUTION,
           audio: variant.AUDIO,
           subtitles: variant.SUBTITLES,
+          closedCaptions: variant['CLOSED-CAPTIONS'],
         });
         variant = undefined;
         continue;
@@ -329,6 +332,7 @@ export function parsePlaylist(
           autoselect: a.AUTOSELECT === 'YES',
           forced: a.FORCED === 'YES',
           associatedLanguage: a['ASSOC-LANGUAGE'],
+          instreamId: a['INSTREAM-ID'],
           characteristics: a.CHARACTERISTICS?.split(',') ?? [],
         });
         break;

@@ -203,6 +203,7 @@ export function mountControls(
         dvb: 'DVB bitmap subtitles',
         teletext: 'Teletext subtitles',
         'cea-708': 'CEA-708 closed captions',
+        'cea-608': 'CEA-608 closed captions',
       };
       badge.title = names[format] ?? format;
       badge.setAttribute('aria-label', badge.title);

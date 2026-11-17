@@ -1,3 +1,5 @@
+import { Cea608Timeline } from './cea608-timeline';
+import { row608Text } from './cea608';
 import type { Track } from './mp4';
 import { selectRendition } from './selection';
 import { AbrController } from './abr';
@@ -51,6 +53,7 @@ export class HlsEngine extends EventTarget {
     quality: {} as Record<string, unknown>,
     abrWarning: '',
     unsupportedCaptions: [] as { id: number; format: string }[],
+    captions608: { packets: 0, parityErrors: 0, events: 0, warning: '' },
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
     startup: { firstFrameMs: null as number | null },
     buffer: {} as Record<string, unknown>,
@@ -81,6 +84,8 @@ export class HlsEngine extends EventTarget {
     return this.main?.playlist;
   }
   private master?: Playlist;
+  private captions608 = new Cea608Timeline();
+  private captions608Seen = new Map<string, number>();
   private media?: MediaSource;
   private mediaUrl?: string;
   private main?: MediaLane;
@@ -342,6 +347,15 @@ export class HlsEngine extends EventTarget {
           segmentAt(lane.playlist, this.video.currentTime),
           lane.playlist.segments.length - 1,
         );
+    if (
+      this.main.ahead(this.video.currentTime) < 0.1 &&
+      this.subtitleTracks.some((t) => t.format === 'cea-608')
+    ) {
+      this.captions608.reset();
+      this.main.next = Math.max(0, this.main.next - 3);
+      if (!this.subtitleManual) this.selectAutomaticSubtitles();
+      if (this.selectedSubtitle.startsWith('hls-608-')) this.render608();
+    }
     this.ended = false;
   }
   private ahead() {
@@ -397,7 +411,9 @@ export class HlsEngine extends EventTarget {
   }
   private async appendPrepared(lane: MediaLane, prepared: PreparedSegment) {
     if (lane.role === 'main')
-      this.diagnostics.unsupportedCaptions = prepared.ignoredCaptions;
+      this.diagnostics.unsupportedCaptions = prepared.ignoredCaptions.filter(
+        (t) => t.format !== 'c608',
+      );
     this.assertLayout(prepared, lane);
     lane.configure(this.media!, prepared);
     const offset =
@@ -416,6 +432,56 @@ export class HlsEngine extends EventTarget {
     await lane.append(prepared, offset, (buffer, action) =>
       this.operation(buffer, action),
     );
+    if (
+      lane.role === 'main' &&
+      prepared.ignoredCaptions.some((t) => t.format === 'c608')
+    ) {
+      this.captions608.update(
+        prepared.captionPackets,
+        offset,
+        prepared.segment.start,
+        prepared.segment.start + prepared.segment.duration,
+        prepared.segment.discontinuity,
+        this.video.currentTime,
+        lane !== this.main,
+      );
+      this.diagnostics.captions608.packets += prepared.captionPackets.length;
+      this.diagnostics.captions608.parityErrors = this.captions608.parityErrors;
+      this.diagnostics.captions608.events = this.captions608.events.filter(
+        (e) => e.rows.length && !e.checkpoint,
+      ).length;
+      this.diagnostics.captions608.warning = prepared.captionError ?? '';
+      for (const service of [1, 2]) {
+        const name = 'hls-608-' + service;
+        if (this.subtitleTracks.some((t) => t.name === name)) continue;
+        const group = this.qualityLevels[this.selectedQuality]?.closedCaptions;
+        const metadata = this.master?.renditions.find(
+          (r) =>
+            r.type === 'CLOSED-CAPTIONS' &&
+            r.group === group &&
+            r.instreamId === 'CC' + service,
+        );
+        if (
+          service === 2 &&
+          !metadata &&
+          !this.captions608.events.some((e) => e.service === 2 && e.rows.length)
+        )
+          continue;
+        this.subtitleTracks.push({
+          name,
+          format: 'cea-608',
+          service,
+          language: metadata?.language ?? 'und',
+          label: (metadata?.name ? metadata.name + ' · ' : '') + 'CC' + service,
+          default: metadata?.default ?? false,
+          autoselect: metadata?.autoselect ?? false,
+          forced: false,
+        });
+        this.emit('subtitletracks', this.subtitleTracks);
+      }
+      if (!this.subtitleManual) this.selectAutomaticSubtitles();
+      if (this.selectedSubtitle.startsWith('hls-608-')) this.render608();
+    }
     this.diagnostics.objects++;
     if (lane.role === 'main') {
       this.abr.observe(prepared.bytes, prepared.elapsed);
@@ -890,6 +956,15 @@ export class HlsEngine extends EventTarget {
     };
     textTrack.addEventListener('cuechange', update, { signal: abort.signal });
 
+    if (track.format === 'cea-608') {
+      abort.signal.addEventListener(
+        'abort',
+        () => this.abort.signal.removeEventListener('abort', stop),
+        { once: true },
+      );
+      this.render608();
+      return;
+    }
     void (async () => {
       const client = new ResourceClient(
         this.source.network ?? {},
@@ -950,6 +1025,38 @@ export class HlsEngine extends EventTarget {
         if (!abort.signal.aborted) this.emit('captionwarning', error);
       })
       .finally(() => this.abort.signal.removeEventListener('abort', stop));
+  }
+  private render608() {
+    if (!this.textTrack) return;
+    const service = Number(this.selectedSubtitle.replace('hls-608-', ''));
+    const events = this.captions608.events.filter((e) => e.service === service);
+    for (const cue of Array.from(this.textTrack.cues ?? []))
+      this.textTrack.removeCue(cue);
+    for (const [key, time] of this.captions608Seen)
+      if (time < this.video.currentTime - 35) this.captions608Seen.delete(key);
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i],
+        end = events[i + 1]?.time ?? this.captions608.horizon;
+      if (end <= Math.max(0, event.time) || end < this.video.currentTime - 35)
+        continue;
+      const key = JSON.stringify(event);
+      if (!event.checkpoint && !this.captions608Seen.has(key)) {
+        this.subtitleCounters.receive();
+        this.captions608Seen.set(key, event.time);
+      }
+      for (const row of event.rows) {
+        const cue = new VTTCue(Math.max(0, event.time), end, row608Text(row));
+        cue.id = 'cea608';
+        cue.snapToLines = false;
+        cue.line = 10 + (row.row * 80) / 15;
+        cue.lineAlign = 'start';
+        cue.position = 10 + (row.column * 80) / 32;
+        cue.positionAlign = 'line-left';
+        cue.align = 'left';
+        cue.size = ((32 - row.column) * 80) / 32;
+        this.textTrack.addCue(cue);
+      }
+    }
   }
   seekToLive() {
     if (!this.isLive || !this.playlist) return;
