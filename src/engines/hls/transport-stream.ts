@@ -1,3 +1,4 @@
+import { ac3Samples } from './ac3';
 import { parseId3 } from './id3';
 import type { TimedMetadata } from './metadata';
 import { seiCaptions, type CcData } from './cea-sei';
@@ -235,24 +236,42 @@ export function demux(bytes: Uint8Array): Pes[] {
             let i = 12 + ((part[10] & 15) << 8) + part[11];
             if (i > end) throw new Error('Invalid PMT program descriptors');
             for (; i + 5 <= end; ) {
-              const type = part[i],
-                elementary = ((part[i + 1] & 31) << 8) | part[i + 2];
+              let type = part[i];
+              const elementary = ((part[i + 1] & 31) << 8) | part[i + 2];
               const next = i + 5 + ((part[i + 3] & 15) << 8) + part[i + 4];
               if (next > end)
                 throw new Error('Invalid PMT elementary descriptors');
-              if ([0x1b, 0x24, 0x0f, 0xdb, 0xcf, 0x15].includes(type)) {
+              if (type === 0x06) {
+                for (let d = i + 5; d < next; ) {
+                  if (d + 2 > next || d + 2 + part[d + 1] > next)
+                    throw new Error('Invalid elementary descriptor bounds');
+                  if (
+                    part[d] === 0x6a ||
+                    (part[d] === 5 &&
+                      part[d + 1] >= 4 &&
+                      String.fromCharCode(...part.subarray(d + 2, d + 6)) ===
+                        'AC-3')
+                  )
+                    type = 0x81;
+                  if (part[d] === 0x7a) type = 0x87;
+                  d += 2 + part[d + 1];
+                }
+              }
+              if (
+                [0x1b, 0x24, 0x0f, 0xdb, 0xcf, 0x15, 0x81, 0xc1].includes(type)
+              ) {
                 if (
                   Array.from(discovered).some(
                     ([id, kind]) =>
                       id !== elementary &&
                       (kind === 0x15
                         ? 2
-                        : [0x0f, 0xcf].includes(kind)
+                        : [0x0f, 0xcf, 0x81, 0xc1].includes(kind)
                           ? 1
                           : 0) ===
                         (type === 0x15
                           ? 2
-                          : [0x0f, 0xcf].includes(type)
+                          : [0x0f, 0xcf, 0x81, 0xc1].includes(type)
                             ? 1
                             : 0),
                   )
@@ -261,8 +280,8 @@ export function demux(bytes: Uint8Array): Pes[] {
                     'Multiple same-kind elementary streams are not yet supported',
                   );
                 discovered.set(elementary, type);
-              } else if ([0x03, 0x04, 0x81, 0x87, 0xc1, 0xc2].includes(type))
-                throw new Error('TS supports AVC/HEVC/AAC only');
+              } else if ([0x03, 0x04, 0x87, 0xc2].includes(type))
+                throw new Error('TS supports AVC/HEVC/AAC/AC-3 only');
               i = next;
             }
             if (i !== end) throw new Error('Truncated PMT elementary entry');
@@ -305,11 +324,11 @@ export class TsTransmuxer {
     return this.transmuxPes(demux(bytes), segmentDuration);
   }
   transmuxPes(pes: Pes[], segmentDuration: number) {
-    if (pes.some((p) => p.type === 0xdb || p.type === 0xcf))
+    if (pes.some((p) => p.type === 0xdb || p.type === 0xcf || p.type === 0xc1))
       throw new Error('Encrypted TS samples require SAMPLE-AES decryption');
     const first =
       pes.find((p) => (p.type === 0x1b || p.type === 0x24) && p.dts != null) ??
-      pes.find((p) => p.type === 0x0f && p.dts != null);
+      pes.find((p) => (p.type === 0x0f || p.type === 0x81) && p.dts != null);
     if (!first || first.dts == null) throw new Error('No PES timestamp anchor');
     const reference = this.clock ?? first.dts;
     for (const p of pes) {
@@ -517,6 +536,25 @@ export class TsTransmuxer {
           ),
         );
       }
+    }
+    const dolby = pes.filter((p) => p.type === 0x81);
+    if (dolby.length) {
+      const timestamp = dolby[0].pts;
+      if (timestamp == null)
+        throw new Error('First AC-3 PES needs a timestamp');
+      const { track, samples } = ac3Samples(
+        concat(...dolby.map((p) => p.data)),
+      );
+      tracks.push(track);
+      starts.push(timestamp / 90000);
+      media.push(
+        fragment(
+          track,
+          samples,
+          (timestamp * track.timescale) / 90000,
+          ++this.serial,
+        ),
+      );
     }
     const metadata: TimedMetadata[] = [];
     let metadataError: string | undefined;

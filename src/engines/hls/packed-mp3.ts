@@ -5,6 +5,7 @@ import type { TimedMetadata } from './metadata';
 export function packedAudioKind(input: Uint8Array) {
   let at = 0;
   while (isId3(input, at)) at += parseId3(input.subarray(at)).consumed;
+  if (input[at] === 0x0b && input[at + 1] === 0x77) return 'ac3';
   return input[at] === 255 && (input[at + 1] & 0xf6) === 0xf0 ? 'aac' : 'mp3';
 }
 export function packedMp3(input: Uint8Array) {

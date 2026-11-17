@@ -71,3 +71,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.19.0-alpha.1 adds packed AAC and ID3/emsg metadata delivery with browser-engine coverage. Continue with remaining packed codecs, protocol extensions, expanded interoperability and stabilization.
 
 0.20.0-alpha.1 adds packed MP3 with raw-MPEG/fMP4 browser capability selection and independent decoding checks. Continue with Dolby audio framing/encryption, protocol extensions and stabilization.
+
+0.21.0-alpha.1 adds AC-3 TS/packed and AC-3/E-AC-3 fMP4 with browser capability validation. Continue with E-AC-3 framing, protocol extensions and stabilization.

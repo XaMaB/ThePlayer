@@ -147,15 +147,16 @@ test('HTTP client retries, slices ignored range requests and aborts pending read
 
 const { compatibleVariants, alignRendition, segmentAt, switchBoundary } =
   await module('renditions');
-test('codec filtering accepts HE-AAC v1 and excludes unsupported Dolby combinations', () => {
+test('codec filtering accepts declared AAC/Dolby formats and excludes unknown audio codecs', () => {
   const variants = [
     { url: 'a', bandwidth: 1, codecs: 'avc1.64001f,mp4a.40.2' },
     { url: 'b', bandwidth: 2, codecs: 'avc1.64001f,mp4a.40.5' },
     { url: 'c', bandwidth: 3, codecs: 'hvc1.1.6.L93,ac-3' },
+    { url: 'd', bandwidth: 4, codecs: 'avc1.64001f,unknown.audio' },
   ];
   assert.deepEqual(
     compatibleVariants(variants).map((v) => v.url),
-    ['a', 'b'],
+    ['a', 'b', 'c'],
   );
 });
 test('renditions with different media sequence numbers align by program date', () => {

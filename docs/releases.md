@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.21.0-alpha.1
+
+- Original AC-3 TS/packed framing and fMP4 remux, with SAMPLE-AES frame decryption.
+- AC-3/E-AC-3 fMP4 sample entries and browser capability filtering.
+- Independent decoded audio/sample-clock checks and WebKit playback/seek coverage; explicit unsupported-browser errors.
+- E-AC-3 TS/packed framing and audio setup/priming remain follow-up work.
+
 ## 0.20.0-alpha.1
 
 - Add packed MPEG-1/2/2.5 Layer III with CBR/VBR frame parsing, ID3 clocks, AES-128 and timestamp rollover.

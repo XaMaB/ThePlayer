@@ -37,7 +37,7 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
               /^(?:wvtt|stpp(?:\.ttml(?:\.(?:im1t|etd1)(?:\|(?:im1t|etd1))*)?)?)$/.test(
                 codec,
               ) ||
-              codec === 'mp3' ||
+              ['mp3', 'ac-3', 'ec-3'].includes(codec) ||
               !!normalizeAv1Codec(codec) ||
               /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
                 codec,

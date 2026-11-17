@@ -1,3 +1,4 @@
+import { ac3Header } from './ac3';
 /** Original HLS sample encryption primitives, from Apple's MPEG-2 stream encryption specification. */
 export async function decryptCbcBlocks(
   data: Uint8Array,
@@ -85,6 +86,25 @@ export async function decryptAacSamples(
   return out;
 }
 
+export async function decryptAc3Samples(
+  data: Uint8Array,
+  key: CryptoKey,
+  iv: Uint8Array,
+) {
+  const out = data.slice();
+  for (let at = 0; at < out.length; ) {
+    const header = ac3Header(out, at);
+    if (at + header.size > out.length)
+      throw new Error('Truncated SAMPLE-AES AC-3 frame');
+    const start = at + 16,
+      end = start + Math.max(0, Math.floor((header.size - 16) / 16)) * 16;
+    if (end > start)
+      out.set(await decryptCbcBlocks(out.subarray(start, end), key, iv), start);
+    at += header.size;
+  }
+  return out;
+}
+
 interface SamplePes {
   type: number;
   pts?: number;
@@ -108,9 +128,14 @@ export async function decryptSamplePes<T extends SamplePes>(
   iv: Uint8Array,
 ): Promise<T[]> {
   const output = input.map((p) => ({ ...p }));
-  for (const kind of ['video', 'audio']) {
+  for (const kind of ['video', 'audio', 'ac3']) {
     const selected = output.filter((p) =>
-      (kind === 'video' ? [0x1b, 0xdb] : [0x0f, 0xcf]).includes(p.type),
+      (kind === 'video'
+        ? [0x1b, 0xdb]
+        : kind === 'ac3'
+          ? [0x81, 0xc1]
+          : [0x0f, 0xcf]
+      ).includes(p.type),
     );
     if (!selected.length) continue;
     const source = join(selected.map((p) => p.data));
@@ -119,6 +144,7 @@ export async function decryptSamplePes<T extends SamplePes>(
       boundaries.push(boundaries.at(-1)! + p.data.length);
     let clear: Uint8Array;
     if (kind === 'audio') clear = await decryptAacSamples(source, key, iv);
+    else if (kind === 'ac3') clear = await decryptAc3Samples(source, key, iv);
     else {
       const starts: { at: number; header: number }[] = [];
       for (let i = 0; i + 2 < source.length; i++) {
@@ -170,7 +196,7 @@ export async function decryptSamplePes<T extends SamplePes>(
     }
     selected.forEach((p, i) => {
       p.data = clear.subarray(boundaries[i], boundaries[i + 1]);
-      p.type = kind === 'video' ? 0x1b : 0x0f;
+      p.type = kind === 'video' ? 0x1b : kind === 'ac3' ? 0x81 : 0x0f;
     });
   }
   return output;

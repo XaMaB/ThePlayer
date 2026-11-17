@@ -317,7 +317,7 @@ export class HlsEngine extends EventTarget {
         ?.trim(),
       async (pes, key, sequence) => {
         if (pes.some((p) => p.type === 0x24))
-          throw new Error('SAMPLE-AES TS supports AVC/AAC only');
+          throw new Error('SAMPLE-AES TS supports AVC/AAC/AC-3 only');
         const imported = await this.importKey(key);
         const iv = key.iv ?? new Uint8Array(16);
         if (!key.iv) new DataView(iv.buffer).setBigUint64(8, BigInt(sequence));

@@ -55,6 +55,8 @@ export interface Sample {
 }
 export interface Track {
   audioObjectType?: number;
+  dac3?: Uint8Array;
+  dec3?: Uint8Array;
   encryption?: { scheme: 'cenc' | 'cbcs'; kid: Uint8Array };
   id: number;
   kind: 'video' | 'audio';
@@ -217,13 +219,21 @@ export function inspectInit(data: Uint8Array): Track[] {
           configs[0].body,
           children.find((b) => b.type === 'colr')?.body,
         );
+      } else if (entry.type === 'ac-3' || entry.type === 'ec-3') {
+        const config = child(
+          entry.body.subarray(28),
+          entry.type === 'ac-3' ? 'dac3' : 'dec3',
+        );
+        if (config.length < (entry.type === 'ac-3' ? 3 : 5))
+          throw new Error('Truncated Dolby audio configuration');
+        codec = entry.type;
       } else if (entry.type === 'mp4a') {
         const esds = child(entry.body.subarray(28), 'esds');
         const objectType = audioObjectType(esds.subarray(4));
         codec = objectType === -1 ? 'mp3' : 'mp4a.40.' + objectType;
       } else
         throw new Error(
-          `Unsupported HLS sample entry ${entry.type}; supports AVC/HEVC/AV1/AAC`,
+          `Unsupported HLS sample entry ${entry.type}; supports AVC/HEVC/AV1/AAC/MP3/AC-3/E-AC-3`,
         );
       return {
         id: read32(tkhd, tkhd[0] === 1 ? 20 : 12),
@@ -283,6 +293,21 @@ function sampleEntry(t: Track): Uint8Array {
       avcc,
     );
   }
+  if (t.codec === 'ac-3' || t.codec === 'ec-3')
+    return box(
+      t.codec,
+      zero(6),
+      u16(1),
+      zero(8),
+      u16(2),
+      u16(16),
+      zero(4),
+      u32(t.timescale * 65536),
+      box(
+        t.codec === 'ac-3' ? 'dac3' : 'dec3',
+        (t.codec === 'ac-3' ? t.dac3 : t.dec3)!,
+      ),
+    );
   const descriptor = (tag: number, ...parts: Uint8Array[]) => {
     const data = concat(...parts);
     if (data.length > 127) throw new Error('Descriptor too large');

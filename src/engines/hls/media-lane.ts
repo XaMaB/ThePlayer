@@ -1,3 +1,4 @@
+import { packedAc3 } from './packed-ac3';
 import { packedAudioKind, packedMp3 } from './packed-mp3';
 import { isId3 } from './id3';
 import { packedAac } from './packed-audio';
@@ -247,7 +248,11 @@ export class MediaLane {
     } else if (data[0] === 0x47 || isId3(data)) {
       if (segment.key?.method === 'SAMPLE-AES-CTR')
         throw new Error('SAMPLE-AES-CTR requires fMP4');
-      const packed = isId3(data) ? packedAac(data) : undefined;
+      const packed = isId3(data)
+        ? packedAudioKind(data) === 'ac3'
+          ? packedAc3(data)
+          : packedAac(data)
+        : undefined;
       const pes = packed?.pes ?? demux(data);
       const encrypted = segment.key?.method === 'SAMPLE-AES';
       if (encrypted && !this.decryptSamples)

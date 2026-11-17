@@ -57,8 +57,11 @@ function stream(types) {
   return Uint8Array.from([...pat, ...pmt]);
 }
 test('TS rejects unsupported encrypted audio instead of silently dropping it', () => {
-  for (const type of [0xc1, 0xc2])
-    assert.throws(() => demux(stream([0x1b, type])), /AVC\/HEVC\/AAC only/);
+  for (const type of [0xc2])
+    assert.throws(
+      () => demux(stream([0x1b, type])),
+      /AVC\/HEVC\/AAC\/AC-3 only/,
+    );
 });
 test('TS rejects multiple video/audio streams even with mixed clear/encrypted stream types', () => {
   for (const types of [
