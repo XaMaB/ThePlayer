@@ -25,6 +25,11 @@ try {
       'ts-ac3',
       'fmp4-ac3',
       'fmp4-eac3',
+      'packed-eac3-48',
+      'packed-eac3-44',
+      'packed-eac3-surround',
+      'packed-eac3-sample-aes',
+      'ts-eac3',
     ]) {
       const page = await browser.newPage({ ignoreHTTPSErrors: true });
       try {

@@ -35,8 +35,22 @@ const hash = (file) =>
     .split('\n')
     .filter((l) => l && !l.startsWith('#'));
 try {
-  for (const mode of ['48', '44', '32', 'surround', 'aes128', 'sample-aes']) {
-    const dir = path.join(root, 'packed-ac3-' + mode),
+  for (const mode of [
+    '48',
+    '44',
+    '32',
+    'surround',
+    'aes128',
+    'sample-aes',
+    'eac3-48',
+    'eac3-44',
+    'eac3-surround',
+    'eac3-sample-aes',
+  ]) {
+    const dir = path.join(
+        root,
+        'packed-' + (mode.startsWith('eac3-') ? mode : 'ac3-' + mode),
+      ),
       list = await readFile(path.join(dir, 'index.m3u8'), 'utf8'),
       names = list.split('\n').filter((l) => l.endsWith('.ac3'));
     const payloads = [],
@@ -52,7 +66,7 @@ try {
         data = Buffer.concat([d.update(data), d.final()]);
       }
       let { pes } = packedAc3(data);
-      if (mode === 'sample-aes')
+      if (mode.endsWith('sample-aes'))
         pes = await decryptSamplePes(
           pes,
           await crypto.subtle.importKey('raw', raw, 'AES-CBC', false, [
@@ -97,15 +111,17 @@ try {
       reference.length,
     );
   }
-  const ts = await readFile(path.join(root, 'ts-ac3/segment0.ts')),
-    result = new TsTransmuxer().transmux(ts, 2);
-  const original = path.join(temp, 'original.ts'),
-    output = path.join(temp, 'ts.mp4');
-  await writeFile(original, ts);
-  await writeFile(output, Buffer.concat([result.init, result.media]));
-  // FFmpeg normalizes the source PTS epoch when producing decoded output.
-  assert.deepEqual(hash(output), hash(original));
-  console.log('PASS independent TS AC-3 remux');
+  for (const codec of ['ac3', 'eac3']) {
+    const ts = await readFile(path.join(root, 'ts-' + codec + '/segment0.ts')),
+      result = new TsTransmuxer().transmux(ts, 2);
+    const original = path.join(temp, 'original.ts'),
+      output = path.join(temp, 'ts.mp4');
+    await writeFile(original, ts);
+    await writeFile(output, Buffer.concat([result.init, result.media]));
+    // FFmpeg normalizes the source PTS epoch when producing decoded output.
+    assert.deepEqual(hash(output), hash(original));
+    console.log('PASS independent TS Dolby remux', codec);
+  }
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

@@ -295,3 +295,9 @@ AC-3 is parsed and remuxed from MPEG-TS (native stream type or registered privat
 Direct fMP4 AC-3/E-AC-3 initialization reads `dac3`/`dec3`. Actual playback requires the browser to expose the codec through MSE. Linux WebKit passes playback and forward/backward seek tests for nine fixtures over Fetch/XHR; Linux Chromium and Firefox pass explicit capability-rejection tests. This does not certify Safari devices, Atmos or Dolby Vision. Packed/TS E-AC-3, encrypted TS AC-3 interoperability and audio setup/priming metadata remain follow-up work.
 
 Independent FFmpeg decoding checks every AC-3 PCM frame and exact elementary bytes for 48/44.1/32 kHz, surround and encrypted fixtures. MP4 timing is separately checked against the fixed sample count, avoiding the raw AC-3 demuxer's accumulated 90 kHz rounding at 44.1 kHz.
+
+## E-AC-3 TS and packed audio (0.22)
+
+TS and packed E-AC-3 support a single independent substream, including aggregation of one/two/three-block syncframes into six-block MP4 samples. SAMPLE-AES chains encrypted blocks across syncframes within each audio sample and resets at the next sample. Clear leaders and incomplete encrypted tails remain untouched. `dec3` is generated from the bitstream configuration.
+
+Generated 48/44.1 kHz stereo, 5.1 and SAMPLE-AES packed streams pass independent decoded PCM/hash/sample-clock checks; TS decoding is compared independently too. Synthetic tests exercise short-syncframe aggregation, CBC continuity, truncation and unsupported substreams. Dependent and multiple independent substreams are explicitly rejected in this path; Atmos object metadata and full device interoperability are not certified.

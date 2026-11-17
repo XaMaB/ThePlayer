@@ -10,7 +10,7 @@ const ss = (n) =>
   Buffer.from([(n >>> 21) & 127, (n >>> 14) & 127, (n >>> 7) & 127, n & 127]);
 const frame = (id, body) =>
   Buffer.concat([Buffer.from(id), ss(body.length), Buffer.alloc(2), body]);
-const tag = (timestamp, title, setup) => {
+const tag = (timestamp, title, setup, codec = 'ac3') => {
   const time = Buffer.alloc(8);
   time.writeBigUInt64BE(BigInt(timestamp));
   const frames = [
@@ -28,8 +28,11 @@ const tag = (timestamp, title, setup) => {
       frame(
         'PRIV',
         Buffer.concat([
-          Buffer.from('com.apple.streaming.audioDescription\0zac3'),
-          Buffer.from([0, 0, 1, 10]),
+          Buffer.from(
+            'com.apple.streaming.audioDescription\0' +
+              (codec === 'eac3' ? 'zec3' : 'zac3'),
+          ),
+          Buffer.from([0, 0, 1, setup.length]),
           setup,
         ]),
       ),
@@ -46,15 +49,19 @@ const encrypt = (data, key, iv, pad) => {
   c.setAutoPadding(pad);
   return Buffer.concat([c.update(data), c.final()]);
 };
-for (const [mode, rate, channels] of [
+for (const [mode, rate, channels, codec = 'ac3'] of [
   ['48', 48000, 2],
   ['44', 44100, 2],
   ['32', 32000, 2],
   ['surround', 48000, 6],
   ['aes128', 48000, 2],
   ['sample-aes', 48000, 2],
+  ['48', 48000, 2, 'eac3'],
+  ['44', 44100, 2, 'eac3'],
+  ['surround', 48000, 6, 'eac3'],
+  ['sample-aes', 48000, 2, 'eac3'],
 ]) {
-  const dir = path.join(root, 'packed-ac3-' + mode);
+  const dir = path.join(root, 'packed-' + codec + '-' + mode);
   await mkdir(dir, { recursive: true });
   const source = path.join(dir, 'original.ac3');
   execFileSync('ffmpeg', [
@@ -70,11 +77,11 @@ for (const [mode, rate, channels] of [
     '-ac',
     String(channels),
     '-c:a',
-    'ac3',
+    codec,
     '-b:a',
     '384k',
     '-f',
-    'ac3',
+    codec,
     '-y',
     source,
   ]);
@@ -95,6 +102,24 @@ for (const [mode, rate, channels] of [
         { encoding: 'utf8' },
       ),
     );
+  let setup = bytes.subarray(0, 10);
+  if (codec === 'eac3') {
+    const file = path.join(dir, 'reference.mp4');
+    execFileSync('ffmpeg', [
+      '-v',
+      'error',
+      '-i',
+      source,
+      '-c',
+      'copy',
+      '-y',
+      file,
+    ]);
+    const mp4 = await readFile(file),
+      start = mp4.indexOf(Buffer.from('dec3'));
+    if (start < 4) throw Error('Fixture missing dec3');
+    setup = mp4.subarray(start + 4, start - 4 + mp4.readUInt32BE(start - 4));
+  }
   const perSegment = Math.ceil((rate * 2) / 1536),
     key = Buffer.alloc(16, 0x51);
   await writeFile(path.join(dir, 'key.bin'), key);
@@ -124,7 +149,8 @@ for (const [mode, rate, channels] of [
       tag(
         Math.round((at * 1536 * 90000) / rate),
         'AC-3 ' + index,
-        mode === 'sample-aes' ? bytes.subarray(0, 10) : undefined,
+        mode === 'sample-aes' ? setup : undefined,
+        codec,
       ),
       ...frames,
     ]);
@@ -136,11 +162,12 @@ for (const [mode, rate, channels] of [
   await writeFile(path.join(dir, 'index.m3u8'), playlist + '#EXT-X-ENDLIST\n');
   await writeFile(
     path.join(dir, 'master.m3u8'),
-    '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=400000,CODECS="ac-3"\nindex.m3u8\n',
+    `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=400000,CODECS="${codec === 'eac3' ? 'ec-3' : 'ac-3'}"\nindex.m3u8\n`,
   );
 }
 for (const [mode, codec, container] of [
   ['ts-ac3', 'ac3', 'mpegts'],
+  ['ts-eac3', 'eac3', 'mpegts'],
   ['fmp4-ac3', 'ac3', 'fmp4'],
   ['fmp4-eac3', 'eac3', 'fmp4'],
 ]) {

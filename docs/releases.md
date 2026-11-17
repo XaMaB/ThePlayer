@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.22.0-alpha.1
+
+- E-AC-3 TS/packed framing and six-block MP4 sample assembly for one independent substream.
+- SAMPLE-AES E-AC-3 CBC chaining across syncframes with per-audio-sample IV resets.
+- Independent decoded hashes/clock checks, malformed framing tests and WebKit playback/seeks.
+- Dependent or multiple E-AC-3 substreams are explicitly rejected in TS/packed delivery; direct fMP4 remains browser-decoded.
+
 ## 0.21.0-alpha.1
 
 - Original AC-3 TS/packed framing and fMP4 remux, with SAMPLE-AES frame decryption.

@@ -1,3 +1,4 @@
+import { eac3Header } from './eac3';
 import { ac3Header } from './ac3';
 /** Original HLS sample encryption primitives, from Apple's MPEG-2 stream encryption specification. */
 export async function decryptCbcBlocks(
@@ -105,6 +106,48 @@ export async function decryptAc3Samples(
   return out;
 }
 
+/** E-AC-3 chains encrypted blocks across syncframes in one six-block audio sample. */
+export async function decryptEac3Samples(
+  data: Uint8Array,
+  key: CryptoKey,
+  iv: Uint8Array,
+) {
+  const out = data.slice();
+  let blocks = 0;
+  const ranges: { start: number; end: number }[] = [];
+  for (let at = 0; at < out.length; ) {
+    const h = eac3Header(out, at);
+    if (h.type === 1 || h.id !== 0)
+      throw new Error('Unsupported SAMPLE-AES E-AC-3 substreams');
+    if (at + h.size > out.length)
+      throw new Error('Truncated SAMPLE-AES E-AC-3 frame');
+    const start = at + 16,
+      end = start + Math.max(0, Math.floor((h.size - 16) / 16)) * 16;
+    if (end > start) ranges.push({ start, end });
+    blocks += h.blocks;
+    if (blocks > 6) throw new Error('Invalid SAMPLE-AES E-AC-3 audio frame');
+    if (blocks === 6) {
+      if (ranges.length) {
+        const clear = await decryptCbcBlocks(
+          join(ranges.map((r) => out.subarray(r.start, r.end))),
+          key,
+          iv,
+        );
+        let offset = 0;
+        for (const r of ranges) {
+          out.set(clear.subarray(offset, offset + r.end - r.start), r.start);
+          offset += r.end - r.start;
+        }
+      }
+      blocks = 0;
+      ranges.length = 0;
+    }
+    at += h.size;
+  }
+  if (blocks) throw new Error('Incomplete SAMPLE-AES E-AC-3 audio frame');
+  return out;
+}
+
 interface SamplePes {
   type: number;
   pts?: number;
@@ -128,13 +171,15 @@ export async function decryptSamplePes<T extends SamplePes>(
   iv: Uint8Array,
 ): Promise<T[]> {
   const output = input.map((p) => ({ ...p }));
-  for (const kind of ['video', 'audio', 'ac3']) {
+  for (const kind of ['video', 'audio', 'ac3', 'eac3']) {
     const selected = output.filter((p) =>
       (kind === 'video'
         ? [0x1b, 0xdb]
-        : kind === 'ac3'
-          ? [0x81, 0xc1]
-          : [0x0f, 0xcf]
+        : kind === 'eac3'
+          ? [0x87, 0xc2]
+          : kind === 'ac3'
+            ? [0x81, 0xc1]
+            : [0x0f, 0xcf]
       ).includes(p.type),
     );
     if (!selected.length) continue;
@@ -144,6 +189,7 @@ export async function decryptSamplePes<T extends SamplePes>(
       boundaries.push(boundaries.at(-1)! + p.data.length);
     let clear: Uint8Array;
     if (kind === 'audio') clear = await decryptAacSamples(source, key, iv);
+    else if (kind === 'eac3') clear = await decryptEac3Samples(source, key, iv);
     else if (kind === 'ac3') clear = await decryptAc3Samples(source, key, iv);
     else {
       const starts: { at: number; header: number }[] = [];
@@ -196,7 +242,14 @@ export async function decryptSamplePes<T extends SamplePes>(
     }
     selected.forEach((p, i) => {
       p.data = clear.subarray(boundaries[i], boundaries[i + 1]);
-      p.type = kind === 'video' ? 0x1b : kind === 'ac3' ? 0x81 : 0x0f;
+      p.type =
+        kind === 'video'
+          ? 0x1b
+          : kind === 'ac3'
+            ? 0x81
+            : kind === 'eac3'
+              ? 0x87
+              : 0x0f;
     });
   }
   return output;
