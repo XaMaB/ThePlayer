@@ -57,3 +57,11 @@ Before publishing:
 - Re-establish external audio clocks when aligned playlists use distinct raw timestamp origins.
 - Assemble and CRC-check multi-packet/multi-section PAT/PMT tables; reject malformed descriptors.
 - Deterministic live recovery scenarios and independently decoded expanded-PMT fixtures.
+
+## 0.10.0-alpha.1
+
+- Assemble AVC/HEVC access units across PES boundaries; continuation PES may omit timestamps.
+- Detect AVC pictures without AUD and retain multi-slice grouping; read HEVC first-slice POC metadata.
+- Infer supported constant-cadence multi-picture timing from PES/VUI and POC, preserving B-frame presentation order.
+- Validate PES timestamp prefixes/markers and reject inconsistent AVC parameter sets within a segment.
+- Compare exact timestamps and decoded frame hashes for split and 2/20-picture PES fixtures; add browser playback/seek scenarios.

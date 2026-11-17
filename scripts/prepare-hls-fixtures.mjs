@@ -1,3 +1,4 @@
+import { videoPesFixture } from '../tests/helpers/video-pes-fixture.mjs';
 import { expandedPsi } from '../tests/helpers/expanded-psi.mjs';
 import { createCipheriv } from 'node:crypto';
 // Original synthetic test media, generated locally. Requires ffmpeg with libx264.
@@ -585,3 +586,23 @@ for (const name of psiPlaylist
     path.join(root, 'psi', name),
     expandedPsi(await readFile(path.join(root, 'ts', name))),
   );
+
+for (const [source, mode, name] of [
+  ['ts', 'split', 'pes-split'],
+  ['ts', 'bundle', 'pes-bundle'],
+  ['bframes', 'bundle', 'pes-bframes'],
+]) {
+  const playlist = await readFile(
+    path.join(root, source, 'index.m3u8'),
+    'utf8',
+  );
+  await mkdir(path.join(root, name), { recursive: true });
+  await writeFile(path.join(root, name, 'index.m3u8'), playlist);
+  for (const segment of playlist
+    .split('\n')
+    .filter((line) => line.endsWith('.ts')))
+    await writeFile(
+      path.join(root, name, segment),
+      videoPesFixture(await readFile(path.join(root, source, segment)), mode),
+    );
+}

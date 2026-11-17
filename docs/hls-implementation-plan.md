@@ -2,16 +2,16 @@
 
 Status: original HLS engine with AVC/HEVC/AAC TS/fMP4, AV1 fMP4, audio-only, ABR, external audio, WebVTT and fMP4 CEA-608. Versions 0.8–0.9 add bounded network recovery, declared gaps, live publisher progress, coordinated encoder/window restarts and complete PSI assembly. See [current support](hls-support.md). The remaining stages below are active work, not completed capabilities.
 
-| Stage                   | Current status                                                                                                        |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Fault infrastructure    | Local/remote HTTP scenarios, Fetch/XHR checks and CI integration implemented                                          |
-| Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues |
-| TS/fMP4 hardening       | Multi-packet/versioned PSI and CRC implemented; access-unit/PES expansion next                                        |
-| ABR / buffer policy     | Baseline implemented; emergency abort and rendition quarantine pending                                                |
-| LL-HLS                  | Pending                                                                                                               |
-| Subtitles               | WebVTT and fMP4 CEA-608 implemented subsets; broader carriage, CEA-708 HLS and TTML/IMSC pending                      |
-| Protection / extensions | AES-128 implemented; sample encryption, EME, steering/interstitials/metadata pending                                  |
-| Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                 |
+| Stage                   | Current status                                                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Fault infrastructure    | Local/remote HTTP scenarios, Fetch/XHR checks and CI integration implemented                                                 |
+| Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues        |
+| TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue |
+| ABR / buffer policy     | Baseline implemented; emergency abort and rendition quarantine pending                                                       |
+| LL-HLS                  | Pending                                                                                                                      |
+| Subtitles               | WebVTT and fMP4 CEA-608 implemented subsets; broader carriage, CEA-708 HLS and TTML/IMSC pending                             |
+| Protection / extensions | AES-128 implemented; sample encryption, EME, steering/interstitials/metadata pending                                         |
+| Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                        |
 
 ## Specification baseline
 
@@ -49,3 +49,5 @@ A third-party engine adapter and an independently implemented engine are differe
 Next: stale-playlist detection, live-window catch-up and encoder restart/timeline recovery, including independent audio; then broaden PSI/PES and access-unit handling before the ABR, LL-HLS, subtitle and protection stages. Each change must add a reproduction fixture and verify cancellation, seeking and existing playback before publication.
 
 0.9.0-alpha.1 extends recovery with stale publisher detection, missed-window/encoder timeline restarts, pause preservation and coordinated independent audio. It starts media-parser hardening with complete PSI section/table assembly and CRC validation. PES/access-unit boundaries, advanced ABR, LL-HLS, further captions and protection/extensions remain active work.
+
+0.10.0-alpha.1 adds access-unit assembly across PES boundaries and constant-cadence multi-picture timing with exact packet-time/frame-hash checks, including B pictures and POC wrap. The next major delivery targets emergency ABR recovery and temporary rendition quarantine, followed by LL-HLS scheduling.

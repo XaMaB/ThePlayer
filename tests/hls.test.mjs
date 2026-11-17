@@ -860,3 +860,58 @@ test('PSI assembler handles pointer tails, multi-packet sections, multiple secti
     /pointer/,
   );
 });
+
+test('AVC slice metadata detects pictures without AUD and preserves multi-slice grouping', async () => {
+  const { AvcPictures, newPicture } = await module('avc-access');
+  const ue = (n) => {
+    const value = (n + 1).toString(2);
+    return '0'.repeat(value.length - 1) + value;
+  };
+  const bits = (n, size) => n.toString(2).padStart(size, '0');
+  const nal = (header, syntax) => {
+    const data = syntax + '1';
+    return Uint8Array.from([
+      header,
+      ...Array.from({ length: Math.ceil(data.length / 8) }, (_, i) =>
+        parseInt(data.slice(i * 8, i * 8 + 8).padEnd(8, '0'), 2),
+      ),
+    ]);
+  };
+  const decoder = new AvcPictures();
+  decoder.parameter(
+    nal(
+      0x67,
+      bits(66, 8) +
+        bits(0, 8) +
+        bits(30, 8) +
+        ue(0) +
+        ue(0) +
+        ue(0) +
+        ue(0) +
+        ue(1) +
+        '0' +
+        ue(19) +
+        ue(10) +
+        '110' +
+        '0',
+    ),
+  );
+  decoder.parameter(nal(0x68, ue(0) + ue(0) + '00'));
+  const slice = (firstMb, frame, poc) =>
+    decoder.picture(
+      nal(0x41, ue(firstMb) + ue(0) + ue(0) + bits(frame, 4) + bits(poc, 4)),
+    );
+  const first = slice(0, 0, 0),
+    continuation = slice(20, 0, 0),
+    next = slice(0, 1, 2);
+  assert.equal(newPicture(first, continuation), false);
+  assert.equal(newPicture(first, next), true);
+  assert.throws(
+    () => decoder.picture(nal(0x41, ue(0) + ue(0) + ue(255))),
+    /Missing AVC/,
+  );
+  assert.throws(
+    () => decoder.parameter(Uint8Array.from([0x67, 0x64])),
+    /Truncated/,
+  );
+});

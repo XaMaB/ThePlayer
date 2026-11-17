@@ -115,6 +115,9 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['pes-split/index.m3u8', 'fetch'],
+    ['pes-bundle/index.m3u8', 'xhr'],
+    ['pes-bframes/index.m3u8', 'fetch'],
     ['psi/index.m3u8', 'fetch'],
     ['caption-tracks/index.m3u8', 'fetch'],
     ['av1-8/index.m3u8', 'fetch'],

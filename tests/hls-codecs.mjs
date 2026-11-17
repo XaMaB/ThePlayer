@@ -27,6 +27,100 @@ const { TsTransmuxer } = await module('transport-stream');
 const { inspectInit } = await module('mp4');
 const temp = await mkdtemp(path.join(os.tmpdir(), 'theplayer-codecs-'));
 try {
+  const { videoPesFixture } = await import('./helpers/video-pes-fixture.mjs');
+  for (const source of ['ts', 'bframes', 'hevc-8', 'hevc-10']) {
+    const original = await readFile(path.join(root, source, 'segment00.ts'));
+    const referenceFile = path.join(temp, source + '-reference.ts');
+    await writeFile(referenceFile, original);
+    const packetTimes = (file) =>
+      JSON.parse(
+        execFileSync(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-select_streams',
+            'v:0',
+            '-show_packets',
+            '-show_entries',
+            'packet=pts,dts',
+            '-of',
+            'json',
+            file,
+          ],
+          { encoding: 'utf8' },
+        ),
+      ).packets.map((p) => [p.pts, p.dts]);
+    const reference = packetTimes(referenceFile);
+    const frameHashes = (file) =>
+      execFileSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-i',
+          file,
+          '-map',
+          '0:v:0',
+          '-vsync',
+          '0',
+          '-f',
+          'framemd5',
+          '-',
+        ],
+        { encoding: 'utf8' },
+      )
+        .split('\n')
+        .filter((line) => line && !line.startsWith('#'))
+        .map((line) => line.split(',').at(-1).trim());
+    const referenceHashes = frameHashes(referenceFile);
+    for (const mode of ['split', 'bundle', 'bundle20']) {
+      const result = new TsTransmuxer().transmux(
+        videoPesFixture(original, mode),
+        2,
+      );
+      const file = path.join(temp, source + '-' + mode + '.mp4');
+      await writeFile(file, Buffer.concat([result.init, result.media]));
+      assert.deepEqual(
+        packetTimes(file),
+        reference,
+        'Every access-unit PTS/DTS must match the original, including reordered B pictures',
+      );
+      const frames = JSON.parse(
+        execFileSync(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-count_frames',
+            '-show_streams',
+            '-of',
+            'json',
+            file,
+          ],
+          { encoding: 'utf8' },
+        ),
+      );
+      assert.equal(
+        Number(
+          frames.streams.find((s) => s.codec_type === 'video').nb_read_frames,
+        ),
+        reference.length,
+      );
+      assert.deepEqual(
+        frameHashes(file),
+        referenceHashes,
+        'Decoded pictures must remain bit-exact after repacketization/remux',
+      );
+      console.log(
+        'PASS video access-unit boundaries',
+        source,
+        mode,
+        reference.length,
+        'frames with exact PTS/DTS',
+      );
+    }
+  }
   const { expandedPsi } = await import('./helpers/expanded-psi.mjs');
   const input = expandedPsi(await readFile(path.join(root, 'ts/segment00.ts')));
   const expanded = new TsTransmuxer().transmux(input, 2);

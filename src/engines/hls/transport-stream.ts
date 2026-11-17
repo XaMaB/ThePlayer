@@ -1,3 +1,6 @@
+import { HevcPictures } from './hevc-access';
+import { AvcPictures } from './avc-access';
+import { videoAccessUnits } from './access-units';
 import { PsiAssembler, PsiTable } from './psi';
 import { hevcConfiguration } from './hevc';
 import { sampleRates, aacConfiguration } from './aac';
@@ -108,6 +111,8 @@ export function dimensions(sps: Uint8Array) {
 }
 export function timestamp(data: Uint8Array, at: number) {
   if (at + 5 > data.length) throw new Error('Truncated PES timestamp');
+  if (!(data[at] & 1) || !(data[at + 2] & 1) || !(data[at + 4] & 1))
+    throw new Error('Invalid PES timestamp marker');
   return (
     ((data[at] >>> 1) & 7) * 2 ** 30 +
     data[at + 1] * 2 ** 22 +
@@ -121,8 +126,8 @@ export function unwrap(value: number, reference: number) {
 }
 interface Pes {
   type: number;
-  pts: number;
-  dts: number;
+  pts?: number;
+  dts?: number;
   data: Uint8Array;
 }
 function demux(bytes: Uint8Array): Pes[] {
@@ -140,19 +145,28 @@ function demux(bytes: Uint8Array): Pes[] {
     pending.delete(pid);
     if (!parts?.length) return;
     const d = concat(...parts);
-    if (d.length < 14 || d[0] || d[1] || d[2] !== 1)
+    if (d.length < 9 || d[0] || d[1] || d[2] !== 1 || (d[6] & 0xc0) !== 0x80)
       throw new Error('Invalid PES header');
+    if (d[6] & 0x30) throw new Error('Scrambled PES is unsupported');
     const flags = d[7] >>> 6;
-    if (flags !== 2 && flags !== 3) throw new Error('PES needs PTS');
+    if (flags === 1 || d[8] < (flags === 3 ? 10 : flags === 2 ? 5 : 0))
+      throw new Error('Invalid PES timestamp header');
     const length = (d[4] << 8) | d[5],
       end = length ? 6 + length : d.length,
       start = 9 + d[8];
     if (end > d.length || start > end)
       throw new Error('Incomplete PES at segment boundary');
+    if ((flags && d[9] >>> 4 !== flags) || (flags === 3 && d[14] >>> 4 !== 1))
+      throw new Error('Invalid PES timestamp prefix');
     packets.push({
       type: types.get(pid)!,
-      pts: timestamp(d, 9),
-      dts: flags === 3 ? timestamp(d, 14) : timestamp(d, 9),
+      pts: flags ? timestamp(d, 9) : undefined,
+      dts:
+        flags === 3
+          ? timestamp(d, 14)
+          : flags === 2
+            ? timestamp(d, 9)
+            : undefined,
       data: d.subarray(start, end),
     });
   };
@@ -259,24 +273,9 @@ function demux(bytes: Uint8Array): Pes[] {
     throw new Error('No supported AVC/HEVC/AAC elementary streams');
   return packets;
 }
-function nals(data: Uint8Array): Uint8Array[] {
-  const out: Uint8Array[] = [];
-  let start = -1;
-  for (let i = 0; i < data.length - 2; i++)
-    if (
-      data[i] === 0 &&
-      data[i + 1] === 0 &&
-      (data[i + 2] === 1 || (data[i + 2] === 0 && data[i + 3] === 1))
-    ) {
-      if (start >= 0) out.push(data.subarray(start, i));
-      const length = data[i + 2] === 1 ? 3 : 4;
-      start = i + length;
-      i = start - 1;
-    }
-  if (start >= 0) out.push(data.subarray(start));
-  return out.filter((n) => n.length);
-}
 export class TsTransmuxer {
+  private avc = new AvcPictures();
+  private h265 = new HevcPictures();
   private vps?: Uint8Array;
   private sps?: Uint8Array;
   private pps?: Uint8Array;
@@ -284,15 +283,22 @@ export class TsTransmuxer {
   private serial = 0;
   constructor(private audioCodec = 'mp4a.40.2') {}
   reset() {
+    this.avc.resetOrder();
+    this.h265.resetOrder();
     this.clock = undefined;
   }
   transmux(bytes: Uint8Array, segmentDuration: number) {
     const pes = demux(bytes);
-    const first = pes.find((p) => p.type === 0x1b || p.type === 0x24) ?? pes[0];
+    const first =
+      pes.find((p) => (p.type === 0x1b || p.type === 0x24) && p.dts != null) ??
+      pes.find((p) => p.dts != null);
+    if (!first || first.dts == null) throw new Error('No PES timestamp anchor');
     const reference = this.clock ?? first.dts;
     for (const p of pes) {
-      p.dts = unwrap(p.dts, reference);
-      p.pts = unwrap(p.pts, p.dts);
+      if (p.dts != null && p.pts != null) {
+        p.dts = unwrap(p.dts, reference);
+        p.pts = unwrap(p.pts, p.dts);
+      }
     }
     this.clock = first.dts;
     const tracks: Track[] = [],
@@ -302,8 +308,13 @@ export class TsTransmuxer {
     if (hevc && pes.some((p) => p.type === 0x1b))
       throw new Error('Mixed AVC and HEVC elementary streams');
     const pictures: { sample: Sample; dts: number }[] = [];
-    for (const p of pes.filter((p) => p.type === 0x1b || p.type === 0x24)) {
-      const units = nals(p.data);
+    for (const p of videoAccessUnits(
+      pes.filter((p) => p.type === 0x1b || p.type === 0x24),
+      hevc,
+      this.avc,
+      this.h265,
+    )) {
+      const units = p.units;
       if (hevc) {
         if (
           units.some(
@@ -356,6 +367,16 @@ export class TsTransmuxer {
           'Multiple AVC access units per PES are not yet supported',
         );
       for (const unit of units) {
+        const type = unit[0] & 31;
+        const previous =
+          type === 7 ? this.sps : type === 8 ? this.pps : undefined;
+        if (
+          pictures.length &&
+          previous &&
+          (previous.length !== unit.length ||
+            previous.some((b, i) => b !== unit[i]))
+        )
+          throw new Error('AVC parameter sets changed within a segment');
         if ((unit[0] & 31) === 7) this.sps = unit;
         if ((unit[0] & 31) === 8) this.pps = unit;
       }
@@ -418,6 +439,9 @@ export class TsTransmuxer {
     }
     const audio = pes.filter((p) => p.type === 0x0f);
     if (audio.length) {
+      const audioStart = audio[0].pts;
+      if (audioStart == null)
+        throw new Error('First audio PES needs a timestamp');
       const bytes = concat(...audio.map((p) => p.data)),
         samples: Sample[] = [];
       let track: Track | undefined;
@@ -468,12 +492,12 @@ export class TsTransmuxer {
       }
       if (track) {
         tracks.push(track);
-        starts.push(audio[0].pts / 90000);
+        starts.push(audioStart / 90000);
         media.push(
           fragment(
             track,
             samples,
-            (audio[0].pts * track.timescale) / 90000,
+            (audioStart * track.timescale) / 90000,
             ++this.serial,
           ),
         );
