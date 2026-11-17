@@ -22,7 +22,8 @@
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
     "test:hls": "node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs",
-    "test:hls:public": "node tests/hls-public.mjs"
+    "test:hls:public": "node tests/hls-public.mjs",
+    "test:hls:mux": "node tests/hls-mux-audit.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

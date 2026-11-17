@@ -91,3 +91,20 @@ This is a conservative first ABR policy. It does not yet abandon in-flight slow 
 Source options `audioLanguage` and `subtitleLanguage` supply explicit preferences; `subtitleLanguage: 'off'` suppresses automatic captions. `preferredLanguages` overrides the browser language list. Non-default, non-forced subtitles need an explicit selection. Forced subtitle matching considers the selected audio language. User subtitle selection/Off persists through quality and audio switches. Accessibility characteristics and associated language are parsed and exposed, but no OS accessibility preference is inferred.
 
 HE-AAC v1 MPEG-TS uses the declared `mp4a.40.5` profile to signal SBR and its doubled output rate correctly. HE-AAC v2/PS and detecting undeclared SBR in raw ADTS remain unsupported. The Mux test checks all five advertised AVC profiles, including transitions between AAC-LC and HE-AAC, with ongoing video and audio decoding.
+
+## Mux catalog audit — 2026-11-17
+
+All eight entries on [Mux's test-stream index](https://test-streams.mux.dev/) were checked in Chromium using ThePlayer's own HLS engine. The check observes rendered frames and continued playback; it exercises a quality transition where available and seeks across the first ad discontinuity for the ad-insertion fixture. This is a bounded smoke test, not validation of an entire asset, every rendition or every ad transition. The dedicated Big Buck Bunny public test separately exercises all five qualities.
+
+| Publisher fixture            | Observed result | Scope / limitation                                                                               |
+| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
+| Big Buck Bunny — adaptive    | Passed          | Playback and quality transition; five profiles available                                         |
+| Big Buck Bunny — 480p        | Passed          | Direct media playlist                                                                            |
+| ARTE China                   | Passed          | Playback and quality transition; six profiles available                                          |
+| Ad insertion in EVENT stream | Passed          | AES-128 and first ad discontinuity; the hosted snapshot is ended                                 |
+| Issue 666                    | Passed          | MPEG-TS byte ranges                                                                              |
+| DK Turntable                 | Passed          | Transition between variants with shifted timestamps                                              |
+| SAMPLE-AES                   | Unsupported     | Explicit encryption rejection; AES-128 support does not imply SAMPLE-AES support                 |
+| Tears of Steel with IMSC     | Unsupported     | `stpp.ttml.im1t` in CODECS currently excludes the variant; no claim of video or caption playback |
+
+The six passing Mux sources are available in the demo presets alongside Apple's example. Run `npm run test:hls:mux` to repeat the catalog audit; `HLS_PUBLIC_SOURCE=mux-imsc` can select one case. Results go to ignored `test-results/mux-audit.json`. Known unsupported cases are recorded as **unsupported**, never passed; unexpected failures make the command exit nonzero. Public availability, contents and CORS can change, so this audit is separate from deterministic CI. Media stays hosted by Mux and is not redistributed.

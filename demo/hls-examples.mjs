@@ -12,4 +12,34 @@ export const hlsExamples = [
     url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
     reference: 'https://test-streams.mux.dev/',
   },
+  {
+    id: 'mux-bbb-480',
+    name: 'Mux Big Buck Bunny · 480p',
+    url: 'https://test-streams.mux.dev/x36xhzz/url_6/193039199_mp4_h264_aac_hq_7.m3u8',
+    reference: 'https://test-streams.mux.dev/',
+  },
+  {
+    id: 'mux-arte',
+    name: 'Mux ARTE China · multiple qualities',
+    url: 'https://test-streams.mux.dev/test_001/stream.m3u8',
+    reference: 'https://test-streams.mux.dev/',
+  },
+  {
+    id: 'mux-ad-event',
+    name: 'Mux ad insertion · AES-128 / discontinuities',
+    url: 'https://test-streams.mux.dev/dai-discontinuity-deltatre/manifest.m3u8',
+    reference: 'https://test-streams.mux.dev/',
+  },
+  {
+    id: 'mux-issue666',
+    name: 'Mux issue 666 · MPEG-TS byte ranges',
+    url: 'https://test-streams.mux.dev/issue666/playlists/cisq0gim60007xzvi505emlxx.m3u8',
+    reference: 'https://test-streams.mux.dev/',
+  },
+  {
+    id: 'mux-pts-shift',
+    name: 'Mux DK Turntable · shifted timestamps',
+    url: 'https://test-streams.mux.dev/pts_shift/master.m3u8',
+    reference: 'https://test-streams.mux.dev/',
+  },
 ];
