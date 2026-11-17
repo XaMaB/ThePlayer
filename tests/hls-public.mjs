@@ -198,6 +198,25 @@ try {
           previousAudio,
         );
       }
+      if (source.id === 'apple-dv-atmos') {
+        assert.ok(
+          await page.evaluate(() =>
+            window.player.diagnostics.unsupportedCaptions.some((t) =>
+              t.format.includes('c608'),
+            ),
+          ),
+        );
+        assert.equal(
+          await page.locator('#placeholder h2').textContent(),
+          'ThePlayer',
+        );
+        await page.evaluate(() => {
+          document.querySelector('video').currentTime = 60;
+        });
+        await page.waitForFunction(
+          () => document.querySelector('video').currentTime > 63,
+        );
+      }
       const tracks = await page.evaluate(() => window.player.subtitleTracks);
       if (tracks.length) {
         await page.evaluate(() =>

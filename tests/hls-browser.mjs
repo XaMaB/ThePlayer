@@ -115,6 +115,7 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['caption-tracks/index.m3u8', 'fetch'],
     ['av1-8/index.m3u8', 'fetch'],
     ['av1-10/index.m3u8', 'xhr'],
     ['av1.m3u8', 'fetch'],
@@ -308,6 +309,18 @@ try {
                 .codec,
           ),
           /^av01\./,
+        );
+      }
+      if (source === 'caption-tracks/index.m3u8') {
+        assert.deepEqual(
+          await page.evaluate(
+            () => window.player.diagnostics.unsupportedCaptions,
+          ),
+          [{ id: 99, format: 'c608' }],
+        );
+        assert.equal(
+          await page.locator('#placeholder h2').textContent(),
+          'ThePlayer',
         );
       }
       if (source === 'event.m3u8')

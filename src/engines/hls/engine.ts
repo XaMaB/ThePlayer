@@ -50,6 +50,7 @@ export class HlsEngine extends EventTarget {
     bandwidth: 0,
     quality: {} as Record<string, unknown>,
     abrWarning: '',
+    unsupportedCaptions: [] as { id: number; format: string }[],
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
     startup: { firstFrameMs: null as number | null },
     buffer: {} as Record<string, unknown>,
@@ -395,6 +396,8 @@ export class HlsEngine extends EventTarget {
       throw new Error('Unsupported browser codec: ' + codecs);
   }
   private async appendPrepared(lane: MediaLane, prepared: PreparedSegment) {
+    if (lane.role === 'main')
+      this.diagnostics.unsupportedCaptions = prepared.ignoredCaptions;
     this.assertLayout(prepared, lane);
     lane.configure(this.media!, prepared);
     const offset =

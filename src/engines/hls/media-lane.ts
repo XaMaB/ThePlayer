@@ -1,3 +1,8 @@
+import {
+  filterCaptionInit,
+  filterCaptionMedia,
+  type IgnoredCaptionTrack,
+} from './caption-tracks';
 import { bufferedAhead } from './buffer';
 import type { Playlist, Segment, Key, Resource } from './playlist';
 import { TsTransmuxer } from './transport-stream';
@@ -16,6 +21,7 @@ export interface PreparedSegment {
   rawStart: number;
   bytes: number;
   elapsed: number;
+  ignoredCaptions: IgnoredCaptionTrack[];
 }
 /** Each independently loaded rendition owns one SourceBuffer and decoder configuration. */
 export class MediaLane {
@@ -28,6 +34,7 @@ export class MediaLane {
   refreshedAt = performance.now();
   private decoder: TsTransmuxer;
   private preparedDiscontinuity = -1;
+  private ignoredCaptions: IgnoredCaptionTrack[] = [];
   private initCache?: { key: string; data: Uint8Array };
   private appendedInit?: Uint8Array;
   constructor(
@@ -64,12 +71,14 @@ export class MediaLane {
         if (segment.key && !segment.key.iv)
           throw new Error('Encrypted initialization needs an explicit IV');
         const loaded = await this.load(segment.map);
-        this.initCache = {
-          key,
-          data: await this.decrypt(loaded.data, segment.key, segment.sequence),
-        };
+        const filtered = filterCaptionInit(
+          await this.decrypt(loaded.data, segment.key, segment.sequence),
+        );
+        this.ignoredCaptions = filtered.ignored;
+        this.initCache = { key, data: filtered.data };
       }
       init = this.initCache.data;
+      data = filterCaptionMedia(data, this.ignoredCaptions);
       tracks = inspectInit(init);
       rawStart = decodeTime(data, tracks);
     } else if (data[0] === 0x47) {
@@ -89,6 +98,7 @@ export class MediaLane {
       rawStart,
       bytes: response.data.length,
       elapsed: response.elapsed,
+      ignoredCaptions: this.ignoredCaptions,
     };
   }
   configure(media: MediaSource, prepared: PreparedSegment) {

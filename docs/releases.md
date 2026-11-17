@@ -26,3 +26,10 @@ Before publishing:
 - Main 8/10-bit browser playback, quality changes and seeking, with original media bytes preserved.
 - Apple AV1 sample in the demo and optional public tests, with external audio and WebVTT.
 - Synthetic AV1 fixtures and codec parser regression tests.
+
+## 0.6.0-alpha.2
+
+- Do not let ancillary fMP4 c608/c708 tracks block supported HLS video/audio.
+- Neutralize caption track and fragment descriptors without changing media offsets; record skipped captions in diagnostics. This does not add CEA-608/708 rendering.
+- Keep external WebVTT selection available; verify the Apple Dolby sample through compatible AVC/AAC variants.
+- Replace the remaining MoQ-only placeholder and integration copy with ThePlayer branding and protocol-neutral instructions.

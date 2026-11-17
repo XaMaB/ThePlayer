@@ -480,3 +480,76 @@ test('AV1 codec normalization retains tier and requires all optional fields toge
     1,
   );
 });
+
+test('ancillary c608/c708 tracks cannot block A/V or change fragment offsets', async () => {
+  const { initialization, inspectInit, boxes, fragment, concat, decodeTime } =
+    await module('mp4');
+  const { filterCaptionInit, filterCaptionMedia } =
+    await module('caption-tracks');
+  const audio = {
+    id: 1,
+    kind: 'audio',
+    timescale: 48000,
+    codec: 'mp4a.40.2',
+    channels: 2,
+    asc: Uint8Array.of(0x11, 0x90),
+  };
+  const caption = { ...audio, id: 99 };
+  const child = (data, type) => boxes(data).find((b) => b.type === type).body;
+  for (const format of ['c608', 'c708']) {
+    const init = initialization([audio, caption]);
+    const trak = boxes(child(init, 'moov')).filter((b) => b.type === 'trak')[1]
+      .body;
+    const mdia = child(trak, 'mdia');
+    child(mdia, 'hdlr').set(new TextEncoder().encode('clcp'), 8);
+    const entry = boxes(
+      child(child(child(mdia, 'minf'), 'stbl'), 'stsd').subarray(8),
+    )[0];
+    init.set(
+      new TextEncoder().encode(format),
+      entry.body.byteOffset - init.byteOffset - 4,
+    );
+    const original = init.slice();
+    const filtered = filterCaptionInit(init);
+    assert.deepEqual(init, original, 'input init remains immutable');
+    assert.equal(filtered.data.length, init.length);
+    assert.deepEqual(filtered.ignored, [{ id: 99, format }]);
+    assert.deepEqual(
+      inspectInit(filtered.data).map((t) => t.id),
+      [1],
+    );
+    const sample = {
+      data: Uint8Array.of(1, 2, 3),
+      duration: 1024,
+      cts: 0,
+      key: true,
+    };
+    const active = fragment(audio, [sample], 5 * 48000, 1);
+    const media = concat(active, fragment(caption, [sample], 0, 2));
+    const before = media.slice();
+    const output = filterCaptionMedia(media, filtered.ignored);
+    assert.deepEqual(media, before);
+    assert.equal(output.length, media.length);
+    assert.deepEqual(
+      output.subarray(0, active.length),
+      active,
+      'A/V bytes and trun offsets stay untouched',
+    );
+    assert.deepEqual(
+      boxes(output)
+        .filter((b) => b.type === 'mdat')
+        .map((b) => b.body),
+      boxes(media)
+        .filter((b) => b.type === 'mdat')
+        .map((b) => b.body),
+    );
+    assert.equal(
+      decodeTime(output, inspectInit(filtered.data)),
+      5,
+      'caption timestamp must not anchor the A/V timeline',
+    );
+    assert.throws(() => inspectInit(init), /Unsupported HLS sample entry/);
+  }
+  const init = initialization([audio]);
+  assert.equal(filterCaptionInit(init).data, init);
+});

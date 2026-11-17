@@ -1,6 +1,12 @@
 // Remote test media remains hosted by its publisher; do not redistribute it as fixtures.
 export const hlsExamples = [
   {
+    id: 'apple-dv-atmos',
+    name: 'Apple Dolby sample · compatible video / AAC / WebVTT',
+    url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8',
+    reference: 'https://developer.apple.com/streaming/examples/',
+  },
+  {
     id: 'apple-av1',
     name: 'Apple AV1 · 10-bit / separate audio / WebVTT',
     url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/av1-sample/av1-sample.m3u8',

@@ -464,3 +464,76 @@ await writeFile(
   path.join(root, 'av1.m3u8'),
   '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=160x90,CODECS="av01.0.00M.08,mp4a.40.2"\nav1-8/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=700000,RESOLUTION=320x180,CODECS="av01.0.00M.10,mp4a.40.2"\nav1-10/index.m3u8\n',
 );
+
+// Structural regression: an unsupported caption track alongside real A/V.
+// The placeholder caption bytes intentionally are not a CEA decoding fixture.
+{
+  const { build } = await import('esbuild');
+  const bundled = await build({
+    entryPoints: [
+      new URL('../src/engines/hls/mp4.ts', import.meta.url).pathname,
+    ],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'node',
+  });
+  const { boxes, box, concat, fragment } = await import(
+    'data:text/javascript;base64,' +
+      Buffer.from(bundled.outputFiles[0].text).toString('base64')
+  );
+  const source = path.join(root, 'fmp4'),
+    dir = path.join(root, 'caption-tracks');
+  await mkdir(dir, { recursive: true });
+  const init = new Uint8Array(await readFile(path.join(source, 'init.mp4')));
+  const moov = boxes(init).find((b) => b.type === 'moov');
+  const children = boxes(moov.body);
+  const caption = children.find((b) => b.type === 'trak').body.slice();
+  const child = (data, type) => boxes(data).find((b) => b.type === type).body;
+  const tkhd = child(caption, 'tkhd');
+  new DataView(tkhd.buffer, tkhd.byteOffset, tkhd.byteLength).setUint32(
+    tkhd[0] === 1 ? 20 : 12,
+    99,
+  );
+  const mdia = child(caption, 'mdia');
+  child(mdia, 'hdlr').set(new TextEncoder().encode('clcp'), 8);
+  const entry = boxes(
+    child(child(child(mdia, 'minf'), 'stbl'), 'stsd').subarray(8),
+  )[0];
+  caption.set(
+    new TextEncoder().encode('c608'),
+    entry.body.byteOffset - caption.byteOffset - 4,
+  );
+  const newMoov = box(
+    'moov',
+    ...children.map((b) => {
+      if (b.type !== 'mvex') return box(b.type, b.body);
+      const trex = child(b.body, 'trex').slice();
+      new DataView(trex.buffer).setUint32(4, 99);
+      return box('mvex', b.body, box('trex', trex));
+    }),
+    box('trak', caption),
+  );
+  await writeFile(
+    path.join(dir, 'init.mp4'),
+    concat(
+      ...boxes(init).map((b) =>
+        b.type === 'moov' ? newMoov : box(b.type, b.body),
+      ),
+    ),
+  );
+  const playlist = await readFile(path.join(source, 'index.m3u8'), 'utf8');
+  await writeFile(path.join(dir, 'index.m3u8'), playlist);
+  for (const name of playlist
+    .split('\n')
+    .filter((line) => line.endsWith('.m4s'))) {
+    const media = await readFile(path.join(source, name));
+    const extra = fragment(
+      { id: 99, kind: 'audio', timescale: 90000, codec: 'c608' },
+      [{ data: Uint8Array.of(0, 0), duration: 90000, cts: 0, key: true }],
+      0,
+      999,
+    );
+    await writeFile(path.join(dir, name), concat(media, extra));
+  }
+}
