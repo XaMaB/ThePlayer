@@ -740,3 +740,59 @@ test('608 tab, underline/italics, backspace and delete-to-end stay inside the 32
   ]);
   assert.equal(d.screens(0)[0].rows[0].cells.at(-1).char, 'D');
 });
+
+test('recovery classifies transient transport failures, not auth or malformed media', async () => {
+  const { HttpError, NetworkError, retryable, retryDelay } =
+    await module('recovery');
+  for (const code of [404, 408, 429, 500, 503])
+    assert.equal(retryable(new HttpError(code)), true);
+  for (const code of [400, 401, 403, 416])
+    assert.equal(retryable(new HttpError(code)), false);
+  assert.equal(retryable(new NetworkError('offline')), true);
+  assert.equal(retryable(new DOMException('timeout', 'TimeoutError')), true);
+  assert.equal(retryable(new DOMException('cancel', 'AbortError')), false);
+  assert.equal(retryable(new Error('Invalid MP4')), false);
+  assert.equal(retryDelay(100), 4000);
+});
+test('recovery validates budgets and can retain strict retry-count behavior', () => {
+  for (const options of [
+    { retries: -1 },
+    { timeoutMs: 0 },
+    { recoveryWindowMs: Infinity },
+  ])
+    assert.throws(
+      () => new ResourceClient(options, new AbortController().signal),
+      /Invalid HLS/,
+    );
+  assert.doesNotThrow(
+    () =>
+      new ResourceClient(
+        { recoveryWindowMs: 0, retries: 0 },
+        new AbortController().signal,
+      ),
+  );
+});
+
+test('declared GAP recovery crosses adjacent known gaps but not unknown missing content', async () => {
+  const { declaredGapPosition } = await module('buffer');
+  const ranges = {
+    length: 2,
+    start: (i) => [0, 10][i],
+    end: (i) => [6, 14][i],
+  };
+  assert.equal(
+    declaredGapPosition(ranges, 5.98, [
+      { start: 6, end: 8 },
+      { start: 8, end: 10 },
+    ]),
+    10.001,
+  );
+  assert.equal(
+    declaredGapPosition(ranges, 6, [{ start: 6, end: 8 }]),
+    undefined,
+  );
+  assert.equal(
+    declaredGapPosition(ranges, 3, [{ start: 6, end: 10 }]),
+    undefined,
+  );
+});

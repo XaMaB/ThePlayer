@@ -30,3 +30,9 @@ Keep conformance results separate from parser support. Explicitly reject unsuppo
 ## Implementation ownership
 
 A third-party engine adapter and an independently implemented engine are different deliverables. The selected direction is an independently implemented HLS engine. Any reused source must retain its license and attribution. An independent engine should derive behavior from the specifications and validate interoperability against other players without presenting their implementation as original work.
+
+## Resilience delivery status
+
+0.8.0-alpha.1 starts stages 1–2: deterministic HTTP faults, bounded resource recovery and declared-gap scheduling. The fault server can run locally in CI or on a separate HTTP host. This delivery does not complete the overall plan.
+
+Next: stale-playlist detection, live-window catch-up and encoder restart/timeline recovery, including independent audio; then broaden PSI/PES and access-unit handling before the ABR, LL-HLS, subtitle and protection stages. Each change must add a reproduction fixture and verify cancellation, seeking and existing playback before publication.

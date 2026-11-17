@@ -3,7 +3,7 @@ import { row608Text } from './cea608';
 import type { Track } from './mp4';
 import { selectRendition } from './selection';
 import { AbrController } from './abr';
-import { bufferedAhead, nextGapPosition } from './buffer';
+import { bufferedAhead, nextGapPosition, declaredGapPosition } from './buffer';
 import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
   parsePlaylist,
@@ -49,6 +49,8 @@ export class HlsEngine extends EventTarget {
     bytes: 0,
     requests: 0,
     retries: 0,
+    declaredGaps: 0,
+    recovery: {} as Record<string, unknown>,
     bandwidth: 0,
     quality: {} as Record<string, unknown>,
     abrWarning: '',
@@ -78,6 +80,7 @@ export class HlsEngine extends EventTarget {
     );
   }
   private abrRetryAt = 0;
+  private gaps: { start: number; end: number }[] = [];
   private abort = new AbortController();
   private client: ResourceClient;
   private get playlist() {
@@ -137,6 +140,7 @@ export class HlsEngine extends EventTarget {
     )
       throw new Error('Invalid HLS startTime');
     this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
+    this.diagnostics.recovery = this.client.recovery;
     video.addEventListener('playing', () => this.state('playing'), {
       signal: this.abort.signal,
     });
@@ -488,7 +492,22 @@ export class HlsEngine extends EventTarget {
       this.diagnostics.bandwidth = this.abr.estimate;
     }
   }
+  private skipDeclaredGaps(lane: MediaLane) {
+    while (lane.playlist.segments[lane.next]?.gap) {
+      const segment = lane.playlist.segments[lane.next++];
+      const gap = {
+        start: segment.start,
+        end: segment.start + segment.duration,
+      };
+      if (!this.gaps.some((g) => g.start === gap.start && g.end === gap.end)) {
+        this.gaps.push(gap);
+        this.diagnostics.declaredGaps++;
+      }
+    }
+    this.gaps = this.gaps.filter((g) => g.end >= this.video.currentTime - 35);
+  }
   private async run() {
+    for (const lane of this.lanes()) this.skipDeclaredGaps(lane);
     // Install every SourceBuffer before appending media, preserving shared A/V ownership.
     const first = await Promise.all(
       this.lanes().map(async (lane) => ({
@@ -517,7 +536,10 @@ export class HlsEngine extends EventTarget {
         }
         continue;
       }
-      for (const lane of this.lanes()) await this.refresh(lane);
+      for (const lane of this.lanes()) {
+        await this.refresh(lane);
+        this.skipDeclaredGaps(lane);
+      }
       if (
         this.autoQuality &&
         !this.initial &&
@@ -566,10 +588,12 @@ export class HlsEngine extends EventTarget {
         if (this.source.autoplay !== false) void this.play();
       }
       if (!this.video.paused && this.video.readyState < 3) {
-        const position = nextGapPosition(
-          this.video.buffered,
-          this.video.currentTime,
-        );
+        const position =
+          declaredGapPosition(
+            this.video.buffered,
+            this.video.currentTime,
+            this.gaps,
+          ) ?? nextGapPosition(this.video.buffered, this.video.currentTime);
         if (position !== undefined) this.video.currentTime = position;
       }
       this.updateDiagnostics();

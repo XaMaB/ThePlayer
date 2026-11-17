@@ -77,20 +77,21 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 
 ## HLS features
 
-| Feature                                             | Status                                                                                  |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Media and multivariant playlists                    | Implemented; relative URLs and playlist variables                                       |
-| Live / VOD / EVENT                                  | Implemented; sliding refresh, finite duration, seeking and EVENT-to-ended transitions   |
-| Auto ABR / manual quality                           | Implemented for compatible renditions in the same audio/subtitle groups                 |
-| Multilingual external audio                         | AAC renditions with independent buffers and selection                                   |
-| DEFAULT / AUTOSELECT / FORCED                       | Used for supported rendition selection; explicit choices and subtitle Off take priority |
-| Network loading                                     | Fetch or XHR; abort, timeout, bounded retry and byte ranges                             |
-| AES-128 encryption                                  | Identity keys, explicit/sequence IV and Web Crypto AES-CBC                              |
-| Discontinuities                                     | Timestamp rebasing; arbitrary timeline repair is not supported                          |
-| SAMPLE-AES / DRM / EME                              | Not implemented                                                                         |
-| Content steering / interstitials / timed metadata   | Not implemented                                                                         |
-| I-frame trick play / image playlists / packed audio | Not implemented                                                                         |
-| GAP recovery / unaligned live resets                | Not implemented; reconnect is required                                                  |
+| Feature                                             | Status                                                                                   |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Media and multivariant playlists                    | Implemented; relative URLs and playlist variables                                        |
+| Live / VOD / EVENT                                  | Implemented; sliding refresh, finite duration, seeking and EVENT-to-ended transitions    |
+| Auto ABR / manual quality                           | Implemented for compatible renditions in the same audio/subtitle groups                  |
+| Multilingual external audio                         | AAC renditions with independent buffers and selection                                    |
+| DEFAULT / AUTOSELECT / FORCED                       | Used for supported rendition selection; explicit choices and subtitle Off take priority  |
+| Network loading                                     | Fetch or XHR; abort, timeout, bounded recovery window and byte ranges                    |
+| AES-128 encryption                                  | Identity keys, explicit/sequence IV and Web Crypto AES-CBC                               |
+| Discontinuities                                     | Timestamp rebasing; arbitrary timeline repair is not supported                           |
+| SAMPLE-AES / DRM / EME                              | Not implemented                                                                          |
+| Content steering / interstitials / timed metadata   | Not implemented                                                                          |
+| I-frame trick play / image playlists / packed audio | Not implemented                                                                          |
+| Declared GAP segments                               | Skipped without requests; playback resumes at buffered media after the declared interval |
+| Unaligned live resets                               | Not implemented; reconnect is required                                                   |
 
 The HLS engine is original code: it does not bundle or copy hls.js, Video.js/VHS or Shaka implementations. This does not mean the entire player has no dependencies: MoQ uses moq-dev, and the MoQ caption path includes a locally patched mux.js decoder with provenance and licensing. See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [detailed limits](docs/hls-support.md).
 
@@ -184,6 +185,8 @@ See [architecture](docs/architecture.md) for extension boundaries and events.
 
 The 0.7.0-alpha.1 release passed formatting, TypeScript/build checks, 64 unit tests, 21 deterministic HLS browser scenarios and controlled-throughput ABR/UI checks. Independent FFmpeg decoding verifies HEVC remuxing; the test host's Chromium lacks an HEVC decoder, so those browser cases verify explicit capability rejection.
 
+The 0.8.0-alpha.1 update adds three unit tests (67 total) and 16 deterministic recovery browser cases across Fetch/XHR. The recovery suite also passed against a separate HTTP server in Amsterdam. It checks temporary errors, interrupted responses, timeouts, playlist failures, bounded permanent failures, cancellation and declared gaps.
+
 Public-source checks include Apple's AV1 sample and real CEA-608 English CC1 captions from Apple's Dolby demo through compatible AVC/AAC renditions. A working fallback from a Dolby demo does not establish Dolby Vision/Atmos support. Public tests are optional and network-dependent; CI uses generated fixtures.
 
 ```sh
@@ -236,4 +239,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.7.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.8.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

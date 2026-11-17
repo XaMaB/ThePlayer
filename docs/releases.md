@@ -41,3 +41,11 @@ Before publishing:
 - Caption timeline checkpoints, bounded seek preroll and replacement at quality transitions.
 - Native text-track rendering with source row/column anchors; external WebVTT remains selectable.
 - Synthetic unit/browser regressions and actual Apple English CC1 playback. See the support matrix for unsupported carriage and styling features.
+
+## 0.8.0-alpha.1
+
+- Bounded HLS resource recovery beyond short retries, with typed transport/HTTP errors and cancellation-aware backoff.
+- Fetch/XHR recovery diagnostics; terminal authentication and malformed-resource failures remain explicit.
+- Skip playlist-declared GAP resources and cross adjacent known gaps only after playable media arrives.
+- Reusable isolated HTTP fault server and browser recovery tests, also runnable against an external host.
+- Encoder restarts, stale-playlist handling and full timeline repair remain future stages.

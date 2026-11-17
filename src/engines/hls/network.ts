@@ -1,8 +1,11 @@
+import { HttpError, NetworkError, retryable, retryDelay } from './recovery';
 import type { Resource } from './playlist';
 export interface NetworkOptions {
   transport?: 'fetch' | 'xhr';
   timeoutMs?: number;
   retries?: number;
+  /** Total per-resource recovery budget; 0 uses only the retry count. Default 30 s. */
+  recoveryWindowMs?: number;
   credentials?: RequestCredentials;
   /** Called per resource; scope credentials to the intended origin here. */
   headers?: (url: string) => Record<string, string>;
@@ -11,34 +14,77 @@ export class ResourceClient {
   bytes = 0;
   requests = 0;
   retries = 0;
+  readonly recovery = {
+    active: 0,
+    attempts: 0,
+    recovered: 0,
+    exhausted: 0,
+    lastError: '',
+  };
   constructor(
     readonly options: NetworkOptions,
     readonly signal: AbortSignal,
   ) {
+    for (const [name, value, minimum] of [
+      ['timeoutMs', options.timeoutMs, 1],
+      ['retries', options.retries, 0],
+      ['recoveryWindowMs', options.recoveryWindowMs, 0],
+    ] as const) {
+      if (
+        value != null &&
+        (!Number.isFinite(value) || value < minimum || !Number.isInteger(value))
+      )
+        throw new Error(`Invalid HLS ${name}`);
+    }
     if (options.transport === 'xhr' && options.credentials === 'omit')
       throw new Error('Use Fetch to omit same-origin credentials');
   }
   async get(
     resource: Resource,
   ): Promise<{ data: Uint8Array; url: string; elapsed: number }> {
-    let last: unknown;
     const started = performance.now();
-    for (let attempt = 0; attempt <= (this.options.retries ?? 2); attempt++) {
-      this.signal.throwIfAborted();
-      try {
-        const result = await this.once(resource);
-        return { ...result, elapsed: performance.now() - started };
-      } catch (error) {
-        last = error;
+    const window = this.options.recoveryWindowMs ?? 30000;
+    const deadline = window ? started + window : Infinity;
+    let recovering = false;
+    try {
+      for (let attempt = 0; ; attempt++) {
         this.signal.throwIfAborted();
-        if (attempt === (this.options.retries ?? 2)) break;
-        this.retries++;
-        await delay(Math.min(4000, 300 * 2 ** attempt), this.signal);
+        try {
+          const result = await this.once(
+            resource,
+            Math.min(
+              this.options.timeoutMs ?? 15000,
+              Math.max(1, deadline - performance.now()),
+            ),
+          );
+          if (recovering) this.recovery.recovered++;
+          return { ...result, elapsed: performance.now() - started };
+        } catch (error) {
+          this.signal.throwIfAborted();
+          if (!retryable(error)) throw error;
+          const wait = retryDelay(attempt);
+          const extended = attempt >= (this.options.retries ?? 2);
+          if ((extended && !window) || performance.now() + wait >= deadline) {
+            this.recovery.exhausted++;
+            throw error;
+          }
+          this.recovery.lastError = (error as Error).message;
+          if (extended) {
+            if (!recovering) {
+              recovering = true;
+              this.recovery.active++;
+            }
+            this.recovery.attempts++;
+          }
+          this.retries++;
+          await delay(wait, this.signal);
+        }
       }
+    } finally {
+      if (recovering) this.recovery.active--;
     }
-    throw last;
   }
-  private async once(resource: Resource) {
+  private async once(resource: Resource, timeoutMs: number) {
     const controller = new AbortController();
     const stop = () => controller.abort(this.signal.reason);
     this.signal.addEventListener('abort', stop, { once: true });
@@ -47,7 +93,7 @@ export class ResourceClient {
         controller.abort(
           new DOMException('HLS request timed out', 'TimeoutError'),
         ),
-      this.options.timeoutMs ?? 15000,
+      timeoutMs,
     );
     const start = performance.now();
     this.requests++;
@@ -88,7 +134,8 @@ export class ResourceClient {
             if (event.loaded > 64 * 1024 * 1024)
               controller.abort(new Error('HLS resource exceeds 64 MiB limit'));
           };
-          xhr.onerror = () => reject(new Error('HLS network/CORS error'));
+          xhr.onerror = () =>
+            reject(new NetworkError('HLS network/CORS error'));
           xhr.onloadend = () =>
             controller.signal.removeEventListener('abort', cancel);
           if (controller.signal.aborted) cancel();
@@ -105,7 +152,7 @@ export class ResourceClient {
         status = response.status;
         url = response.url;
         contentRange = response.headers.get('Content-Range');
-        if (!response.ok) throw new Error(`HLS HTTP ${status}`);
+        if (!response.ok) throw new HttpError(status);
         const reader = response.body?.getReader();
         if (!reader) throw new Error('Empty HTTP response');
         const chunks: Uint8Array[] = [];
@@ -131,7 +178,7 @@ export class ResourceClient {
           at += chunk.length;
         }
       }
-      if (status < 200 || status >= 300) throw new Error(`HLS HTTP ${status}`);
+      if (status < 200 || status >= 300) throw new HttpError(status);
       if (data.byteLength > 64 * 1024 * 1024)
         throw new Error('HLS resource exceeds 64 MiB limit');
       if (resource.range) {
@@ -150,6 +197,10 @@ export class ResourceClient {
       }
       this.bytes += data.length;
       return { data, url, elapsed: performance.now() - start };
+    } catch (error) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      if (error instanceof TypeError) throw new NetworkError(error.message);
+      throw error;
     } finally {
       clearTimeout(timeout);
       this.signal.removeEventListener('abort', stop);

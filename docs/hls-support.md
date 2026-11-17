@@ -29,7 +29,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 - TS assumes independently decodable segments, one video/audio stream, one AVC/HEVC access unit per PES and a PSI section fitting in one packet. Multi-packet PSI, unusual PES boundaries, non-random-access segment starts and unsupported codecs fail explicitly. More broadcast edge-case testing is needed.
 - AVC, HEVC Main/Main10, AV1 Main 8/10-bit (fMP4) and AAC-LC/declared HE-AAC v1 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. Dolby audio, packed audio, I-frame-only trick-play and image playlists are not supported.
 - SAMPLE-AES, DRM/EME, session-key preloading, content steering, interstitials and timed metadata are not implemented.
-- GAP recovery and live resets without a shared sequence/timeline are not implemented. These require reconnecting.
+- Declared GAP segments have bounded scheduling/playback recovery; see the validation scope below. Live resets without a shared sequence/timeline still require reconnecting.
 - The network client bounds individual resources at 64 MiB. No server proxy is provided; cross-origin resources need appropriate CORS headers.
 - The player uses MSE. There is no native-HLS fallback in this engine; such a fallback would not test our own parser/pipeline.
 
@@ -162,3 +162,13 @@ Caption history is checkpointed around playback. Quality transitions replace fut
 Limits: field-2 CC3/CC4 (`cdt2`), TS/AVC-SEI carriage, standalone SCC, multiple `c608` tracks, Text/XDS services, background attributes and flashing are not implemented. This is a tested subset, not a full CTA-608 conformance claim. Existing MoQ CEA-708/P16 support is independent.
 
 Unit tests cover decoding, row/column commands, parity, character replacement, fragment bounds/timestamps and timeline replacement/checkpoints. The original synthetic caption fixture exercises selection, positioning, seek and Off in Chromium. The optional Apple Dolby sample test verifies actual English CC1 text, seek, quality switching and subsequent WebVTT selection through compatible AVC/AAC variants. `player.diagnostics.captions608` exposes packet, parity, retained-event and warning diagnostics.
+
+## Network recovery and declared gaps (0.8.0-alpha.1)
+
+Fetch and XHR classify temporary transport failures, timeouts, HTTP 404/408/425/429 and 5xx responses as retryable. Authentication/authorization failures and invalid media/range responses fail explicitly. After the short retry count, requests can continue within `network.recoveryWindowMs` (default 30000 ms total per resource), with bounded backoff and request timeouts clipped to the budget. Set the window to 0 to use only `network.retries`. A persistent 404 eventually fails; it is not silently treated as a playable segment or an implicit gap. Resource cancellation interrupts both requests and retry waits.
+
+`diagnostics.recovery` reports active extended recoveries, extended attempts, recovered requests, exhausted budgets and the last transient error. Recovery counters describe network requests, not decoded frames. HLS resources are retried without recreating the player. Live-window movement during long outages, stale playlists and encoder timeline resets remain separate work.
+
+Playlist-declared `EXT-X-GAP` segments are not requested. The scheduler advances past them, and the playback clock crosses a declared gap only when playable buffered media exists after it. Adjacent declared gaps are combined. Unknown missing content is not skipped. The first validation covers multiplexed A/V VOD with adjacent gaps; all-gap startup and complex external-audio/discontinuity combinations are not certified.
+
+Run `npm run test:hls:recovery` for deterministic Fetch/XHR faults: temporary 503, disconnected sockets, request timeout, playlist reload failures, persistent missing segment, forbidden source, cancellation during recovery and declared gaps. The same suite accepts `HLS_RECOVERY_BASE=http://test-host:9088` for external transport tests. To serve generated TS fixtures and built player assets, run `HOST=0.0.0.0 PORT=9088 npm run serve:hls:tests`; defaults bind localhost. The test server has fixed fault scenarios and no HTTP administration API. Use only generated media and public build artifacts in its roots.

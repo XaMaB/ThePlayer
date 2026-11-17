@@ -21,3 +21,21 @@ export function nextGapPosition(
       return start + 0.001;
   }
 }
+
+/** Cross only playlist-declared missing media, and only once playable media exists. */
+export function declaredGapPosition(
+  ranges: TimeRanges,
+  time: number,
+  gaps: { start: number; end: number }[],
+): number | undefined {
+  let end = time;
+  for (const gap of [...gaps].sort((a, b) => a.start - b.start)) {
+    if (gap.start <= end + 0.1 && gap.end > end) end = gap.end;
+  }
+  if (end <= time) return;
+  for (let i = 0; i < ranges.length; i++) {
+    const start = ranges.start(i);
+    if (start > time && start <= end + 0.1 && ranges.end(i) > end)
+      return Math.max(start, end) + 0.001;
+  }
+}
