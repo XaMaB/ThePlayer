@@ -1277,3 +1277,54 @@ test('AVC immediate intra recovery points are random access; gradual recovery is
   );
   assert.equal(avcRandomAccess([Uint8Array.of(0x65)]), true);
 });
+
+test('HLS map encryption captures its declaration key across rotation and METHOD=NONE', () => {
+  const p = parsePlaylist(
+    vod(
+      '#EXT-X-KEY:METHOD=AES-128,URI="a.key",IV=0x1\n#EXT-X-MAP:URI="init.mp4"\n#EXT-X-KEY:METHOD=AES-128,URI="b.key",IV=0x2\n#EXTINF:2,\na.m4s\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:2,\nb.m4s\n#EXT-X-ENDLIST',
+    ),
+    base,
+  );
+  assert.equal(p.segments[0].key.url, 'https://example.com/live/b.key');
+  assert.equal(p.segments[0].map.key.url, 'https://example.com/live/a.key');
+  assert.equal(p.segments[1].key, undefined);
+  assert.equal(p.segments[1].map.key.iv[15], 1);
+});
+test('HLS identity key alternatives survive unsupported KEYFORMAT declarations', () => {
+  const p = parsePlaylist(
+    vod(
+      '#EXT-X-KEY:METHOD=AES-128,URI="a.key",KEYFORMATVERSIONS="1/2"\n#EXT-X-KEY:METHOD=AES-128,URI="skd://example-key",KEYFORMAT="example.drm"\n#EXTINF:2,\na.ts\n#EXT-X-ENDLIST',
+    ),
+    base,
+  );
+  assert.equal(p.segments[0].key.method, 'AES-128');
+  assert.equal(p.segments[0].keys.length, 2);
+  assert.deepEqual(p.segments[0].key.versions, [1, 2]);
+  assert.throws(
+    () => parsePlaylist(vod('#EXT-X-KEY:METHOD=NONE,URI="a"'), base),
+    /NONE/,
+  );
+  assert.throws(
+    () => parsePlaylist(vod('#EXT-X-KEY:METHOD=AES-128'), base),
+    /URI/,
+  );
+  assert.throws(
+    () =>
+      parsePlaylist(vod('#EXT-X-KEY:METHOD=AES-256-GCM,URI="a",IV=0x1'), base),
+    /forbidden/,
+  );
+});
+test('SESSION-KEY is distinct from media encryption and repeated key declarations have separate cache scopes', () => {
+  const p = parsePlaylist(
+    '#EXTM3U\n#EXT-X-SESSION-KEY:METHOD=AES-256-GCM,URI="key"\n#EXT-X-STREAM-INF:BANDWIDTH=100\nmedia.m3u8',
+    base,
+  );
+  assert.equal(p.sessionKeys[0].method, 'AES-256-GCM');
+  const media = parsePlaylist(
+    vod(
+      '#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:2,\na.ts\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:2,\nb.ts\n#EXT-X-ENDLIST',
+    ),
+    base,
+  );
+  assert.notEqual(media.segments[0].key.scope, media.segments[1].key.scope);
+});

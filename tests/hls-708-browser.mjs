@@ -11,7 +11,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'],
 });
 try {
-  for (const kind of ['mp4', 'ts'])
+  for (const kind of ['mp4', 'ts', 'cdp'])
     for (const transport of ['fetch', 'xhr']) {
       const page = await browser.newPage({ ignoreHTTPSErrors: true });
       const errors = [];

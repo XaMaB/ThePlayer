@@ -149,6 +149,7 @@ export class HlsEngine extends EventTarget {
   private subtitleManual = false;
   private subtitleCounters = new SubtitleCounters();
   private keys = new Map<string, Promise<CryptoKey>>();
+  private prefetchedKeys = new Map<string, Promise<CryptoKey>>();
   private loadTime = 0;
   private offsets = new Map<number, number>();
   private switches: {
@@ -315,6 +316,21 @@ export class HlsEngine extends EventTarget {
     let p = await this.readPlaylist(this.source.url);
     if (p.variants.length) {
       this.master = p;
+      for (const key of (p.sessionKeys ?? []).slice(0, 32))
+        if (
+          key.format === 'identity' &&
+          ['AES-128', 'AES-256-GCM'].includes(key.method) &&
+          (key.versions ?? [1]).includes(1)
+        ) {
+          const promise = this.importKey(key);
+          this.prefetchedKeys.set(
+            JSON.stringify([key.url, key.method]),
+            promise,
+          );
+          void promise.catch(() =>
+            this.prefetchedKeys.delete(JSON.stringify([key.url, key.method])),
+          );
+        }
       let usable = browserVariants(p.variants, (mime) =>
         MediaSource.isTypeSupported(mime),
       );
@@ -549,6 +565,7 @@ export class HlsEngine extends EventTarget {
     if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
     this.offsets.clear();
     this.keys.clear();
+    this.prefetchedKeys.clear();
     this.gaps = [];
     this.captions608.reset();
     this.captions708.reset();
@@ -624,7 +641,7 @@ export class HlsEngine extends EventTarget {
   private async appendPrepared(lane: MediaLane, prepared: PreparedSegment) {
     if (lane.role === 'main')
       this.diagnostics.unsupportedCaptions = prepared.ignoredCaptions.filter(
-        (t) => t.format !== 'c608',
+        (t) => !['c608', 'c708'].includes(t.format),
       );
     this.assertLayout(prepared, lane);
     lane.configure(this.media!, prepared);
@@ -1214,36 +1231,76 @@ export class HlsEngine extends EventTarget {
     sequence: number,
   ) {
     if (!key) return data;
-    if (key.method !== 'AES-128' || key.format !== 'identity' || !key.url)
-      throw new Error(`Unsupported HLS encryption ${key.method}/${key.format}`);
-    let promise = this.keys.get(key.url);
-    if (!promise) {
-      promise = (async () => {
-        const bytes = (await this.client.get({ url: key.url! })).data;
-        if (bytes.length !== 16)
-          throw new Error('AES-128 key must be 16 bytes');
-        return crypto.subtle.importKey(
-          'raw',
-          bytes as BufferSource,
-          'AES-CBC',
-          false,
-          ['decrypt'],
+    const imported = await this.importKey(key);
+    if (key.method === 'AES-256-GCM') {
+      if (data.length < 32) throw new Error('Truncated AES-256-GCM resource');
+      try {
+        return new Uint8Array(
+          await crypto.subtle.decrypt(
+            {
+              name: 'AES-GCM',
+              iv: data.subarray(0, 16) as BufferSource,
+              tagLength: 128,
+            },
+            imported,
+            data.subarray(16) as BufferSource,
+          ),
         );
-      })();
-      if (this.keys.size >= 32)
-        this.keys.delete(this.keys.keys().next().value!);
-      this.keys.set(key.url, promise);
+      } catch {
+        throw new Error('HLS AES-256-GCM authentication failed');
+      }
     }
     const iv = key.iv ?? new Uint8Array(16);
     if (!key.iv) new DataView(iv.buffer).setBigUint64(8, BigInt(sequence));
     return new Uint8Array(
       await crypto.subtle.decrypt(
         { name: 'AES-CBC', iv: iv as BufferSource },
-        await promise,
+        imported,
         data as BufferSource,
       ),
     );
   }
+  private async importKey(key: Key): Promise<CryptoKey> {
+    if (
+      !['AES-128', 'AES-256-GCM'].includes(key.method) ||
+      key.format !== 'identity' ||
+      !(key.versions ?? [1]).includes(1) ||
+      !key.url
+    )
+      throw new Error(`Unsupported HLS encryption ${key.method}/${key.format}`);
+    if (!globalThis.crypto?.subtle)
+      throw new Error('HLS encryption requires a secure context');
+    const id = JSON.stringify([key.url, key.method, key.scope]);
+    let promise = this.keys.get(id);
+    if (!promise) {
+      const warmId = JSON.stringify([key.url, key.method]);
+      const warm = this.prefetchedKeys.get(warmId);
+      this.prefetchedKeys.delete(warmId);
+      promise =
+        warm ??
+        (async () => {
+          const bytes = (await this.client.get({ url: key.url! })).data;
+          const length = key.method === 'AES-256-GCM' ? 32 : 16;
+          if (bytes.length !== length)
+            throw new Error(`${key.method} key must be ${length} bytes`);
+          return crypto.subtle.importKey(
+            'raw',
+            bytes as BufferSource,
+            key.method === 'AES-256-GCM' ? 'AES-GCM' : 'AES-CBC',
+            false,
+            ['decrypt'],
+          );
+        })();
+      if (this.keys.size >= 32)
+        this.keys.delete(this.keys.keys().next().value!);
+      this.keys.set(id, promise);
+      void promise.catch(() => {
+        if (this.keys.get(id) === promise) this.keys.delete(id);
+      });
+    }
+    return promise;
+  }
+
   private event(target: EventTarget, name: string) {
     return new Promise<void>((resolve, reject) => {
       const cleanup = () => {
@@ -1456,17 +1513,17 @@ export class HlsEngine extends EventTarget {
           let cues: ReturnType<typeof parseVtt> = [],
             documents: ReturnType<typeof parseTtml>[] = [];
           if (segment.map) {
-            const key = JSON.stringify([segment.map, segment.key]);
+            const key = JSON.stringify(segment.map);
             if (initialization?.key !== key) {
               let bytes = (await client.get(segment.map)).data;
-              if (segment.key) {
-                if (!segment.key.iv)
+              if (segment.map.key) {
+                if (segment.map.key.method === 'AES-128' && !segment.map.key.iv)
                   throw new Error(
                     'Encrypted subtitle initialization requires an explicit IV',
                   );
                 bytes = await this.decrypt(
                   bytes,
-                  segment.key,
+                  segment.map.key,
                   segment.sequence,
                 );
               }
@@ -1636,6 +1693,7 @@ export class HlsEngine extends EventTarget {
     this.video.load();
     if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
     this.keys.clear();
+    this.prefetchedKeys.clear();
     this.state('closed');
   }
 }

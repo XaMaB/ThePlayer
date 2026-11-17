@@ -61,3 +61,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.14.0-alpha.1 adds ATSC SEI carriage and field-2 CEA-608 decoding. Original CEA-708 decoding remains the next caption target; protection/extensions and stabilization remain active.
 
 0.15.0-alpha.1 adds original CEA-708 SEI services, P16 and window rendering, plus avc3 parameter-set preservation. Remaining caption work includes c708/CDP and further layout/attribute validation; protection/extensions remain active.
+
+0.16.0-alpha.1 adds c708/CDP and whole-resource encryption hardening (map key scope, rotation, key alternatives/session preloads, AES-256-GCM). Continue with sample encryption/EME, protocol extensions and stabilization.

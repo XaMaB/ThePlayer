@@ -1,3 +1,4 @@
+import { extract708 } from './c708-mp4';
 import { mp4SeiCaptions, type CcData } from './cea-sei';
 import { captionMetadata, extract608, type CaptionPacket } from './c608-mp4';
 import {
@@ -76,14 +77,14 @@ export class MediaLane {
     let captionPackets: CaptionPacket[] = [],
       captionError: string | undefined = this.captionMetaError;
     if (segment.map) {
-      const key = JSON.stringify([segment.map, segment.key]);
+      const key = JSON.stringify(segment.map);
       if (this.initCache?.key !== key) {
-        if (segment.key && !segment.key.iv)
+        if (segment.map.key?.method === 'AES-128' && !segment.map.key.iv)
           throw new Error('Encrypted initialization needs an explicit IV');
         const loaded = await this.load(segment.map);
         const original = await this.decrypt(
           loaded.data,
-          segment.key,
+          segment.map.key,
           segment.sequence,
         );
         const filtered = filterCaptionInit(original);
@@ -112,11 +113,28 @@ export class MediaLane {
         captionError = error instanceof Error ? error.message : String(error);
       }
       try {
-        const packets = mp4SeiCaptions(
+        const inBand = mp4SeiCaptions(
           data,
           this.captionMeta,
           segment.range?.offset ?? 0,
         );
+        const cdp = extract708(
+          data,
+          this.captionMeta,
+          segment.range?.offset ?? 0,
+        );
+        const hasDigitalTrack = this.captionMeta.some(
+          (t) => t.format === 'c708',
+        );
+        const hasAnalogTrack = this.captionMeta.some(
+          (t) => t.format === 'c608',
+        );
+        const packets = [
+          ...inBand.filter((p) =>
+            p.type < 2 ? !hasAnalogTrack && !hasDigitalTrack : !hasDigitalTrack,
+          ),
+          ...cdp.filter((p) => p.type >= 2 || !hasAnalogTrack),
+        ];
         captionPackets.push(
           ...packets
             .filter((p) => p.type < 2)

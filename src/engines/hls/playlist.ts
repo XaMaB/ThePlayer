@@ -8,8 +8,14 @@ export interface Resource {
   url: string;
   range?: ByteRange;
 }
+export interface Initialization extends Resource {
+  key?: Key;
+  keys?: Key[];
+}
 export interface Key {
   method: string;
+  versions?: number[];
+  scope?: string;
   url?: string;
   iv?: Uint8Array;
   format: string;
@@ -19,7 +25,8 @@ export interface Segment extends Resource {
   start: number;
   duration: number;
   discontinuity: number;
-  map?: Resource;
+  map?: Initialization;
+  keys?: Key[];
   key?: Key;
   gap: boolean;
   programDateTime?: string;
@@ -71,6 +78,7 @@ export interface Playlist {
   reports?: { url: string; sequence?: number; part?: number }[];
   skipped?: number;
   unsupported: string[];
+  sessionKeys?: Key[];
 }
 export function attributes(input: string): Attributes {
   const result: Attributes = {};
@@ -165,25 +173,31 @@ export function parsePlaylist(
     unsupported: [],
   };
   const variables = p.variables;
-  const uri = (value: string) => {
+  const uri = (value: string, opaque = false) => {
     const replaced = value.replace(/\{\$([a-zA-Z0-9_-]+)\}/g, (_, name) => {
       if (!(name in variables))
         throw new Error(`Undefined HLS variable: ${name}`);
       return variables[name];
     });
     const url = new URL(replaced, base);
-    if (!['https:', 'http:'].includes(url.protocol))
+    if (!opaque && !['https:', 'http:'].includes(url.protocol))
       throw new Error('HLS resources require HTTP(S)');
     return url.href;
   };
   let duration: number | undefined,
     variant: Attributes | undefined,
     byteRange: string | undefined;
-  let map: Resource | undefined,
+  let map: Initialization | undefined,
     key: Key | undefined,
     discontinuity = 0,
     gap = false,
     date: string | undefined;
+  const activeKeys = new Map<string, Key>();
+  let keyDeclaration = 0;
+  const chooseKey = () =>
+    [...activeKeys.values()].find(
+      (k) => k.format === 'identity' && (k.versions ?? [1]).includes(1),
+    ) ?? activeKeys.values().next().value;
   let previousRange: { url: string; end: number } | undefined;
   let previousPartRange: { url: string; end: number } | undefined;
   let partIndex = 0,
@@ -216,6 +230,7 @@ export function parsePlaylist(
         discontinuity,
         map,
         key,
+        keys: [...activeKeys.values()],
         gap,
         programDateTime: date,
       });
@@ -273,16 +288,31 @@ export function parsePlaylist(
         const url = uri(a.URI);
         map = {
           url,
+          key,
+          keys: [...activeKeys.values()],
           range: a.BYTERANGE ? range(a.BYTERANGE, undefined, url) : undefined,
         };
         break;
       }
+      case '#EXT-X-SESSION-KEY':
       case '#EXT-X-KEY': {
         const a = attributes(value);
+        if (!a.METHOD) throw new Error('Missing HLS encryption method');
         if (a.METHOD === 'NONE') {
+          if (tag === '#EXT-X-SESSION-KEY' || Object.keys(a).length !== 1)
+            throw new Error('Invalid METHOD=NONE attributes');
+          activeKeys.clear();
           key = undefined;
           break;
         }
+        if (!a.URI) throw new Error('Missing HLS key URI');
+        if (a.IV && ['AES-256-GCM', 'SAMPLE-AES-CTR'].includes(a.METHOD))
+          throw new Error('IV is forbidden for ' + a.METHOD);
+        const versions = (a.KEYFORMATVERSIONS ?? '1')
+          .split('/')
+          .map((v) => number(v, 'KEYFORMATVERSIONS', true));
+        if (versions.some((v) => !v))
+          throw new Error('Invalid KEYFORMATVERSIONS');
         let iv: Uint8Array | undefined;
         if (a.IV) {
           if (!/^0x[0-9a-f]{1,32}$/i.test(a.IV))
@@ -292,12 +322,22 @@ export function parsePlaylist(
             (pair) => parseInt(pair, 16),
           );
         }
-        key = {
+        const declaration: Key = {
           method: a.METHOD,
-          url: a.URI ? uri(a.URI) : undefined,
+          versions,
+          scope: `${base}|${p.sequence + p.segments.length}:${partIndex}:${keyDeclaration++}`,
+          url: a.URI
+            ? uri(a.URI, !!a.KEYFORMAT && a.KEYFORMAT !== 'identity')
+            : undefined,
           iv,
           format: a.KEYFORMAT ?? 'identity',
         };
+        if (tag === '#EXT-X-SESSION-KEY')
+          (p.sessionKeys ??= []).push(declaration);
+        else {
+          activeKeys.set(declaration.format, declaration);
+          key = chooseKey();
+        }
         break;
       }
       case '#EXT-X-GAP':
@@ -341,7 +381,9 @@ export function parsePlaylist(
           group: a['GROUP-ID'],
           name: a.NAME,
           language: a.LANGUAGE ?? 'und',
-          url: a.URI ? uri(a.URI) : undefined,
+          url: a.URI
+            ? uri(a.URI, !!a.KEYFORMAT && a.KEYFORMAT !== 'identity')
+            : undefined,
           default: a.DEFAULT === 'YES',
           autoselect: a.AUTOSELECT === 'YES',
           forced: a.FORCED === 'YES',
@@ -400,6 +442,7 @@ export function parsePlaylist(
           discontinuity,
           map,
           key,
+          keys: [...activeKeys.values()],
           gap: a.GAP === 'YES',
           part: partIndex++,
           partOffset,
@@ -485,6 +528,9 @@ export function parsePlaylist(
         if (tail) {
           map = tail.map;
           key = tail.key;
+          activeKeys.clear();
+          for (const oldKey of tail.keys ?? (key ? [key] : []))
+            activeKeys.set(oldKey.format, oldKey);
           discontinuity = tail.discontinuity;
           previousRange = tail.range
             ? { url: tail.url, end: tail.range.offset + tail.range.length }

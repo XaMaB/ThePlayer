@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.16.0-alpha.1
+
+- Decode separate c708/ccdp tracks with CDP section, checksum, sequence and cadence validation.
+- Bind initialization encryption to the key active at EXT-X-MAP, preserving it across media-key rotation and METHOD=NONE.
+- Select supported identity keys among KEYFORMAT alternatives, validate key attributes and separate repeated key declarations in the key cache.
+- Preload supported SESSION-KEY entries and reuse them for the first media/map decryption.
+- Add AES-256-GCM whole-resource decryption with authentication checks and original positive/tampered fixtures for Fetch/XHR.
+
 ## 0.15.0-alpha.2
 
 - Normalize the subtitle test server root before checking paths, fixing default dist/ serving in GitHub CI.

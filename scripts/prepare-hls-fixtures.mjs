@@ -616,3 +616,6 @@ await import('./prepare-sei-fixtures.mjs');
 await import('./prepare-708-fixtures.mjs');
 
 await import('./prepare-open-gop-fixtures.mjs');
+
+await import('./prepare-cdp-fixtures.mjs');
+await import('./prepare-protection-fixtures.mjs');
