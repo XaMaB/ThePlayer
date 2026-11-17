@@ -30,3 +30,25 @@ jobs:
       - run: npm run fixtures:hls
       - run: npm run test:hls
       - run: npm run test:hls:soak
+  hls-metadata-browsers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+    env:
+      HLS_TEST_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run bootstrap
+      - run: npm run build
+      - run: npm run fixtures:hls
+      - run: npm run test:hls:packed-audio
+      - run: npm run test:hls:metadata

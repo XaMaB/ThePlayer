@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "0.18.0-alpha.1",
+  "version": "0.19.0-alpha.1",
   "private": true,
   "description": "Modular MoQ player with an original experimental HLS engine",
   "type": "module",
@@ -21,7 +21,7 @@
     "export": "node scripts/export.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
-    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-open-gop.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery && npm run test:hls:ll && npm run test:hls:text && npm run test:hls:sei && npm run test:hls:708 && npm run test:hls:protection && npm run test:hls:sample-aes && npm run test:hls:eme",
+    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-open-gop.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery && npm run test:hls:ll && npm run test:hls:text && npm run test:hls:sei && npm run test:hls:708 && npm run test:hls:protection && npm run test:hls:sample-aes && npm run test:hls:eme && npm run test:hls:packed-audio && npm run test:hls:metadata",
     "test:hls:public": "node tests/hls-public.mjs",
     "test:hls:mux": "node tests/hls-mux-audit.mjs",
     "test:hls:recovery": "node tests/hls-recovery-browser.mjs",
@@ -34,7 +34,9 @@
     "test:hls:708": "node tests/hls-708-browser.mjs",
     "test:hls:protection": "node tests/hls-protection-browser.mjs",
     "test:hls:sample-aes": "node tests/hls-sample-aes.mjs && node tests/hls-sample-aes-browser.mjs",
-    "test:hls:eme": "node tests/hls-cenc.mjs && node tests/hls-eme-browser.mjs"
+    "test:hls:eme": "node tests/hls-cenc.mjs && node tests/hls-eme-browser.mjs",
+    "test:hls:packed-audio": "node tests/hls-packed-audio.mjs && node tests/hls-packed-audio-browser.mjs",
+    "test:hls:metadata": "node tests/hls-metadata-browser.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

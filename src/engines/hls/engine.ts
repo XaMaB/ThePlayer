@@ -747,6 +747,14 @@ export class HlsEngine extends EventTarget {
     await lane.append(prepared, offset, (buffer, action) =>
       this.operation(buffer, action),
     );
+    if (prepared.metadataError)
+      this.emit('metadatawarning', prepared.metadataError);
+    for (const item of prepared.metadata)
+      this.emit('metadata', {
+        ...item,
+        time: item.time + offset,
+        lane: lane.role,
+      });
     if (lane.role === 'main') {
       this.captions608.update(
         prepared.captionPackets,

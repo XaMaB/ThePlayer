@@ -1,3 +1,5 @@
+import { parseId3 } from './id3';
+import type { TimedMetadata } from './metadata';
 import { seiCaptions, type CcData } from './cea-sei';
 import { HevcPictures } from './hevc-access';
 import { AvcPictures, avcRandomAccess } from './avc-access';
@@ -238,13 +240,21 @@ export function demux(bytes: Uint8Array): Pes[] {
               const next = i + 5 + ((part[i + 3] & 15) << 8) + part[i + 4];
               if (next > end)
                 throw new Error('Invalid PMT elementary descriptors');
-              if ([0x1b, 0x24, 0x0f, 0xdb, 0xcf].includes(type)) {
+              if ([0x1b, 0x24, 0x0f, 0xdb, 0xcf, 0x15].includes(type)) {
                 if (
                   Array.from(discovered).some(
                     ([id, kind]) =>
                       id !== elementary &&
-                      [0x0f, 0xcf].includes(kind) ===
-                        [0x0f, 0xcf].includes(type),
+                      (kind === 0x15
+                        ? 2
+                        : [0x0f, 0xcf].includes(kind)
+                          ? 1
+                          : 0) ===
+                        (type === 0x15
+                          ? 2
+                          : [0x0f, 0xcf].includes(type)
+                            ? 1
+                            : 0),
                   )
                 )
                   throw new Error(
@@ -299,7 +309,7 @@ export class TsTransmuxer {
       throw new Error('Encrypted TS samples require SAMPLE-AES decryption');
     const first =
       pes.find((p) => (p.type === 0x1b || p.type === 0x24) && p.dts != null) ??
-      pes.find((p) => p.dts != null);
+      pes.find((p) => p.type === 0x0f && p.dts != null);
     if (!first || first.dts == null) throw new Error('No PES timestamp anchor');
     const reference = this.clock ?? first.dts;
     for (const p of pes) {
@@ -508,7 +518,29 @@ export class TsTransmuxer {
         );
       }
     }
+    const metadata: TimedMetadata[] = [];
+    let metadataError: string | undefined;
+    for (const packet of pes.filter((p) => p.type === 0x15)) {
+      try {
+        let at = 0;
+        while (at < packet.data.length) {
+          const tag = parseId3(packet.data.subarray(at));
+          const timestamp = packet.pts ?? tag.timestamp;
+          if (timestamp == null) throw new Error('Timed ID3 needs a timestamp');
+          metadata.push({
+            type: 'id3',
+            time: unwrap(timestamp, reference) / 90000,
+            frames: tag.frames,
+          });
+          at += tag.consumed;
+        }
+      } catch (error) {
+        metadataError = error instanceof Error ? error.message : String(error);
+      }
+    }
     return {
+      metadata,
+      metadataError,
       tracks,
       init: initialization(tracks),
       media: concat(...media),

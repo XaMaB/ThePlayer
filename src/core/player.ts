@@ -51,6 +51,8 @@ const events = [
   'subtitlemetrics',
   'caption',
   'captionwarning',
+  'metadata',
+  'metadatawarning',
 ];
 
 /** No transport imports: applications can supply only the engines they need. */

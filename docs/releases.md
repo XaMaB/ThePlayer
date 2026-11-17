@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.19.0-alpha.1
+
+- Add packed ADTS AAC with mandatory ID3 timestamp anchors, interleaved ID3, timestamp rollover, AES-128 and SAMPLE-AES.
+- Parse ID3 v2.3/v2.4 framing, private timestamps, text encodings and unsynchronization; retain unknown/encoded frames as bytes.
+- Expose timed ID3 from MPEG-TS and ID3/generic emsg v0/v1 from fMP4 through metadata events with presentation timestamps.
+- Report malformed optional metadata as warnings and preserve media playback and byte offsets.
+- Add byte-exact audio checks, Chromium/Firefox/WebKit playback/seek tests and a CI browser matrix for packed audio and timed metadata.
+
 ## 0.18.0-alpha.1
 
 - Recognize protected encv/enca sample entries and cenc/cbcs track defaults while preserving encrypted bytes for the CDM.

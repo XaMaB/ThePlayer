@@ -1,3 +1,7 @@
+import { isId3 } from './id3';
+import { packedAac } from './packed-audio';
+import { emsgMetadata, filterEmsg, type TimedMetadata } from './metadata';
+import { fragmentSamples } from './fragment-samples';
 import { extract708 } from './c708-mp4';
 import { mp4SeiCaptions, type CcData } from './cea-sei';
 import { captionMetadata, extract608, type CaptionPacket } from './c608-mp4';
@@ -8,7 +12,7 @@ import {
 } from './caption-tracks';
 import { bufferedAhead } from './buffer';
 import type { Playlist, Segment, Key, Resource } from './playlist';
-import { TsTransmuxer, demux, type Pes } from './transport-stream';
+import { TsTransmuxer, demux, unwrap, type Pes } from './transport-stream';
 import { inspectInit, decodeTime, type Track } from './mp4';
 
 export interface LoadedResource {
@@ -17,6 +21,8 @@ export interface LoadedResource {
   elapsed: number;
 }
 export interface PreparedSegment {
+  metadata: TimedMetadata[];
+  metadataError?: string;
   segment: Segment;
   init: Uint8Array;
   data: Uint8Array;
@@ -83,6 +89,8 @@ export class MediaLane {
     }
     let init: Uint8Array, tracks: Track[], rawStart: number;
     let digitalPackets: CcData[] = [];
+    let metadata: TimedMetadata[] = [];
+    let metadataError: string | undefined;
     let captionPackets: CaptionPacket[] = [],
       captionError: string | undefined = this.captionMetaError;
     if (segment.map) {
@@ -174,10 +182,28 @@ export class MediaLane {
           );
       }
       rawStart = decodeTime(data, tracks);
-    } else if (data[0] === 0x47) {
+      try {
+        metadata = emsgMetadata(data, () => {
+          const samples = fragmentSamples(
+            data,
+            this.captionMeta,
+            segment.range?.offset ?? 0,
+          );
+          const earliest = samples.reduce(
+            (time, sample) => Math.min(time, sample.time),
+            Infinity,
+          );
+          return Number.isFinite(earliest) ? earliest : rawStart;
+        });
+      } catch (error) {
+        metadataError = error instanceof Error ? error.message : String(error);
+      }
+      data = filterEmsg(data);
+    } else if (data[0] === 0x47 || isId3(data)) {
       if (segment.key?.method === 'SAMPLE-AES-CTR')
         throw new Error('SAMPLE-AES-CTR requires fMP4');
-      const pes = demux(data);
+      const packed = isId3(data) ? packedAac(data) : undefined;
+      const pes = packed?.pes ?? demux(data);
       const encrypted = segment.key?.method === 'SAMPLE-AES';
       if (encrypted && !this.decryptSamples)
         throw new Error('SAMPLE-AES decoder unavailable');
@@ -191,6 +217,11 @@ export class MediaLane {
       tracks = result.tracks;
       data = result.media;
       rawStart = result.start;
+      metadataError = result.metadataError;
+      metadata = (packed?.metadata ?? result.metadata).map((item) => ({
+        ...item,
+        time: unwrap(item.time * 90000, result.start * 90000) / 90000,
+      }));
       captionPackets = result.captions
         .filter((p) => p.type < 2)
         .map((p) => ({
@@ -201,11 +232,16 @@ export class MediaLane {
         }));
       digitalPackets = result.captions.filter((p) => p.type >= 2);
       captionError = result.captionError;
-    } else throw new Error('Expected MPEG-TS or fMP4 with EXT-X-MAP');
+    } else
+      throw new Error(
+        'Expected MPEG-TS, timestamped packed audio, or fMP4 with EXT-X-MAP',
+      );
     if (this.role === 'audio' && tracks.some((t) => t.kind !== 'audio'))
       throw new Error('Audio rendition contains a non-audio track');
     return {
       segment,
+      metadata,
+      metadataError,
       init,
       data,
       tracks,

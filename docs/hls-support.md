@@ -28,7 +28,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 - **TTML/IMSC text and MP4 WebVTT are implemented subsets.** See the text-profile scope below. HLS CEA-708 SEI decoding uses an original implementation separate from the MoQ decoder; see its scope below.
 - TS supports one video/audio stream, supported access-unit timing and complete PES packets. Multi-packet PAT/PMT sections are assembled and CRC-checked. Annex-B NAL units may span PES boundaries, and multiple pictures per PES are supported for the timing profiles below. IDR and immediate AVC intra recovery points are marked as random access; other segment starts preserve continuity and MSE waits for a random access point when required. Unsupported codecs still fail explicitly. More broadcast edge-case testing is needed.
 - AVC, HEVC Main/Main10, AV1 Main 8/10-bit (fMP4) and AAC-LC/declared HE-AAC v1 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. Dolby audio, packed audio, I-frame-only trick-play and image playlists are not supported.
-- SAMPLE-AES supports TS AVC/AAC identity keys. fMP4 cenc/cbcs uses EME, with ClearKey validated. Content steering, interstitials and timed metadata remain pending.
+- SAMPLE-AES supports TS AVC/AAC identity keys. fMP4 cenc/cbcs uses EME, with ClearKey validated. Content steering and interstitials remain pending; ID3/emsg metadata delivery is described below.
 - Declared GAP segments have bounded scheduling/playback recovery; see the validation scope below. Live-window loss and detected timeline resets now trigger a bounded coordinated media restart; see below.
 - The network client bounds individual resources at 64 MiB. No server proxy is provided; cross-origin resources need appropriate CORS headers.
 - The player uses MSE. There is no native-HLS fallback in this engine; such a fallback would not test our own parser/pipeline.
@@ -271,3 +271,13 @@ The tests cover AVC/AAC CENC subsamples and CBCS 1:9 video/full-block audio, per
 This does not certify Widevine, PlayReady, FairPlay, persistent/offline licenses or output-protection behavior. These need their own CDM/platform/license validation. Encrypted in-band video SEI captions cannot be decoded by JavaScript before CDM decryption; separate clear subtitle tracks remain usable.
 
 References: [W3C EME](https://www.w3.org/TR/encrypted-media/), [CENC initialization data](https://www.w3.org/TR/eme-initdata-cenc/), ISO/IEC 23001-7.
+
+## Packed AAC and timed metadata (0.19)
+
+Packed ADTS AAC requires a leading ID3 PRIV transport timestamp. ID3 v2.3/v2.4, interleaved tags, 33-bit clock rollover, whole-resource AES-128 and AAC SAMPLE-AES are supported. Fifty generated segments are checked against the original ADTS bytes and timestamps. Packed MP3/AC-3/E-AC-3 remain pending.
+
+`metadata` events are emitted after a segment is appended. Their `time` is in the presentation timeline; arrival does not mean playback has reached that time. Events may be delivered again after a seek/reload. They contain `type` (`id3` or `emsg`), `frames` and `lane`; emsg also exposes scheme/value/id/duration and raw message bytes. ID3 exposes parsed private/text fields and original frame bytes. Applications own presentation-time scheduling and deduplication appropriate to their metadata semantics.
+
+ID3 is read from MPEG-TS stream type 0x15 and packed audio. fMP4 supports emsg v0 relative and v1 absolute timestamps, including AOM/Apple ID3 schemes. Optional malformed metadata emits `metadatawarning` and does not stop A/V playback. emsg boxes are neutralized before MSE without moving sample offsets. Compressed/encrypted ID3 frames are retained as encoded bytes, not interpreted.
+
+Generated tests cover metadata timing, byte preservation, seeks, malformed metadata recovery and Fetch/XHR. Packed-audio and timed-metadata playback/seek tests have passed in Playwright Chromium, Firefox and WebKit on Linux (60 browser cases). These are browser-engine tests, not Safari/iOS device certification.

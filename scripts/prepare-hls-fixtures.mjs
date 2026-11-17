@@ -623,3 +623,6 @@ await import('./prepare-protection-fixtures.mjs');
 await import('./prepare-sample-aes-fixtures.mjs');
 
 await import('./prepare-cenc-fixtures.mjs');
+
+await import('./prepare-packed-audio-fixtures.mjs');
+await import('./prepare-metadata-fixtures.mjs');

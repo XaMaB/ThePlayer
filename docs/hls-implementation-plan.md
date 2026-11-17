@@ -67,3 +67,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.17.0-alpha.1 adds SAMPLE-AES TS AVC/AAC, verified byte-for-byte and through browser playback. Continue with fMP4 sample encryption/EME, remaining protocol extensions and stabilization.
 
 0.18.0-alpha.1 adds CENC/CBCS fMP4 through EME with ClearKey validation and automatic identity-key delivery. Continue with protected key/rendition rotation, remaining media/protocol extensions and stabilization; commercial CDM certification remains distinct from ClearKey coverage.
+
+0.19.0-alpha.1 adds packed AAC and ID3/emsg metadata delivery with browser-engine coverage. Continue with remaining packed codecs, protocol extensions, expanded interoperability and stabilization.
