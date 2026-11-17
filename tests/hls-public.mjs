@@ -169,11 +169,44 @@ try {
           { timeout: 45000 },
         );
       }
+      if (source.id === 'apple-av1') {
+        assert.match(
+          await page.evaluate(
+            () =>
+              window.player.catalog.tracks.find((t) => t.kind === 'video')
+                .codec,
+          ),
+          /^av01\./,
+        );
+        await page.evaluate(() => {
+          document.querySelector('video').currentTime = 60;
+        });
+        await page.waitForFunction(
+          () => document.querySelector('video').currentTime > 63,
+        );
+        const previousAudio = await page.evaluate(
+          () => document.querySelector('video').webkitAudioDecodedByteCount,
+        );
+        await page.evaluate(() =>
+          window.player.selectAudioTrack(
+            window.player.audioTracks.find((t) => t.label.includes('DVS')).name,
+          ),
+        );
+        await page.waitForFunction(
+          (n) =>
+            document.querySelector('video').webkitAudioDecodedByteCount > n,
+          previousAudio,
+        );
+      }
       const tracks = await page.evaluate(() => window.player.subtitleTracks);
       if (tracks.length) {
         await page.evaluate(() =>
           window.player.selectSubtitleTrack(
-            window.player.subtitleTracks[0].name,
+            (
+              window.player.subtitleTracks.find(
+                (t) => t.label === 'English' && !t.forced,
+              ) ?? window.player.subtitleTracks[0]
+            ).name,
           ),
         );
         await page.waitForFunction(

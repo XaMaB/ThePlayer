@@ -441,3 +441,42 @@ test('browser capability filters HEVC without losing standalone audio', () => {
   );
   assert.equal(browserVariants(variants, () => true).length, 3);
 });
+
+const { av1Codec, normalizeAv1Codec } = await module('av1');
+test('AV1 configuration reads profile, tier, depth and nclx color metadata', () => {
+  assert.equal(av1Codec(Uint8Array.of(0x81, 0, 0x0c, 0)), 'av01.0.00M.08');
+  assert.equal(
+    av1Codec(
+      Uint8Array.of(0x81, 0, 0x4d, 0),
+      Uint8Array.of(110, 99, 108, 120, 0, 1, 0, 1, 0, 1, 0),
+    ),
+    'av01.0.00M.10.0.111.01.01.01.0',
+  );
+  assert.equal(av1Codec(Uint8Array.of(0x81, 0x48, 0xe0, 0)), 'av01.2.08H.12');
+  assert.throws(() => av1Codec(Uint8Array.of(1, 0, 12, 0)), /configuration/);
+  assert.throws(() => av1Codec(Uint8Array.of(0x81, 0, 0x6c, 0)), /bit depth/);
+  assert.throws(() => av1Codec(Uint8Array.of(0x81, 0, 12, 1)), /configuration/);
+  assert.throws(() => av1Codec(Uint8Array.of(0x81, 0, 0x4f, 0)), /chroma/);
+  assert.throws(
+    () => av1Codec(Uint8Array.of(0x81, 0, 0x8c, 0)),
+    /profile or level/,
+  );
+});
+test('AV1 codec normalization retains tier and requires all optional fields together', () => {
+  assert.equal(
+    normalizeCodec('AV01.0.00m.10.0.111.01.01.01.0'),
+    'av01.0.00M.10.0.111.01.01.01.0',
+  );
+  assert.equal(normalizeAv1Codec('av01.0.00M.10.0'), undefined);
+  assert.equal(normalizeAv1Codec('av01.0.00M.10?ignored'), 'av01.0.00M.10');
+  assert.equal(normalizeAv1Codec('av01.0.00M.12'), undefined);
+  assert.equal(normalizeAv1Codec('av01.3.00M.10'), undefined);
+  assert.equal(normalizeAv1Codec('av01.0.25M.08'), undefined);
+  assert.equal(
+    browserVariants(
+      [{ url: 'a', bandwidth: 1, codecs: 'av01.0.00M.10,mp4a.40.2' }],
+      (mime) => mime.includes('av01.0.00M.10'),
+    ).length,
+    1,
+  );
+});

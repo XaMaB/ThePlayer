@@ -18,3 +18,11 @@ Before publishing:
 - VOD position and pause preservation when changing video/audio mode.
 - Shared API/UI/build version and matching annotated Git release tag.
 - Independent FFmpeg decoding and browser regressions; HEVC browser playback remains dependent on a capable device.
+
+## 0.6.0-alpha.1
+
+- AV1 fMP4 (`av01`/`av1C`) initialization and browser capability filtering.
+- Profile, level, tier, bit-depth and nclx color codec signaling; invalid configuration rejection.
+- Main 8/10-bit browser playback, quality changes and seeking, with original media bytes preserved.
+- Apple AV1 sample in the demo and optional public tests, with external audio and WebVTT.
+- Synthetic AV1 fixtures and codec parser regression tests.

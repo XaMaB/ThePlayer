@@ -1,3 +1,4 @@
+import { normalizeAv1Codec } from './av1';
 import type { Playlist, Variant } from './playlist';
 
 /** Older HLS masters spell AVC profile/level as decimal bytes (avc1.66.30).
@@ -5,6 +6,7 @@ import type { Playlist, Variant } from './playlist';
  */
 export function normalizeCodec(value: string): string {
   const codec = value.trim().toLowerCase();
+  if (codec.startsWith('av01.')) return normalizeAv1Codec(codec) ?? codec;
   const legacy = /^avc1\.(\d{1,3})\.(\d{1,3})$/.exec(codec);
   if (!legacy) {
     if (/^(hvc1|hev1)\./.test(codec))
@@ -16,7 +18,7 @@ export function normalizeCodec(value: string): string {
   if (profile < 1 || profile > 255 || level < 1 || level > 255) return codec;
   return `avc1.${profile.toString(16).padStart(2, '0')}00${level.toString(16).padStart(2, '0')}`;
 }
-/** The demuxers currently support AVC, HEVC, AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
+/** The demuxers currently support AVC, HEVC, AV1 (fMP4), AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
 export function compatibleVariants(variants: Variant[]): Variant[] {
   return variants
     .map((v) => ({
@@ -28,10 +30,12 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
         !v.codecs ||
         v.codecs
           .split(',')
-          .every((codec) =>
-            /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
-              codec,
-            ),
+          .every(
+            (codec) =>
+              !!normalizeAv1Codec(codec) ||
+              /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
+                codec,
+              ),
           ),
     );
 }

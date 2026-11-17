@@ -115,6 +115,9 @@ const browser = await chromium.launch({
 });
 try {
   for (const [source, transport] of [
+    ['av1-8/index.m3u8', 'fetch'],
+    ['av1-10/index.m3u8', 'xhr'],
+    ['av1.m3u8', 'fetch'],
     ['hevc-8/index.m3u8', 'fetch'],
     ['hevc-8/fmp4.m3u8', 'fetch'],
     ['hevc-10/index.m3u8', 'fetch'],
@@ -277,6 +280,34 @@ try {
             JSON.parse(
               await readFile(path.join(playerRoot, 'package.json'), 'utf8'),
             ).version,
+        );
+      }
+      if (source === 'av1.m3u8') {
+        await page.evaluate(() => window.player.selectQuality(1));
+        await page.waitForFunction(
+          () =>
+            document.querySelector('video').videoWidth === 320 &&
+            window.player.currentQuality === 1,
+        );
+        await page.evaluate(() => {
+          document.querySelector('video').currentTime = 8;
+        });
+        await page.waitForFunction(
+          () => document.querySelector('video').currentTime > 9,
+        );
+        assert.ok(
+          await page.evaluate(
+            () =>
+              document.querySelector('video').webkitAudioDecodedByteCount > 0,
+          ),
+        );
+        assert.match(
+          await page.evaluate(
+            () =>
+              window.player.catalog.tracks.find((t) => t.kind === 'video')
+                .codec,
+          ),
+          /^av01\./,
         );
       }
       if (source === 'event.m3u8')

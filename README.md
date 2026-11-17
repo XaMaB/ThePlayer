@@ -27,11 +27,11 @@ ThePlayer brings multilingual audio, broadcast captions and live playback contro
 
 ## Protocols
 
-| Protocol              | Status                | Notes                                                                            |
-| --------------------- | --------------------- | -------------------------------------------------------------------------------- |
-| MoQ over WebTransport | Implemented           | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile               |
-| HLS                   | Experimental baseline | Original TS/fMP4 AVC/HEVC/AAC engine; [coverage and limits](docs/hls-support.md) |
-| MPEG-DASH             | Planned               | Engine API is in place; no DASH engine ships yet                                 |
+| Protocol              | Status                | Notes                                                                                         |
+| --------------------- | --------------------- | --------------------------------------------------------------------------------------------- |
+| MoQ over WebTransport | Implemented           | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile                            |
+| HLS                   | Experimental baseline | Original AVC/HEVC/AAC TS/fMP4 and AV1 fMP4 engine; [coverage and limits](docs/hls-support.md) |
+| MPEG-DASH             | Planned               | Engine API is in place; no DASH engine ships yet                                              |
 
 MoQ defines transport behavior; applications still need a matching catalog and media profile. An arbitrary MoQ relay or publisher is not automatically interoperable with this player.
 
@@ -59,7 +59,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 
 ## Audio and video
 
-HLS supports AVC, HEVC Main/Main10 and AAC in TS/fMP4, including audio-only streams. HEVC playback requires browser/OS decoder support. Mixed masters expose Video / Audio only in the Quality menu. See the [HLS matrix](docs/hls-support.md) for tested formats and device-validation limits.
+HLS supports AVC, HEVC Main/Main10 and AAC in TS/fMP4, including audio-only streams, plus AV1 Main 8/10-bit in fMP4. HEVC and AV1 playback require browser/OS decoder support. Mixed masters expose Video / Audio only in the Quality menu. See the [HLS matrix](docs/hls-support.md) for tested formats and device-validation limits.
 
 The MoQ engine appends fragmented MP4 to Media Source Extensions. Playback depends on browser support for the advertised codecs; the player does not transcode. Multilingual audio tracks come from the media catalog. Track switching replaces the audio subscription and buffer while keeping the video connection and timeline.
 
@@ -202,4 +202,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.5.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.6.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

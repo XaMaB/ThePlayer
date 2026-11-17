@@ -379,6 +379,13 @@ export class HlsEngine extends EventTarget {
       prepared.tracks.some((t) => t.kind === 'video')
     )
       throw new Error('Audio-only mode requires an audio-only rendition');
+    if (
+      lane.role === 'main' &&
+      this.master &&
+      this.mediaMode === 'video' &&
+      !prepared.tracks.some((t) => t.kind === 'video')
+    )
+      throw new Error('Video rendition contains no supported video track');
     const codecs = prepared.tracks.map((t) => t.codec).join(',');
     if (
       !MediaSource.isTypeSupported(

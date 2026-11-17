@@ -1,3 +1,4 @@
+import { av1Codec } from './av1';
 import { hevcCodec } from './hevc';
 
 /** ISO BMFF reader/writer for AVC, HEVC and AAC. */
@@ -173,13 +174,22 @@ export function inspectInit(data: Uint8Array): Track[] {
           ).join('');
       } else if (entry.type === 'hvc1' || entry.type === 'hev1') {
         codec = hevcCodec(child(entry.body.subarray(78), 'hvcC'), entry.type);
+      } else if (entry.type === 'av01') {
+        const children = boxes(entry.body.subarray(78));
+        const configs = children.filter((b) => b.type === 'av1C');
+        if (configs.length !== 1)
+          throw new Error('AV1 needs exactly one av1C box');
+        codec = av1Codec(
+          configs[0].body,
+          children.find((b) => b.type === 'colr')?.body,
+        );
       } else if (entry.type === 'mp4a') {
         const esds = child(entry.body.subarray(28), 'esds');
         const objectType = audioObjectType(esds.subarray(4));
         codec = 'mp4a.40.' + objectType;
       } else
         throw new Error(
-          `Unsupported HLS sample entry ${entry.type}; supports AVC/HEVC/AAC`,
+          `Unsupported HLS sample entry ${entry.type}; supports AVC/HEVC/AV1/AAC`,
         );
       return {
         id: read32(tkhd, tkhd[0] === 1 ? 20 : 12),

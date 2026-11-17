@@ -1,6 +1,12 @@
 // Remote test media remains hosted by its publisher; do not redistribute it as fixtures.
 export const hlsExamples = [
   {
+    id: 'apple-av1',
+    name: 'Apple AV1 · 10-bit / separate audio / WebVTT',
+    url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/av1-sample/av1-sample.m3u8',
+    reference: 'https://developer.apple.com/streaming/examples/',
+  },
+  {
     id: 'apple-bipbop',
     name: 'Apple BipBop · fMP4 / separate audio / WebVTT',
     url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8',

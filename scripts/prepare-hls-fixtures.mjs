@@ -406,3 +406,61 @@ await writeFile(
   '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=320x180,CODECS="avc1.42c00c,mp4a.40.2"\nts/index.m3u8\n' +
     audioLadder,
 );
+
+for (const depth of [8, 10]) {
+  const dir = path.join(root, 'av1-' + depth);
+  await mkdir(dir, { recursive: true });
+  ffmpeg(
+    '-filter_threads',
+    '1',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=size=${depth === 8 ? '160x90' : '320x180'}:rate=25`,
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=550:sample_rate=48000',
+    '-t',
+    '12',
+    '-c:v',
+    'libaom-av1',
+    '-cpu-used',
+    '8',
+    '-row-mt',
+    '1',
+    '-threads',
+    '2',
+    '-g',
+    '50',
+    '-crf',
+    '38',
+    '-b:v',
+    '0',
+    '-pix_fmt',
+    depth === 10 ? 'yuv420p10le' : 'yuv420p',
+    '-color_primaries',
+    'bt709',
+    '-color_trc',
+    'bt709',
+    '-colorspace',
+    'bt709',
+    '-c:a',
+    'aac',
+    '-f',
+    'hls',
+    '-hls_time',
+    '2',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_type',
+    'fmp4',
+    '-hls_segment_filename',
+    path.join(dir, 'segment%02d.m4s'),
+    path.join(dir, 'index.m3u8'),
+  );
+}
+await writeFile(
+  path.join(root, 'av1.m3u8'),
+  '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=160x90,CODECS="av01.0.00M.08,mp4a.40.2"\nav1-8/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=700000,RESOLUTION=320x180,CODECS="av01.0.00M.10,mp4a.40.2"\nav1-10/index.m3u8\n',
+);
