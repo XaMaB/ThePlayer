@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 const fixtures =
   process.env.THEPLAYER_HLS_FIXTURES ??
   path.join(os.tmpdir(), 'theplayer-hls-fixtures');
-const dist = path.resolve(fileURLToPath(new URL('../dist/', import.meta.url)));
+const dist =
+  process.env.THEPLAYER_DIST ??
+  path.resolve(fileURLToPath(new URL('../dist/', import.meta.url)));
 let slow = false;
 const server = createServer(async (req, res) => {
   try {

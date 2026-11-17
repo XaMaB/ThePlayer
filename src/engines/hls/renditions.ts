@@ -1,3 +1,4 @@
+import { shiftPlaylist } from './playlist';
 import { normalizeAv1Codec } from './av1';
 import type { Playlist, Variant } from './playlist';
 
@@ -69,12 +70,13 @@ export function alignRendition(next: Playlist, reference: Playlist): Playlist {
         s.sequence === overlap.sequence &&
         s.discontinuity === overlap.discontinuity,
     )!;
-    shift = anchor.start - overlap.start;
+    shift =
+      anchor.start -
+      (anchor.partOffset ?? 0) -
+      overlap.start +
+      (overlap.partOffset ?? 0);
   }
-  return {
-    ...next,
-    segments: next.segments.map((s) => ({ ...s, start: s.start + shift })),
-  };
+  return shiftPlaylist(next, shift);
 }
 export function segmentAt(p: Playlist, time: number): number {
   const index = p.segments.findIndex(
@@ -84,7 +86,9 @@ export function segmentAt(p: Playlist, time: number): number {
 }
 /** Switch at a future segment boundary, preserving the content currently being decoded. */
 export function switchBoundary(p: Playlist, time: number): number {
-  const segment = p.segments.find((s) => s.start >= time + 0.15);
+  const segment = p.segments.find(
+    (s) => s.start >= time + 0.15 && (s.part === undefined || s.independent),
+  );
   if (!segment)
     throw new Error('No future segment boundary available for switching');
   return segment.start;

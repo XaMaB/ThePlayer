@@ -26,13 +26,13 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 
 ## Protocols
 
-| Protocol              | Status                      | Implemented scope                                                                                         |
-| --------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------- |
-| MoQ over WebTransport | Implemented                 | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                         |
-| HLS over HTTP(S)      | Experimental implementation | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                     |
-| LL-HLS                | Not implemented             | Complete segments may play as ordinary HLS; no partial-segment playback, blocking reload or delta updates |
-| MPEG-DASH             | Planned                     | No DASH engine ships yet                                                                                  |
-| UDP/RTP multicast     | Origin input only           | The browser does not join multicast groups; use an Origin to ingest and publish media                     |
+| Protocol              | Status                      | Implemented scope                                                                                      |
+| --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| MoQ over WebTransport | Implemented                 | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                      |
+| HLS over HTTP(S)      | Experimental implementation | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                  |
+| LL-HLS                | Implemented fMP4 baseline   | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache |
+| MPEG-DASH             | Planned                     | No DASH engine ships yet                                                                               |
+| UDP/RTP multicast     | Origin input only           | The browser does not join multicast groups; use an Origin to ingest and publish media                  |
 
 MoQ transport compatibility alone does not guarantee interoperability: the publisher and player must also agree on the catalog and media profile. HLS is a tested subset, not a claim of full support for every protocol version. See the [HLS support matrix](docs/hls-support.md).
 
@@ -222,7 +222,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Extend the original HLS engine: LL-HLS, further ABR recovery and TTML/IMSC1.
+- Extend the original HLS engine: broader LL-HLS interoperability, TTML/IMSC1 and protection/extensions.
 - Extend HLS caption carriage beyond fMP4 CEA-608, including TS/SEI and CEA-708.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
@@ -239,4 +239,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.11.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.12.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

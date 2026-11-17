@@ -8,6 +8,7 @@ const { version } = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8'),
 );
 const root = fileURLToPath(new URL('..', import.meta.url));
+const output = path.resolve(root, process.env.THEPLAYER_DIST ?? 'dist');
 const upstream = process.env.MOQ_SOURCE ?? path.join(root, '.cache/moq');
 const revision = 'caf6ebc05d0b56a5689af1df431dd13804aaa1a2';
 let actual;
@@ -26,7 +27,7 @@ const alias = Object.fromEntries(
     path.join(upstream, 'js', name, 'src/index.ts'),
   ]),
 );
-await mkdir(path.join(root, 'dist'), { recursive: true });
+await mkdir(output, { recursive: true });
 const license = await readFile(
   path.join(root, 'vendor/mux.js/LICENSE'),
   'utf8',
@@ -39,7 +40,7 @@ await build({
     core: 'src/core/player.ts',
     hls: 'src/engines/hls/engine.ts',
   },
-  outdir: 'dist',
+  outdir: output,
   bundle: true,
   splitting: true,
   chunkNames: 'chunks/[name]-[hash]',
@@ -58,15 +59,15 @@ await build({
 });
 await Promise.all(
   ['index.html', 'style.css'].map((name) =>
-    copyFile(path.join(root, 'demo', name), path.join(root, 'dist', name)),
+    copyFile(path.join(root, 'demo', name), path.join(output, name)),
   ),
 );
 const embed = (await readFile(path.join(root, 'demo/index.html'), 'utf8'))
   .replace('<body>', '<body data-embed>')
   .replace('ThePlayer · Demo', 'ThePlayer · Embed');
-await writeFile(path.join(root, 'dist/embed.html'), embed);
+await writeFile(path.join(output, 'embed.html'), embed);
 
 await writeFile(
-  path.join(root, 'dist/version.json'),
+  path.join(output, 'version.json'),
   JSON.stringify({ name: 'ThePlayer', version }) + '\n',
 );

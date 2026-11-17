@@ -5,6 +5,7 @@ const tailKey = (p: Playlist) => {
   return JSON.stringify([
     p.live,
     tail.sequence,
+    tail.part,
     tail.discontinuity,
     tail.url,
     tail.range,

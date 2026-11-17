@@ -606,3 +606,5 @@ for (const [source, mode, name] of [
       videoPesFixture(await readFile(path.join(root, source, segment)), mode),
     );
 }
+
+await import('./prepare-ll-hls-fixtures.mjs');

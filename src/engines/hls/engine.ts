@@ -1,3 +1,4 @@
+import { PlaylistLoader } from './playlist-reload';
 import { LiveProgress, reconcileLive } from './live';
 import { Cea608Timeline } from './cea608-timeline';
 import { row608Text } from './cea608';
@@ -9,6 +10,8 @@ import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
   parsePlaylist,
   alignPlaylist,
+  independentIndex,
+  holdBack,
   type Playlist,
   type Segment,
   type Resource,
@@ -62,6 +65,8 @@ export class HlsEngine extends EventTarget {
       lanes: {} as Record<string, { unchangedMs: number; stale: boolean }>,
     },
     recovery: {} as Record<string, unknown>,
+    playlistReload: {} as Record<string, unknown>,
+    preload: {} as Record<string, unknown>,
     bandwidth: 0,
     quality: {} as Record<string, unknown>,
     abrWarning: '',
@@ -103,6 +108,7 @@ export class HlsEngine extends EventTarget {
   private gaps: { start: number; end: number }[] = [];
   private abort = new AbortController();
   private client: ResourceClient;
+  private playlistLoader: PlaylistLoader;
   private get playlist() {
     return this.main?.playlist;
   }
@@ -173,6 +179,10 @@ export class HlsEngine extends EventTarget {
         'Live recovery timeout must not precede the stale threshold',
       );
     this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
+    this.playlistLoader = new PlaylistLoader(
+      this.client,
+      () => this.master?.variables ?? {},
+    );
     this.diagnostics.recovery = this.client.recovery;
     video.addEventListener('playing', () => this.state('playing'), {
       signal: this.abort.signal,
@@ -217,24 +227,16 @@ export class HlsEngine extends EventTarget {
       );
     }
   }
-  private async readPlaylist(url: string, recoveryWindowMs?: number) {
-    const response = await this.client.get({ url }, { recoveryWindowMs });
-    if (response.data.length > 2 * 1024 * 1024)
-      throw new Error('Playlist exceeds 2 MiB');
-    const p = parsePlaylist(
-      new TextDecoder('utf-8', { fatal: true }).decode(response.data),
-      response.url,
-      this.master?.variables,
-    );
-    if (p.unsupported.length)
-      throw new Error('Unsupported HLS feature: ' + p.unsupported.join(', '));
-    return p;
+  private readPlaylist(url: string, recoveryWindowMs?: number) {
+    return this.playlistLoader.read(url, recoveryWindowMs);
   }
   private lane(p: Playlist, role: 'main' | 'audio', codecs?: string) {
     return new MediaLane(
       p,
       role,
-      (r) => {
+      async (r) => {
+        const hinted = await this.playlistLoader.preload.take(r);
+        if (hinted) return hinted;
         const active =
           role === 'main' &&
           this.autoQuality &&
@@ -392,30 +394,29 @@ export class HlsEngine extends EventTarget {
           ? Math.max(0, p.duration + offset)
           : offset
         : p.live
-          ? Math.max(
-              0,
-              p.duration -
-                Math.max(
-                  3 * p.targetDuration,
-                  Number(p.serverControl?.['HOLD-BACK']) || 0,
-                ),
-            )
+          ? Math.max(0, p.duration - holdBack(p))
           : 0;
-    return Math.min(p.segments.length - 1, segmentAt(p, time));
+    return independentIndex(p, segmentAt(p, time));
   }
   private lanes() {
     return [this.main, this.audio].filter((lane): lane is MediaLane => !!lane);
   }
   private onSeek() {
     if (this.initial || !this.main) return;
+    if (
+      this.lanes().every((lane) => lane.ahead(this.video.currentTime) >= 0.1)
+    ) {
+      this.ended = false;
+      return;
+    }
     this.generation++;
     for (const lane of this.lanes())
       if (lane.ahead(this.video.currentTime) < 0.1)
         // Seeking exactly to duration still needs the last segment. Otherwise
         // endOfStream() can shorten the duration to the buffered prefix.
-        lane.next = Math.min(
+        lane.next = independentIndex(
+          lane.playlist,
           segmentAt(lane.playlist, this.video.currentTime),
-          lane.playlist.segments.length - 1,
         );
     if (
       this.main.ahead(this.video.currentTime) < 0.1 &&
@@ -434,15 +435,27 @@ export class HlsEngine extends EventTarget {
 
   private async refresh(lane: MediaLane) {
     const p = lane.playlist;
+    if (!p.live) return;
+    const age = performance.now() - lane.refreshedAt;
+    const blocking = this.playlistLoader.blocking(p);
     if (
-      !p.live ||
-      performance.now() - lane.refreshedAt < p.targetDuration * 1000
+      blocking
+        ? age < 100 ||
+          (lane.next < p.segments.length &&
+            lane.ahead(this.video.currentTime) < this.targetBuffer)
+        : age < p.targetDuration * 1000
     )
       return;
     const token = this.generation,
       nextSequence =
         p.segments[lane.next]?.sequence ?? p.segments.at(-1)!.sequence + 1;
-    const incoming = await this.readPlaylist(p.url);
+    const nextTime =
+      p.segments[lane.next]?.start ??
+      p.segments.at(-1)!.start + p.segments.at(-1)!.duration;
+    const incoming = await this.playlistLoader.reload(
+      p,
+      performance.now() - lane.refreshedAt,
+    );
     const unchanged = this.liveProgress.observe(incoming, performance.now());
     const staleAfter =
       this.source.liveStallTimeoutMs ??
@@ -478,7 +491,7 @@ export class HlsEngine extends EventTarget {
     lane.refreshedAt = performance.now();
     lane.next =
       token === this.generation
-        ? updated.segments.findIndex((s) => s.sequence >= nextSequence)
+        ? segmentAt(updated, nextTime)
         : segmentAt(updated, this.video.currentTime);
     if (lane.next < 0) lane.next = updated.segments.length;
   }
@@ -514,10 +527,17 @@ export class HlsEngine extends EventTarget {
       'main',
       this.qualityLevels[this.selectedQuality]?.codecs,
     );
-    this.main.next = Math.max(
-      0,
-      main.segments.length -
-        Math.max(3, Math.ceil(this.targetBuffer / main.targetDuration)),
+    this.main.next = independentIndex(
+      main,
+      segmentAt(
+        main,
+        Math.max(
+          main.segments[0].start,
+          main.segments.at(-1)!.start +
+            main.segments.at(-1)!.duration -
+            holdBack(main),
+        ),
+      ),
     );
     this.audio = audio ? this.lane(audio, 'audio') : undefined;
     if (this.audio)
@@ -867,7 +887,11 @@ export class HlsEngine extends EventTarget {
         const token = this.generation;
         try {
           const choice = this.qualityLevels[index];
-          const parsed = await this.readPlaylist(choice.url, 0);
+          const parsed = await this.playlistLoader.rendition(
+            choice.url,
+            this.main!.playlist,
+            0,
+          );
           const playlist = alignRendition(parsed, this.main!.playlist);
           const next = this.main!.playlist.segments[this.main!.next];
           const boundary = Math.max(
@@ -876,7 +900,7 @@ export class HlsEngine extends EventTarget {
           );
           const lane = this.lane(playlist, 'main', choice.codecs);
           lane.next = Math.min(
-            segmentAt(playlist, boundary),
+            independentIndex(playlist, segmentAt(playlist, boundary)),
             playlist.segments.length - 1,
           );
           this.skipDeclaredGaps(lane);
@@ -966,7 +990,10 @@ export class HlsEngine extends EventTarget {
       return;
     const choice =
       kind === 'audio' ? this.audioTracks[index] : this.qualityLevels[index];
-    const p = alignRendition(await this.readPlaylist(choice.url), old.playlist);
+    const p = alignRendition(
+      await this.playlistLoader.rendition(choice.url, old.playlist),
+      old.playlist,
+    );
     const lane = this.lane(
       p,
       old.role,
@@ -1077,6 +1104,8 @@ export class HlsEngine extends EventTarget {
     await this.enqueueSwitch('quality', index);
   }
   private updateDiagnostics() {
+    this.diagnostics.playlistReload = this.playlistLoader.diagnostics;
+    this.diagnostics.preload = this.playlistLoader.preload.diagnostics;
     this.diagnostics.quality = {
       mode: this.autoQuality ? 'auto' : 'manual',
       current: this.currentQuality,
@@ -1091,7 +1120,18 @@ export class HlsEngine extends EventTarget {
     this.diagnostics.retries = this.client.retries;
     this.diagnostics.buffer = {
       target: this.targetBuffer,
-      mode: 'hls-segment',
+      mode: this.playlist?.partTarget ? 'll-hls-part' : 'hls-segment',
+      holdBack:
+        this.isLive && this.playlist ? holdBack(this.playlist) : undefined,
+      latency:
+        this.isLive && this.playlist
+          ? Math.max(
+              0,
+              this.playlist.segments.at(-1)!.start +
+                this.playlist.segments.at(-1)!.duration -
+                this.video.currentTime,
+            )
+          : undefined,
       ahead: this.ahead(),
       live: this.isLive,
     };
@@ -1367,7 +1407,7 @@ export class HlsEngine extends EventTarget {
       last = p.segments.at(-1)!;
     this.video.currentTime = Math.max(
       p.segments[0].start,
-      last.start + last.duration - 3 * p.targetDuration,
+      last.start + last.duration - holdBack(p),
     );
     void this.play();
   }

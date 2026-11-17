@@ -16,6 +16,8 @@ export interface RequestProgress {
   elapsedMs: number;
 }
 export interface RequestOptions {
+  timeoutMs?: number;
+  retries?: number;
   signal?: AbortSignal;
   recoveryWindowMs?: number;
   onProgress?: (progress: RequestProgress) => void;
@@ -75,7 +77,7 @@ export class ResourceClient {
           const result = await this.once(
             resource,
             Math.min(
-              this.options.timeoutMs ?? 15000,
+              request.timeoutMs ?? this.options.timeoutMs ?? 15000,
               Math.max(1, deadline - performance.now()),
             ),
             signal,
@@ -87,7 +89,8 @@ export class ResourceClient {
           signal.throwIfAborted();
           if (!retryable(error)) throw error;
           const wait = retryDelay(attempt);
-          const extended = attempt >= (this.options.retries ?? 2);
+          const extended =
+            attempt >= (request.retries ?? this.options.retries ?? 2);
           if ((extended && !window) || performance.now() + wait >= deadline) {
             this.recovery.exhausted++;
             throw error;

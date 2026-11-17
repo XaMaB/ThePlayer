@@ -8,7 +8,8 @@ import os from 'node:os';
 export function faultServer({
   fixtures = process.env.THEPLAYER_HLS_FIXTURES ??
     path.join(os.tmpdir(), 'theplayer-hls-fixtures'),
-  dist = fileURLToPath(new URL('../../dist/', import.meta.url)),
+  dist = process.env.THEPLAYER_DIST ??
+    fileURLToPath(new URL('../../dist/', import.meta.url)),
 } = {}) {
   const requests = new Map();
   const epochs = new Map();
@@ -35,6 +36,167 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
+        if (scenario.startsWith('ll-parts')) {
+          relative = 'll-parts/' + resource;
+          const key = match[1];
+          if (!starts.has(key)) starts.set(key, Date.now());
+          const epoch = starts.get(key);
+          const waitFor = async (index) => {
+            const wait = Math.max(0, epoch + (index - 1) * 500 - Date.now());
+            if (wait)
+              await new Promise((resolve) => {
+                const timer = setTimeout(resolve, Math.min(wait, 6000));
+                res.on('close', () => {
+                  clearTimeout(timer);
+                  resolve();
+                });
+              });
+          };
+          if (resource === 'index.m3u8') {
+            if (url.searchParams.has('_HLS_msn')) {
+              requests.set(
+                key + ':parts-blocking',
+                (requests.get(key + ':parts-blocking') ?? 0) + 1,
+              );
+              await waitFor(
+                Number(url.searchParams.get('_HLS_msn')) * 4 +
+                  Number(url.searchParams.get('_HLS_part') ?? 3),
+              );
+              if (res.destroyed) return;
+            }
+            const count = 2 + Math.floor((Date.now() - epoch) / 500);
+            const completed = Math.floor(count / 4),
+              first = Math.max(0, completed - 4);
+            let text =
+              '#EXTM3U\n#EXT-X-VERSION:9\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:' +
+              first +
+              '\n#EXT-X-DISCONTINUITY-SEQUENCE:' +
+              Math.floor(first / 6) +
+              '\n#EXT-X-MAP:URI="init.mp4"\n#EXT-X-PART-INF:PART-TARGET=0.5\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=1.5\n';
+            for (let parent = first; parent <= completed; parent++) {
+              if (parent > first && parent % 6 === 0)
+                text += '#EXT-X-DISCONTINUITY\n';
+              const n = parent === completed ? count % 4 : 4;
+              if (parent >= completed - 3)
+                for (let part = 0; part < n; part++) {
+                  const index = parent * 4 + part;
+                  text +=
+                    '#EXT-X-PART:DURATION=0.5,URI="part' +
+                    String(index % 24).padStart(2, '0') +
+                    '.m4s?index=' +
+                    index +
+                    '"' +
+                    (part === 0 ? ',INDEPENDENT=YES' : '') +
+                    '\n';
+                }
+              if (parent < completed)
+                text +=
+                  '#EXTINF:2,\nparent' +
+                  (parent % 6) +
+                  '.m4s?sequence=' +
+                  parent +
+                  '\n';
+            }
+            if (scenario === 'll-parts-cancel' && count % 5 === 0)
+              text +=
+                '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="abandoned.m4s?index=' +
+                count +
+                '"\n';
+            else
+              text +=
+                '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="part' +
+                String(count % 24).padStart(2, '0') +
+                '.m4s?index=' +
+                count +
+                '"\n';
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.end(text);
+            return;
+          }
+          if (resource === 'abandoned.m4s') {
+            await waitFor(Number(url.searchParams.get('index')) + 3);
+            if (!res.destroyed) {
+              res.writeHead(404);
+              res.end();
+            }
+            return;
+          }
+          if (resource.startsWith('part')) {
+            const id = key + ':part:' + url.searchParams.get('index');
+            requests.set(id, (requests.get(id) ?? 0) + 1);
+            await waitFor(Number(url.searchParams.get('index')));
+            if (res.destroyed) return;
+          }
+        }
+        if (
+          !scenario.startsWith('ll-parts') &&
+          scenario.startsWith('ll-') &&
+          resource === 'index.m3u8'
+        ) {
+          const key = match[1];
+          if (!starts.has(key)) starts.set(key, Date.now());
+          const epoch = starts.get(key);
+          const requested = Number(url.searchParams.get('_HLS_msn'));
+          if (url.searchParams.has('_HLS_msn')) {
+            requests.set(
+              key + ':blocking',
+              (requests.get(key + ':blocking') ?? 0) + 1,
+            );
+            if (scenario === 'll-reject') {
+              res.writeHead(400);
+              res.end();
+              return;
+            }
+            const wait = Math.max(
+              0,
+              epoch + (requested - 7) * 2000 - Date.now(),
+            );
+            if (wait > 0) {
+              requests.set(
+                key + ':waited',
+                (requests.get(key + ':waited') ?? 0) + 1,
+              );
+              await new Promise((resolve) => {
+                const timer = setTimeout(resolve, Math.min(wait, 6000));
+                res.on('close', () => {
+                  clearTimeout(timer);
+                  resolve();
+                });
+              });
+              if (res.destroyed) return;
+            }
+          }
+          const first = Math.floor((Date.now() - epoch) / 2000);
+          let skip = url.searchParams.get('_HLS_skip') === 'YES' ? 2 : 0;
+          if (skip)
+            requests.set(
+              key + ':delta',
+              (requests.get(key + ':delta') ?? 0) + 1,
+            );
+          if (skip && scenario === 'll-missing') skip = 9;
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.end(
+            '#EXTM3U\n#EXT-X-VERSION:9\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:' +
+              first +
+              '\n#EXT-X-DISCONTINUITY-SEQUENCE:' +
+              Math.floor(first / 9) +
+              '\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12\n' +
+              (skip ? '#EXT-X-SKIP:SKIPPED-SEGMENTS=' + skip + '\n' : '') +
+              Array.from({ length: Math.max(1, 8 - skip) }, (_, i) => {
+                const n = first + skip + i;
+                return (
+                  (i + skip && n % 9 === 0 ? '#EXT-X-DISCONTINUITY\n' : '') +
+                  '#EXTINF:2,\nsegment' +
+                  String(n % 9).padStart(2, '0') +
+                  '.ts?sequence=' +
+                  n +
+                  '\n'
+                );
+              }).join(''),
+          );
+          return;
+        }
+
         if (scenario === 'soak' && resource === 'index.m3u8') {
           const key = match[1];
           if (!starts.has(key)) starts.set(key, Date.now());

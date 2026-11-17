@@ -74,7 +74,9 @@ const server = createServer(async (req, res) => {
       : u.pathname === '/'
         ? 'index.html'
         : u.pathname.slice(1);
-    const root = fixture ? fixtures : path.join(playerRoot, 'dist');
+    const root = fixture
+      ? fixtures
+      : (process.env.THEPLAYER_DIST ?? path.join(playerRoot, 'dist'));
     const file = path.resolve(root, relative);
     if (!file.startsWith(root + path.sep)) throw new Error('Path');
     const data = await readFile(file);

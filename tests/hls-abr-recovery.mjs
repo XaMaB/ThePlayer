@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 const root =
   process.env.THEPLAYER_HLS_FIXTURES ??
   path.join(os.tmpdir(), 'theplayer-hls-fixtures');
-const dist = new URL('../dist/', import.meta.url);
+const dist = process.env.THEPLAYER_DIST
+  ? new URL('file://' + process.env.THEPLAYER_DIST + '/')
+  : new URL('../dist/', import.meta.url);
 let armed = false,
   mode = '',
   bad = 0,

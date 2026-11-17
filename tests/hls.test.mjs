@@ -1028,3 +1028,135 @@ test('Per-resource cancellation and progress abort leave sibling requests usable
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('Delta update restores skipped resource, map, key, discontinuity and implicit byte-range state', () => {
+  const base = 'https://example.test/live.m3u8';
+  const common =
+    '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-DISCONTINUITY-SEQUENCE:3\n';
+  const previous = parsePlaylist(
+    common +
+      '#EXT-X-MAP:URI="init.mp4"\n#EXT-X-KEY:METHOD=AES-128,URI="key",IV=0x1\n#EXT-X-BYTERANGE:10@0\n#EXTINF:2,\nmedia\n#EXT-X-BYTERANGE:10\n#EXTINF:2,\nmedia\n',
+    base,
+  );
+  const delta =
+    common +
+    '#EXT-X-SKIP:SKIPPED-SEGMENTS=2\n#EXT-X-BYTERANGE:10\n#EXTINF:2,\nmedia\n';
+  const next = parsePlaylist(delta, base, {}, previous);
+  assert.equal(next.segments.length, 3);
+  assert.equal(next.duration, 6);
+  assert.equal(next.segments[2].sequence, 12);
+  assert.equal(next.segments[2].discontinuity, 3);
+  assert.equal(next.segments[2].range.offset, 20);
+  assert.equal(next.segments[2].key.url, 'https://example.test/key');
+  assert.equal(next.segments[2].map.url, 'https://example.test/init.mp4');
+  assert.throws(() => parsePlaylist(delta, base), /complete playlist reload/);
+  assert.throws(
+    () =>
+      parsePlaylist(
+        delta.replace('SEGMENTS=2', 'SEGMENTS=3'),
+        base,
+        {},
+        previous,
+      ),
+    /complete playlist reload/,
+  );
+  assert.equal(previous.segments.length, 2);
+});
+
+test('Playlist delivery directives preserve signed queries and require advertised capabilities and fresh cache', async () => {
+  const { reloadUrl, canonicalPlaylistUrl } = await module('playlist-reload');
+  const p = parsePlaylist(
+    '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12\n#EXTINF:2,\na.ts\n',
+    'https://example.test/live.m3u8?token=abc',
+  );
+  let url = new URL(reloadUrl(p, 1000));
+  assert.equal(url.searchParams.get('_HLS_msn'), '11');
+  assert.equal(url.searchParams.get('_HLS_skip'), 'YES');
+  assert.equal(url.searchParams.get('token'), 'abc');
+  assert.equal(canonicalPlaylistUrl(url.href), p.url);
+  url = new URL(reloadUrl(p, 6001, false));
+  assert.equal(url.searchParams.has('_HLS_msn'), false);
+  assert.equal(url.searchParams.has('_HLS_skip'), false);
+  assert.equal(reloadUrl({ ...p, live: false }, 0), p.url);
+  assert.equal(reloadUrl({ ...p, serverControl: undefined }, 0), p.url);
+});
+
+test('LL-HLS parts retain parent sequence, dependencies, duration and delta reload cursor', async () => {
+  const { playablePlaylist, independentIndex } = await module('playlist');
+  const { reloadUrl } = await module('playlist-reload');
+  const header =
+    '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:5\n#EXT-X-PART-INF:PART-TARGET=0.5\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES\n#EXT-X-MAP:URI="init.mp4"\n';
+  const parts = Array.from(
+    { length: 4 },
+    (_, i) =>
+      `#EXT-X-PART:DURATION=0.5,URI="part${i}.m4s"${i === 0 ? ',INDEPENDENT=YES' : ''}\n`,
+  ).join('');
+  const partial = playablePlaylist(parsePlaylist(header + parts, base));
+  assert.equal(partial.duration, 2);
+  assert.deepEqual(
+    partial.segments.map((s) => s.sequence),
+    [5, 5, 5, 5],
+  );
+  assert.deepEqual(
+    partial.segments.map((s) => s.part),
+    [0, 1, 2, 3],
+  );
+  assert.equal(independentIndex(partial, 3), 0);
+  const next = playablePlaylist(
+    parsePlaylist(
+      header +
+        parts +
+        '#EXTINF:2,\nparent.m4s\n#EXT-X-PART:DURATION=0.5,URI="next.m4s",INDEPENDENT=YES\n',
+      base,
+    ),
+  );
+  assert.equal(next.segments.length, 5);
+  assert.equal(next.duration, 2.5);
+  assert.equal(next.segments[4].sequence, 6);
+  assert.equal(next.segments[4].start, 2);
+  const url = new URL(reloadUrl(next, 0));
+  assert.equal(url.searchParams.get('_HLS_msn'), '6');
+  assert.equal(url.searchParams.get('_HLS_part'), '1');
+  assert.equal(alignPlaylist(next, partial).segments[4].start, 2);
+  const collapsed = playablePlaylist(
+    parsePlaylist(header + '#EXTINF:2,\nparent.m4s\n', base),
+  );
+  assert.equal(alignPlaylist(collapsed, partial).segments[0].start, 0);
+  assert.throws(
+    () =>
+      parsePlaylist(
+        header.replace('#EXT-X-PART-INF:PART-TARGET=0.5\n', '') + parts,
+        base,
+      ),
+    /PART-INF/,
+  );
+});
+
+test('Rendition reports default to the local edge and request the reported peer position', async () => {
+  const { PlaylistLoader } = await module('playlist-reload');
+  const text =
+    '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:8\n#EXT-X-PART-INF:PART-TARGET=0.5\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES\n#EXT-X-PART:DURATION=0.5,URI="part.m4s",INDEPENDENT=YES\n#EXT-X-RENDITION-REPORT:URI="peer.m3u8"\n';
+  const reference = parsePlaylist(text, base);
+  assert.equal(reference.reports[0].sequence, 8);
+  assert.equal(reference.reports[0].part, 0);
+  const requests = [];
+  const client = {
+    signal: new AbortController().signal,
+    options: {},
+    get: async (resource) => {
+      requests.push(resource.url);
+      return {
+        data: new TextEncoder().encode(text),
+        url: resource.url,
+        elapsed: 1,
+      };
+    },
+  };
+  const loader = new PlaylistLoader(client, () => ({}));
+  const result = await loader.rendition(reference.reports[0].url, reference);
+  const request = new URL(requests[0]);
+  assert.equal(request.searchParams.get('_HLS_msn'), '8');
+  assert.equal(request.searchParams.get('_HLS_part'), '0');
+  assert.equal(result.url, reference.reports[0].url);
+  assert.equal(loader.diagnostics.renditionReports, 1);
+});

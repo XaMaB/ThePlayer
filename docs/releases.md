@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.12.0-alpha.1
+
+- Play LL-HLS fMP4 parts before their parent segments are complete, preserving dependent pictures and independent startup points.
+- Follow blocking reload and delta directives with full-playlist recovery when history is missing and polling fallback on rejected/time-limited directives.
+- Prefetch bounded hinted resources, cancel superseded hints, and use rendition reports for peer positions.
+- Apply PART-HOLD-BACK to live positioning and expose part/preload/reload diagnostics.
+- Add isolated `THEPLAYER_DIST` builds and deterministic Fetch/XHR LL-HLS browser scenarios.
+
 ## 0.11.0-alpha.1
 
 - Cancel slow Auto-mode segment requests when a lower rendition offers a better completion time.

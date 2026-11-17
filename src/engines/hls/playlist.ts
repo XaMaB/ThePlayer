@@ -23,6 +23,9 @@ export interface Segment extends Resource {
   key?: Key;
   gap: boolean;
   programDateTime?: string;
+  part?: number;
+  partOffset?: number;
+  independent?: boolean;
 }
 export interface Variant {
   url: string;
@@ -61,7 +64,12 @@ export interface Playlist {
   independent: boolean;
   startOffset?: number;
   serverControl?: Attributes;
-  parts: Attributes[];
+  parts: Segment[];
+  parents?: Segment[];
+  partTarget?: number;
+  preload?: Resource;
+  reports?: { url: string; sequence?: number; part?: number }[];
+  skipped?: number;
   unsupported: string[];
 }
 export function attributes(input: string): Attributes {
@@ -133,6 +141,7 @@ export function parsePlaylist(
   text: string,
   base: string,
   inherited: Attributes = {},
+  previous?: Playlist,
 ): Playlist {
   const lines = text
     .replace(/^\uFEFF/, '')
@@ -176,6 +185,9 @@ export function parsePlaylist(
     gap = false,
     date: string | undefined;
   let previousRange: { url: string; end: number } | undefined;
+  let previousPartRange: { url: string; end: number } | undefined;
+  let partIndex = 0,
+    partOffset = 0;
   for (const line of lines.slice(1)) {
     if (!line.startsWith('#')) {
       const url = uri(line);
@@ -208,6 +220,8 @@ export function parsePlaylist(
         programDateTime: date,
       });
       p.duration += duration;
+      partIndex = 0;
+      partOffset = 0;
       duration = undefined;
       byteRange = undefined;
       gap = false;
@@ -360,10 +374,124 @@ export function parsePlaylist(
       case '#EXT-X-SERVER-CONTROL':
         p.serverControl = attributes(value);
         break;
-      case '#EXT-X-PART':
-        p.parts.push(attributes(value));
+      case '#EXT-X-PART-INF':
+        p.partTarget = number(attributes(value)['PART-TARGET'], 'PART-TARGET');
+        if (!p.partTarget) throw new Error('Zero part target duration');
         break;
-      case '#EXT-X-SKIP':
+      case '#EXT-X-PART': {
+        const a = attributes(value);
+        if (!a.URI) throw new Error('Missing partial segment URI');
+        const url = uri(a.URI),
+          duration = number(a.DURATION, 'part DURATION');
+        if (!duration) throw new Error('Zero part duration');
+        for (const flag of ['INDEPENDENT', 'GAP'])
+          if (a[flag] !== undefined && !['YES', 'NO'].includes(a[flag]))
+            throw new Error('Invalid part ' + flag);
+        const r = a.BYTERANGE
+          ? range(a.BYTERANGE, previousPartRange, url)
+          : undefined;
+        previousPartRange = r ? { url, end: r.offset + r.length } : undefined;
+        p.parts.push({
+          url,
+          range: r,
+          sequence: p.sequence + p.segments.length,
+          start: p.duration + partOffset,
+          duration,
+          discontinuity,
+          map,
+          key,
+          gap: a.GAP === 'YES',
+          part: partIndex++,
+          partOffset,
+          independent:
+            a.INDEPENDENT === 'YES' || (p.independent && partIndex === 1),
+          programDateTime: date
+            ? new Date(Date.parse(date) + partOffset * 1000).toISOString()
+            : undefined,
+        });
+        partOffset += duration;
+        break;
+      }
+      case '#EXT-X-PRELOAD-HINT': {
+        const a = attributes(value);
+        if (a.TYPE !== 'PART' || p.preload || !a.URI) break;
+        const url = uri(a.URI);
+        // Open-ended hinted ranges need a streaming range cache; retain only
+        // bounded hints here until that path is available.
+        if (a['BYTERANGE-START'] && !a['BYTERANGE-LENGTH']) break;
+        p.preload = {
+          url,
+          range: a['BYTERANGE-LENGTH']
+            ? {
+                offset: number(
+                  a['BYTERANGE-START'] ?? '0',
+                  'hint offset',
+                  true,
+                ),
+                length: number(a['BYTERANGE-LENGTH'], 'hint length', true),
+              }
+            : undefined,
+        };
+        break;
+      }
+      case '#EXT-X-RENDITION-REPORT': {
+        const a = attributes(value);
+        if (!a.URI) throw new Error('Missing rendition report URI');
+        (p.reports ??= []).push({
+          url: uri(a.URI),
+          sequence:
+            a['LAST-MSN'] === undefined
+              ? undefined
+              : number(a['LAST-MSN'], 'LAST-MSN', true),
+          part:
+            a['LAST-PART'] === undefined
+              ? undefined
+              : number(a['LAST-PART'], 'LAST-PART', true),
+        });
+        break;
+      }
+      case '#EXT-X-SKIP': {
+        const a = attributes(value);
+        const count = number(a['SKIPPED-SEGMENTS'], 'SKIPPED-SEGMENTS', true);
+        if (
+          p.skipped !== undefined ||
+          p.segments.length ||
+          duration !== undefined
+        )
+          throw new Error('Invalid delta skip placement');
+        p.skipped = count;
+        const cached =
+          (previous?.parents ?? previous?.segments)?.filter(
+            (s) => s.sequence >= p.sequence && s.sequence < p.sequence + count,
+          ) ?? [];
+        if (
+          cached.length !== count ||
+          cached.some((s, i) => s.sequence !== p.sequence + i) ||
+          (count && cached[0].discontinuity !== discontinuity)
+        )
+          throw new MissingDeltaBase();
+        for (const old of cached) {
+          p.segments.push({ ...old, start: p.duration });
+          p.duration += old.duration;
+          for (const part of previous?.parts.filter(
+            (part) => part.sequence === old.sequence,
+          ) ?? [])
+            p.parts.push({
+              ...part,
+              start: p.duration - old.duration + (part.partOffset ?? 0),
+            });
+        }
+        const tail = cached.at(-1);
+        if (tail) {
+          map = tail.map;
+          key = tail.key;
+          discontinuity = tail.discontinuity;
+          previousRange = tail.range
+            ? { url: tail.url, end: tail.range.offset + tail.range.length }
+            : undefined;
+        }
+        break;
+      }
       case '#EXT-X-I-FRAMES-ONLY':
         p.unsupported.push(tag);
         break;
@@ -375,7 +503,18 @@ export function parsePlaylist(
     throw new Error('Incomplete playlist entry');
   if (p.variants.length && p.segments.length)
     throw new Error('Mixed multivariant and media playlist');
-  if (!p.variants.length && (!p.targetDuration || !p.segments.length))
+  if (p.parts.length && !p.partTarget)
+    throw new Error('Partial segments require PART-INF');
+  p.duration += partOffset;
+  const reportedTail = p.parts.at(-1) ?? p.segments.at(-1);
+  for (const report of p.reports ?? []) {
+    report.sequence ??= reportedTail?.sequence;
+    report.part ??= p.parts.at(-1)?.part;
+  }
+  if (
+    !p.variants.length &&
+    (!p.targetDuration || (!p.segments.length && !p.parts.length))
+  )
     throw new Error('No complete media segments or missing target duration');
   return p;
 }
@@ -395,22 +534,85 @@ export function alignPlaylist(next: Playlist, previous: Playlist): Playlist {
         s.discontinuity === overlap.discontinuity,
     )!;
     if (
-      old.url !== overlap.url ||
-      JSON.stringify(old.range) !== JSON.stringify(overlap.range) ||
-      JSON.stringify(old.map) !== JSON.stringify(overlap.map) ||
-      (old.programDateTime &&
-        overlap.programDateTime &&
-        old.programDateTime !== overlap.programDateTime) ||
-      Math.abs(old.duration - overlap.duration) > 0.05
+      old.part === overlap.part &&
+      (old.url !== overlap.url ||
+        JSON.stringify(old.range) !== JSON.stringify(overlap.range) ||
+        JSON.stringify(old.map) !== JSON.stringify(overlap.map) ||
+        (old.programDateTime &&
+          overlap.programDateTime &&
+          old.programDateTime !== overlap.programDateTime) ||
+        Math.abs(old.duration - overlap.duration) > 0.05)
     )
       throw new Error('Live playlist changed an existing segment');
-    shift = old.start - overlap.start;
+    shift =
+      old.start -
+      (old.partOffset ?? 0) -
+      overlap.start +
+      (overlap.partOffset ?? 0);
   } else {
     const tail = previous.segments.at(-1)!;
     if (next.segments[0].sequence !== tail.sequence + 1)
       throw new Error('Live window lost synchronization; reconnect required');
     shift = tail.start + tail.duration;
   }
-  next.segments = next.segments.map((s) => ({ ...s, start: s.start + shift }));
-  return next;
+  return shiftPlaylist(next, shift);
+}
+
+export class MissingDeltaBase extends Error {
+  constructor() {
+    super('HLS delta update requires a complete playlist reload');
+    this.name = 'MissingDeltaBase';
+  }
+}
+
+export function shiftPlaylist(p: Playlist, shift: number): Playlist {
+  const shifted = (s: Segment) => ({ ...s, start: s.start + shift });
+  return {
+    ...p,
+    segments: p.segments.map(shifted),
+    parents: p.parents?.map(shifted),
+    parts: p.parts.map(shifted),
+  };
+}
+/** A parent is represented once: by its parts when complete, or by the whole segment. */
+export function playablePlaylist(p: Playlist): Playlist {
+  if (!p.parts.length) return p;
+  const segments: Segment[] = [];
+  for (const parent of p.segments) {
+    const parts = p.parts.filter((part) => part.sequence === parent.sequence);
+    const sum = parts.reduce((n, part) => n + part.duration, 0);
+    if (parts.length && Math.abs(sum - parent.duration) < 0.05)
+      segments.push(...parts);
+    else segments.push(parent);
+  }
+  segments.push(
+    ...p.parts.filter(
+      (part) => part.sequence >= p.sequence + p.segments.length,
+    ),
+  );
+  return { ...p, parents: p.segments, segments };
+}
+export function independentIndex(p: Playlist, index: number): number {
+  index = Math.min(index, p.segments.length - 1);
+  while (
+    index > 0 &&
+    p.segments[index].part !== undefined &&
+    !p.segments[index].independent
+  )
+    index--;
+  if (p.segments[index]?.part !== undefined && !p.segments[index].independent)
+    throw new Error('No independent partial segment available for startup');
+  return index;
+}
+
+export function holdBack(p: Playlist): number {
+  return p.partTarget
+    ? Math.max(
+        2 * p.partTarget,
+        Number(p.serverControl?.['PART-HOLD-BACK']) || 3 * p.partTarget,
+      )
+    : Math.max(
+        3 * p.targetDuration,
+        Number(p.serverControl?.['HOLD-BACK']) || 0,
+      );
 }

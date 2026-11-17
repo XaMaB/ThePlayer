@@ -22,7 +22,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 ## Explicit limits
 
 - **No full protocol-version claim.** The parser recognizes version numbers through 13 and rejects higher versions. Acceptance of a version number does not certify all its optional features.
-- **LL-HLS is not implemented yet.** A playlist with complete segments can play using ordinary reloads. Partial-only playlists, blocking reload, delta merging, preload hints and rendition reports are not implemented. Delta playlists are rejected.
+- **LL-HLS fMP4 baseline is implemented.** Partial-only startup, dependent parts, parent completion, blocking reload, delta merge/full reload fallback and speculative whole-resource/bounded-range preload hints are supported. Rendition-report positions are used when available. Open-ended hinted ranges are currently ignored and fetched from the authoritative part reference instead. See the validation scope below.
 - **Auto ABR and manual switching** support browser-compatible AVC/HEVC/AV1/AAC-LC/HE-AAC v1 variants in the same audio/subtitle groups. Switching takes effect at a future segment boundary.
 - External AAC audio renditions have independent SourceBuffers and language selection. Audio and video must share a media clock; live playlists need matching sequence/discontinuity positions or PROGRAM-DATE-TIME anchors. Arbitrary timeline repair is not supported.
 - **No TTML/IMSC1, stpp, wvtt-in-MP4 or HLS CEA-708 rendering yet.** Existing CEA-708/P16 support belongs to the MoQ pipeline and does not automatically apply to HLS. WebVTT STYLE/REGION blocks and some cue settings are not rendered by this baseline.
@@ -200,3 +200,13 @@ This does not certify every elementary-stream timing mode. Untimestamped field/I
 In Auto mode, in-flight main-rendition requests report transferred bytes and elapsed time. When projected completion threatens the available buffer and a lower rendition is cheaper to retrieve, the engine cancels that request and loads the corresponding lower-quality segment. A failed rendition is excluded for 30 seconds, with repeated failures extending the interval up to 180 seconds. Manual quality selection clears that rendition's quarantine and retains the user's choice.
 
 Resource cancellation does not abort the session or independent audio. Playlist/init validation and layout checks still apply to fallback candidates. Exhausting all lower compatible candidates reports the error; this is recovery policy, not a guarantee against stalls on links below the lowest bitrate. Diagnostics expose aborts, failovers and quarantined levels. Fetch/XHR browser tests cover delayed first bytes, throttled bodies and HTTP 503.
+
+## Low-latency delivery
+
+The playlist loader follows advertised blocking and delta capabilities, preserves application query parameters, and strips delivery directives from persistent playlist identity. Missing delta history triggers a full reload; rejected or timed-out blocking requests temporarily fall back to polling. Cached parent state retains encryption/map/discontinuity and byte-range information.
+
+The media scheduler represents a parent once, using its parts when available. It starts/seeks from independent parts, retains dependent pictures, and uses PART-HOLD-BACK for live positioning. Preload bytes remain speculative until a published PART matches them. Superseded hints are cancelled; the cache is bounded and session cancellation reaches its requests. The default fallback behavior remains available for ordinary HLS.
+
+Deterministic Fetch/XHR browser tests cover blocking delivery, delta recovery, rejected directives, timeouts, 500 ms fMP4 parts with dependent AVC pictures, partial-only startup, timestamp discontinuities, duplicate-request prevention and abandoned preload hints. Rendition-report URI/position selection has unit coverage. This is not a claim of validation across every CDN, encrypted partial-segment format, independent-audio LL stream or browser/device. Browser networking controls HTTP/2 and HTTP/3 negotiation and priority behavior.
+
+A 30-minute ordinary live test on the 0.9 recovery implementation completed 360 samples with no player errors or reported dropped frames. Observed buffer range was 2.22–5.98 s with a 4 s target; maximum sampled JavaScript heap was 13.1 MB. This synthetic Chromium result is not a device-certification or a multi-day stability claim.
