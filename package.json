@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "0.10.0-alpha.1",
+  "version": "0.11.0-alpha.1",
   "private": true,
   "description": "Modular MoQ player with an original experimental HLS engine",
   "type": "module",
@@ -21,12 +21,13 @@
     "export": "node scripts/export.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
-    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery",
+    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery",
     "test:hls:public": "node tests/hls-public.mjs",
     "test:hls:mux": "node tests/hls-mux-audit.mjs",
     "test:hls:recovery": "node tests/hls-recovery-browser.mjs",
     "serve:hls:tests": "node tests/helpers/hls-fault-server.mjs",
-    "test:hls:soak": "node tests/hls-soak.mjs"
+    "test:hls:soak": "node tests/hls-soak.mjs",
+    "test:hls:abr-recovery": "node tests/hls-abr-recovery.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

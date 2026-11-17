@@ -7,7 +7,7 @@ Status: original HLS engine with AVC/HEVC/AAC TS/fMP4, AV1 fMP4, audio-only, ABR
 | Fault infrastructure    | Local/remote HTTP scenarios, Fetch/XHR checks and CI integration implemented                                                 |
 | Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues        |
 | TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue |
-| ABR / buffer policy     | Baseline implemented; emergency abort and rendition quarantine pending                                                       |
+| ABR / buffer policy     | Emergency request abort, bounded fallback and temporary rendition quarantine implemented                                     |
 | LL-HLS                  | Pending                                                                                                                      |
 | Subtitles               | WebVTT and fMP4 CEA-608 implemented subsets; broader carriage, CEA-708 HLS and TTML/IMSC pending                             |
 | Protection / extensions | AES-128 implemented; sample encryption, EME, steering/interstitials/metadata pending                                         |
@@ -51,3 +51,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.9.0-alpha.1 extends recovery with stale publisher detection, missed-window/encoder timeline restarts, pause preservation and coordinated independent audio. It starts media-parser hardening with complete PSI section/table assembly and CRC validation. PES/access-unit boundaries, advanced ABR, LL-HLS, further captions and protection/extensions remain active work.
 
 0.10.0-alpha.1 adds access-unit assembly across PES boundaries and constant-cadence multi-picture timing with exact packet-time/frame-hash checks, including B pictures and POC wrap. The next major delivery targets emergency ABR recovery and temporary rendition quarantine, followed by LL-HLS scheduling.
+
+0.11.0-alpha.1 adds request-progress-based emergency downshifts and failed-rendition quarantine. Tests inject delayed first bytes, throttled bodies and HTTP 503 for Fetch/XHR, checking continued playback, cancellation and exclusion from subsequent automatic choices. LL-HLS is the next stage.

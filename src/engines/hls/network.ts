@@ -10,6 +10,16 @@ export interface NetworkOptions {
   /** Called per resource; scope credentials to the intended origin here. */
   headers?: (url: string) => Record<string, string>;
 }
+export interface RequestProgress {
+  loaded: number;
+  total?: number;
+  elapsedMs: number;
+}
+export interface RequestOptions {
+  signal?: AbortSignal;
+  recoveryWindowMs?: number;
+  onProgress?: (progress: RequestProgress) => void;
+}
 export class ResourceClient {
   bytes = 0;
   requests = 0;
@@ -41,14 +51,26 @@ export class ResourceClient {
   }
   async get(
     resource: Resource,
+    request: RequestOptions = {},
   ): Promise<{ data: Uint8Array; url: string; elapsed: number }> {
+    const linked = request.signal ? new AbortController() : undefined;
+    const stop = () => linked?.abort(this.signal.reason);
+    const cancel = () => linked?.abort(request.signal!.reason);
+    if (linked) {
+      this.signal.addEventListener('abort', stop, { once: true });
+      request.signal!.addEventListener('abort', cancel, { once: true });
+      if (this.signal.aborted) stop();
+      if (request.signal!.aborted) cancel();
+    }
+    const signal = linked?.signal ?? this.signal;
     const started = performance.now();
-    const window = this.options.recoveryWindowMs ?? 30000;
+    const window =
+      request.recoveryWindowMs ?? this.options.recoveryWindowMs ?? 30000;
     const deadline = window ? started + window : Infinity;
     let recovering = false;
     try {
       for (let attempt = 0; ; attempt++) {
-        this.signal.throwIfAborted();
+        signal.throwIfAborted();
         try {
           const result = await this.once(
             resource,
@@ -56,11 +78,13 @@ export class ResourceClient {
               this.options.timeoutMs ?? 15000,
               Math.max(1, deadline - performance.now()),
             ),
+            signal,
+            request.onProgress,
           );
           if (recovering) this.recovery.recovered++;
           return { ...result, elapsed: performance.now() - started };
         } catch (error) {
-          this.signal.throwIfAborted();
+          signal.throwIfAborted();
           if (!retryable(error)) throw error;
           const wait = retryDelay(attempt);
           const extended = attempt >= (this.options.retries ?? 2);
@@ -77,17 +101,26 @@ export class ResourceClient {
             this.recovery.attempts++;
           }
           this.retries++;
-          await delay(wait, this.signal);
+          await delay(wait, signal);
         }
       }
     } finally {
       if (recovering) this.recovery.active--;
+      if (linked) {
+        this.signal.removeEventListener('abort', stop);
+        request.signal!.removeEventListener('abort', cancel);
+      }
     }
   }
-  private async once(resource: Resource, timeoutMs: number) {
+  private async once(
+    resource: Resource,
+    timeoutMs: number,
+    signal: AbortSignal,
+    progress?: (value: RequestProgress) => void,
+  ) {
     const controller = new AbortController();
-    const stop = () => controller.abort(this.signal.reason);
-    this.signal.addEventListener('abort', stop, { once: true });
+    const stop = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', stop, { once: true });
     const timeout = setTimeout(
       () =>
         controller.abort(
@@ -97,10 +130,21 @@ export class ResourceClient {
     );
     const start = performance.now();
     this.requests++;
-    const headers = { ...this.options.headers?.(resource.url) };
-    if (resource.range)
-      headers.Range = `bytes=${resource.range.offset}-${resource.range.offset + resource.range.length - 1}`;
+    let loaded = 0,
+      total: number | undefined;
+    const notify = () => {
+      if (controller.signal.aborted) return;
+      try {
+        progress?.({ loaded, total, elapsedMs: performance.now() - start });
+      } catch (error) {
+        controller.abort(error);
+      }
+    };
+    const pulse = progress ? setInterval(notify, 250) : undefined;
     try {
+      const headers = { ...this.options.headers?.(resource.url) };
+      if (resource.range)
+        headers.Range = `bytes=${resource.range.offset}-${resource.range.offset + resource.range.length - 1}`;
       let data: Uint8Array,
         url: string,
         status: number,
@@ -131,6 +175,9 @@ export class ResourceClient {
               range: xhr.getResponseHeader('Content-Range'),
             });
           xhr.onprogress = (event) => {
+            loaded = event.loaded;
+            total = event.lengthComputable ? event.total : undefined;
+            notify();
             if (event.loaded > 64 * 1024 * 1024)
               controller.abort(new Error('HLS resource exceeds 64 MiB limit'));
           };
@@ -152,6 +199,11 @@ export class ResourceClient {
         status = response.status;
         url = response.url;
         contentRange = response.headers.get('Content-Range');
+        const length = Number(response.headers.get('Content-Length'));
+        total =
+          length > 0 && !response.headers.get('Content-Encoding')
+            ? length
+            : undefined;
         if (!response.ok) throw new HttpError(status);
         const reader = response.body?.getReader();
         if (!reader) throw new Error('Empty HTTP response');
@@ -162,6 +214,9 @@ export class ResourceClient {
             const { value, done } = await reader.read();
             if (done) break;
             size += value.length;
+            loaded = size;
+            notify();
+            controller.signal.throwIfAborted();
             if (size > 64 * 1024 * 1024) {
               await reader.cancel();
               throw new Error('HLS resource exceeds 64 MiB limit');
@@ -203,7 +258,8 @@ export class ResourceClient {
       throw error;
     } finally {
       clearTimeout(timeout);
-      this.signal.removeEventListener('abort', stop);
+      if (pulse) clearInterval(pulse);
+      signal.removeEventListener('abort', stop);
     }
   }
 }

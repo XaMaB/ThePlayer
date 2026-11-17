@@ -915,3 +915,116 @@ test('AVC slice metadata detects pictures without AUD and preserves multi-slice 
     /Truncated/,
   );
 });
+
+test('ABR quarantines failed variants without choosing blocked intermediate upgrades', () => {
+  const abr = new AbrController();
+  const levels = [300000, 800000, 2000000].map((bandwidth) => ({ bandwidth }));
+  abr.observe(1000000, 1000);
+  abr.observe(1000000, 1000);
+  abr.quarantine(1, 0, 'HTTP 503');
+  assert.equal(abr.choose(levels, 0, 12, 12, 1000), 2);
+  assert.equal(abr.fallback(levels, 2, 1000), 0);
+  assert.equal(abr.fallback(levels, 2, 30000), 1);
+  abr.quarantine(1, 30000, 'HTTP 503');
+  assert.equal(abr.fallback(levels, 2, 89999), 0);
+  assert.equal(abr.fallback(levels, 2, 90000), 1);
+  abr.clear(1);
+  assert.deepEqual(abr.quarantined(40000), []);
+});
+
+test('Emergency ABR compares replacement cost with finishing the current response', () => {
+  const abr = new AbrController();
+  const levels = [300000, 800000, 2000000].map((bandwidth) => ({ bandwidth }));
+  assert.equal(
+    abr.emergency(levels, 2, { loaded: 0, elapsedMs: 500 }, 1, 2, 0),
+    undefined,
+  );
+  assert.equal(
+    abr.emergency(levels, 2, { loaded: 0, elapsedMs: 2000 }, 2, 2, 0),
+    1,
+  );
+  assert.equal(
+    abr.emergency(
+      levels,
+      2,
+      { loaded: 100000, total: 500000, elapsedMs: 1000 },
+      2,
+      2,
+      0,
+    ),
+    0,
+  );
+  assert.equal(
+    abr.emergency(
+      levels,
+      2,
+      { loaded: 490000, total: 500000, elapsedMs: 2000 },
+      1,
+      2,
+      0,
+    ),
+    undefined,
+  );
+  abr.quarantine(0, 0, 'failed');
+  assert.equal(
+    abr.emergency(
+      levels,
+      2,
+      { loaded: 100000, total: 500000, elapsedMs: 1000 },
+      2,
+      2,
+      0,
+    ),
+    1,
+  );
+  abr.quarantine(1, 0, 'failed');
+  assert.equal(
+    abr.emergency(levels, 2, { loaded: 0, elapsedMs: 2000 }, 2, 2, 0),
+    undefined,
+  );
+});
+
+test('Per-resource cancellation and progress abort leave sibling requests usable', async () => {
+  const server = createServer((req, res) => {
+    if (req.url === '/fast') return res.end('ok');
+    const timer = setTimeout(() => res.end('late'), 5000);
+    res.on('close', () => clearTimeout(timer));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const root = new AbortController();
+  const client = new ResourceClient({}, root.signal);
+  try {
+    const reason = new Error('emergency downshift');
+    await assert.rejects(
+      client.get(
+        { url: base + '/slow' },
+        {
+          onProgress: (progress) => {
+            assert.equal(progress.loaded, 0);
+            if (progress.elapsedMs >= 200) throw reason;
+          },
+        },
+      ),
+      (error) => error === reason,
+    );
+    assert.equal(client.retries, 0);
+    const single = new AbortController();
+    const pending = client.get(
+      { url: base + '/slow' },
+      { signal: single.signal },
+    );
+    single.abort(reason);
+    await assert.rejects(pending, (error) => error === reason);
+    assert.equal(
+      new TextDecoder().decode(
+        (await client.get({ url: base + '/fast' })).data,
+      ),
+      'ok',
+    );
+    assert.equal(root.signal.aborted, false);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

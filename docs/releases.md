@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.11.0-alpha.1
+
+- Cancel slow Auto-mode segment requests when a lower rendition offers a better completion time.
+- Recover failed main-rendition resources through lower compatible qualities and temporarily quarantine failures.
+- Keep per-resource cancellation separate from session/audio cancellation and expose recovery diagnostics.
+- Validate delayed responses, throttled bodies and HTTP 503 through Fetch/XHR browser playback.
+
 `package.json` is the authoritative SemVer version. `src/version.ts` exports it as `VERSION`; the shared controls show it beside ThePlayer in MediaInfo and the context menu. The build writes `dist/version.json` and adds the version to bundle banners. There is no separately edited UI version.
 
 Each published release commit receives an immutable annotated Git tag `v<package version>`. Experimental releases use `-alpha.N`; a higher alpha number identifies a new published build. A tag identifies the exact source snapshot, even while the HLS PR remains a draft. Tags are not moved or reused.

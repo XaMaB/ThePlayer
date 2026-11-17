@@ -3,7 +3,7 @@ import { Cea608Timeline } from './cea608-timeline';
 import { row608Text } from './cea608';
 import type { Track } from './mp4';
 import { selectRendition } from './selection';
-import { AbrController } from './abr';
+import { AbrController, EmergencySwitch } from './abr';
 import { bufferedAhead, nextGapPosition, declaredGapPosition } from './buffer';
 import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
@@ -65,6 +65,11 @@ export class HlsEngine extends EventTarget {
     bandwidth: 0,
     quality: {} as Record<string, unknown>,
     abrWarning: '',
+    abrRecovery: {
+      aborted: 0,
+      failovers: 0,
+      quarantined: [] as { index: number; until: number; reason: string }[],
+    },
     unsupportedCaptions: [] as { id: number; format: string }[],
     captions608: { packets: 0, parityErrors: 0, events: 0, warning: '' },
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
@@ -91,6 +96,7 @@ export class HlsEngine extends EventTarget {
     );
   }
   private abrRetryAt = 0;
+  private abrRecovering = false;
   private liveProgress = new LiveProgress();
   private restartTimes: number[] = [];
   private resumeAfterReset?: boolean;
@@ -211,8 +217,8 @@ export class HlsEngine extends EventTarget {
       );
     }
   }
-  private async readPlaylist(url: string) {
-    const response = await this.client.get({ url });
+  private async readPlaylist(url: string, recoveryWindowMs?: number) {
+    const response = await this.client.get({ url }, { recoveryWindowMs });
     if (response.data.length > 2 * 1024 * 1024)
       throw new Error('Playlist exceeds 2 MiB');
     const p = parsePlaylist(
@@ -228,7 +234,40 @@ export class HlsEngine extends EventTarget {
     return new MediaLane(
       p,
       role,
-      (r) => this.client.get(r),
+      (r) => {
+        const active =
+          role === 'main' &&
+          this.autoQuality &&
+          this.selectedQuality > 0 &&
+          this.main?.playlist.url === p.url &&
+          !this.initial &&
+          'duration' in r;
+        return this.client.get(r, {
+          recoveryWindowMs: active || this.abrRecovering ? 0 : undefined,
+          onProgress: active
+            ? (progress) => {
+                if (
+                  !this.autoQuality ||
+                  this.video.paused ||
+                  this.main?.playlist.url !== p.url
+                )
+                  return;
+                const index = this.abr.emergency(
+                  this.qualityLevels,
+                  this.selectedQuality,
+                  progress,
+                  this.ahead(),
+                  Number((r as { duration: number }).duration),
+                  performance.now(),
+                );
+                if (index !== undefined) {
+                  this.abr.observe(progress.loaded, progress.elapsedMs);
+                  throw new EmergencySwitch(index);
+                }
+              }
+            : undefined,
+        });
+      },
       (data, key, sequence) => this.decrypt(data, key, sequence),
       codecs
         ?.split(',')
@@ -694,7 +733,12 @@ export class HlsEngine extends EventTarget {
           } catch (error) {
             this.diagnostics.abrWarning =
               error instanceof Error ? error.message : String(error);
-            this.abrRetryAt = performance.now() + 10000;
+            this.abr.quarantine(
+              next,
+              performance.now(),
+              this.diagnostics.abrWarning,
+            );
+            this.abrRetryAt = performance.now() + 1000;
           }
         }
       }
@@ -779,10 +823,23 @@ export class HlsEngine extends EventTarget {
         continue;
       }
       const token = this.generation;
-      const prepared = await lane.prepare();
-      if (token !== this.generation) continue;
-      await this.appendPrepared(lane, prepared);
-      if (token === this.generation) lane.next++;
+      try {
+        const prepared = await lane.prepare();
+        if (token !== this.generation) continue;
+        await this.appendPrepared(lane, prepared);
+        if (token === this.generation) lane.next++;
+      } catch (error) {
+        this.abort.signal.throwIfAborted();
+        if (token !== this.generation) continue;
+        if (
+          lane.role !== 'main' ||
+          !this.autoQuality ||
+          this.selectedQuality <= 0
+        )
+          throw error;
+        await this.recoverQuality(error);
+        continue;
+      }
       const cutoff = this.video.currentTime - 30;
       if (
         cutoff > 0 &&
@@ -792,6 +849,84 @@ export class HlsEngine extends EventTarget {
         await this.operation(lane.buffer!, () =>
           lane.buffer!.remove(0, cutoff),
         );
+    }
+  }
+  private async recoverQuality(error: unknown) {
+    const previous = this.selectedQuality;
+    const reason = error instanceof Error ? error.message : String(error);
+    this.abr.quarantine(previous, performance.now(), reason);
+    if (error instanceof EmergencySwitch)
+      this.diagnostics.abrRecovery.aborted++;
+    let index =
+      error instanceof EmergencySwitch
+        ? error.index
+        : this.abr.fallback(this.qualityLevels, previous, performance.now());
+    this.abrRecovering = true;
+    try {
+      while (index !== undefined) {
+        const token = this.generation;
+        try {
+          const choice = this.qualityLevels[index];
+          const parsed = await this.readPlaylist(choice.url, 0);
+          const playlist = alignRendition(parsed, this.main!.playlist);
+          const next = this.main!.playlist.segments[this.main!.next];
+          const boundary = Math.max(
+            this.video.currentTime,
+            next?.start ?? this.video.currentTime,
+          );
+          const lane = this.lane(playlist, 'main', choice.codecs);
+          lane.next = Math.min(
+            segmentAt(playlist, boundary),
+            playlist.segments.length - 1,
+          );
+          this.skipDeclaredGaps(lane);
+          const prepared = await lane.prepare();
+          if (token !== this.generation) return;
+          this.assertLayout(prepared, lane);
+          lane.inheritBuffer(this.main!);
+          if (lane.buffer!.buffered.length) {
+            const end = lane.buffer!.buffered.end(
+              lane.buffer!.buffered.length - 1,
+            );
+            if (end > prepared.segment.start)
+              await this.operation(lane.buffer!, () =>
+                lane.buffer!.remove(prepared.segment.start, end),
+              );
+          }
+          if (token !== this.generation) return;
+          await this.appendPrepared(lane, prepared);
+          if (token !== this.generation) return;
+          lane.next++;
+          this.main = lane;
+          this.selectedQuality = index;
+          this.qualityTimeline.push({ at: prepared.segment.start, id: index });
+          this.abr.switched(performance.now());
+          this.diagnostics.abrRecovery.failovers++;
+          this.diagnostics.abrWarning = reason;
+          this.emit('qualitychange', {
+            ...choice,
+            effectiveAt: prepared.segment.start,
+            auto: true,
+          });
+          this.publishCatalog();
+          return;
+        } catch (failure) {
+          this.abort.signal.throwIfAborted();
+          this.abr.quarantine(
+            index,
+            performance.now(),
+            failure instanceof Error ? failure.message : String(failure),
+          );
+          index = this.abr.fallback(
+            this.qualityLevels,
+            index,
+            performance.now(),
+          );
+        }
+      }
+      throw error;
+    } finally {
+      this.abrRecovering = false;
     }
   }
   private publishCatalog() {
@@ -937,6 +1072,7 @@ export class HlsEngine extends EventTarget {
     if (!Number.isInteger(index) || !this.qualityLevels[index])
       throw new Error('Unknown HLS quality');
     this.autoQuality = false;
+    this.abr.clear(index);
     this.emit('qualitychange', { auto: false });
     await this.enqueueSwitch('quality', index);
   }
@@ -947,6 +1083,9 @@ export class HlsEngine extends EventTarget {
       scheduled: this.selectedQuality,
       bandwidthEstimate: this.abr.estimate,
     };
+    this.diagnostics.abrRecovery.quarantined = this.abr.quarantined(
+      performance.now(),
+    );
     this.diagnostics.bytes = this.client.bytes;
     this.diagnostics.requests = this.client.requests;
     this.diagnostics.retries = this.client.retries;
