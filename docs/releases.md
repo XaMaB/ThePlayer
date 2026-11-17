@@ -1,5 +1,10 @@
 # Release versions
 
+## 0.15.0-alpha.2
+
+- Normalize the subtitle test server root before checking paths, fixing default dist/ serving in GitHub CI.
+- Validate the default build directory as well as isolated build directories.
+
 ## 0.15.0-alpha.1
 
 - Decode CEA-708 services from AVC/HEVC SEI using an original packet, command and window implementation.

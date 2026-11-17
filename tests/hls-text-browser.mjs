@@ -50,7 +50,7 @@ const server = createServer(async (req, res) => {
       fixture ? root : dist,
       name.slice(fixture ? 9 : 1),
     );
-    if (!file.startsWith((fixture ? root : dist) + path.sep))
+    if (!file.startsWith(path.resolve(fixture ? root : dist) + path.sep))
       throw new Error('path');
     res.setHeader(
       'Content-Type',
