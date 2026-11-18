@@ -195,7 +195,12 @@ export class MediaLane {
       } catch (error) {
         captionError = error instanceof Error ? error.message : String(error);
       }
-      data = filterCaptionMedia(data, this.ignoredCaptions);
+      data = filterCaptionMedia(
+        data,
+        this.ignoredCaptions,
+        this.captionMeta,
+        segment.range?.offset ?? 0,
+      );
       tracks = inspectInit(init);
       if (
         segment.key?.method === 'SAMPLE-AES' ||
@@ -357,8 +362,12 @@ export class MediaLane {
     operation: (buffer: SourceBuffer, action: () => void) => Promise<void>,
   ) {
     this.offset = offset;
-    this.buffer!.timestampOffset =
+    const timestampOffset =
       prepared.mime === 'audio/mpeg' ? prepared.rawStart + offset : offset;
+    // Even assigning the current value invokes MSE's parser-state checks.
+    // A browser may retain a media-segment parser state across append calls.
+    if (this.buffer!.timestampOffset !== timestampOffset)
+      this.buffer!.timestampOffset = timestampOffset;
     const previous = this.appendedInit;
     if (
       prepared.init.length &&

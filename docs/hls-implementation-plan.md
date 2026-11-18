@@ -99,3 +99,7 @@ Temporary DRM sessions now retire when known keys leave buffered/prepared media.
 0.41.0-alpha.1 bundles milestone 0.40 and adds alternate VIDEO groups with shared controls and cross-quality angle selection. A delayed live target at an audio switch has bounded reload recovery and an injected stale-response regression. Remaining work includes audio topology changes, advanced text/media profiles and final stabilization/device gates.
 
 0.42.0-alpha.1 bundles milestones 0.40–0.41 and extends CEA-708 presentation with horizontal full justification, media-clock fade/wipe and word preservation in four print directions. Unit and browser checks cover interrupted visibility, pause and backward seek. Remaining typography/reflow limits stay explicit.
+
+0.43.0-alpha.1 adds clear-stream steering between muxed and separate audio topologies, with media preflight, preserved pause/position and live validation. Post-commit failures are explicit; encrypted topology combinations and manual cross-topology selection remain separately scoped.
+
+0.44.0-alpha.1 bundles milestone 0.43 and implements CEA-608 background attributes with feature-detected native/DOM presentation. Browser checks verify real rendered pixels and HLS caption carriage, selection, seeking and cleanup. Remaining media profiles and final stabilization gates are still active.

@@ -2,6 +2,7 @@
 export interface Cell608 {
   char: string;
   color: string;
+  background: number;
   italic: boolean;
   underline: boolean;
 }
@@ -58,6 +59,7 @@ class Channel {
   column = 0;
   roll = 2;
   color = 'white';
+  background = 14;
   italic = false;
   underline = false;
   get memory() {
@@ -68,6 +70,7 @@ class Channel {
     this.memory[this.row][this.column] = {
       char,
       color: this.color,
+      background: this.background,
       italic: this.italic,
       underline: this.underline,
     };
@@ -107,6 +110,7 @@ class Channel {
       if (this.mode === 'roll') this.moveBase(Math.max(this.roll - 1, row));
       else this.row = row;
       this.column = b & 16 ? ((b >>> 1) & 7) * 4 : 0;
+      this.background = 14;
       if (b & 16) {
         this.color = 'white';
         this.italic = false;
@@ -119,6 +123,19 @@ class Channel {
       this.put(extended[a - 0x12][b - 0x20]);
     } else if (a === 0x11 && b >= 0x20 && b <= 0x2f) {
       this.style(b);
+      this.put(' ');
+    } else if (a === 0x10 && b >= 0x20 && b <= 0x2f) {
+      this.background = b & 15;
+      this.backspace();
+      this.put(' ');
+    } else if (a === 0x17 && b >= 0x2d && b <= 0x2f) {
+      if (b === 0x2d) this.background = 16;
+      else {
+        this.color = 'black';
+        this.italic = false;
+        this.underline = b === 0x2f;
+      }
+      this.backspace();
       this.put(' ');
     } else if (a === 0x17 && b >= 0x21 && b <= 0x23)
       this.column = Math.min(31, this.column + b - 0x20);
@@ -163,6 +180,7 @@ class Channel {
               this.front[i] = this.front[i + 1];
             this.front[this.row] = Array(32).fill(null);
             this.column = 0;
+            this.background = 14;
           }
           break;
         case 0x2e:
@@ -281,8 +299,30 @@ export function row608Text(row: Row608): string {
   return row.cells
     .map((cell) =>
       cell
-        ? `<c.cea608.${cell.color}>${cell.italic ? '<i>' : ''}${cell.underline ? '<u>' : ''}${escape(cell.char)}${cell.underline ? '</u>' : ''}${cell.italic ? '</i>' : ''}</c>`
+        ? `<c.cea608.${cell.color}.cea608-bg${cell.background ?? 14}>${cell.italic ? '<i>' : ''}${cell.underline ? '<u>' : ''}${escape(cell.char)}${cell.underline ? '</u>' : ''}${cell.italic ? '</i>' : ''}</c>`
         : '\u00a0',
     )
     .join('');
+}
+
+/** Native cue rules remain scoped to the owning video by WebVttStyles. */
+export function cea608Styles() {
+  const rgb = [
+    '255,255,255',
+    '0,255,0',
+    '0,0,255',
+    '0,255,255',
+    '255,0,0',
+    '255,255,0',
+    '255,0,255',
+    '0,0,0',
+  ];
+  return (
+    '::cue { background-color: transparent; }\n::cue(.cea608) { font-family: monospace; }\n' +
+    Array.from(
+      { length: 17 },
+      (_, id) =>
+        `::cue(.cea608-bg${id}) { background-color: ${id === 16 ? 'transparent' : `rgba(${rgb[id >>> 1]},${id & 1 ? 0.5 : 1})`}; }`,
+    ).join('\n')
+  );
 }

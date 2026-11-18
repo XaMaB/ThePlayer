@@ -283,6 +283,22 @@ export function faultServer({
             req.headers.host;
           const prefix = `${origin}/scenario/${match[1]}/${scenario}/`;
           if (resource === 'master.m3u8') {
+            if (scenario.startsWith('steering-topology-')) {
+              if (!starts.has(match[1])) starts.set(match[1], Date.now());
+              let master =
+                '#EXTM3U\n#EXT-X-CONTENT-STEERING:SERVER-URI="steering.json",PATHWAY-ID="a"\n';
+              for (const id of ['a', 'b']) {
+                const separate =
+                  scenario === 'steering-topology-reverse'
+                    ? id === 'a'
+                    : id === 'b';
+                if (separate)
+                  master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-${id}",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="${id}/audio-en/index.m3u8"\n`;
+                master += `#EXT-X-STREAM-INF:BANDWIDTH=600000,CODECS="avc1.42c00c,mp4a.40.2",RESOLUTION=320x180,STABLE-VARIANT-ID="main",PATHWAY-ID="${id}"${separate ? `,AUDIO="audio-${id}"` : ''}\n${id}/${separate ? 'video-low' : 'fmp4'}/index.m3u8\n`;
+              }
+              res.end(master);
+              return;
+            }
             if (scenario.startsWith('steering-inventory-')) {
               const mode = scenario.slice('steering-inventory-'.length);
               let master =
@@ -418,6 +434,15 @@ export function faultServer({
               return;
             }
             if (
+              scenario === 'steering-topology-preflight' &&
+              media[1] === 'b' &&
+              media[2].endsWith('init.mp4')
+            ) {
+              res.writeHead(503);
+              res.end();
+              return;
+            }
+            if (
               scenario === 'steering-inventory-recover' &&
               media[1] === 'b' &&
               media[2].endsWith('segment03.m4s')
@@ -439,9 +464,43 @@ export function faultServer({
               res.end();
               return;
             }
+            if (
+              scenario === 'steering-topology-live' &&
+              media[2].endsWith('/index.m3u8')
+            ) {
+              const original = await readFile(
+                path.join(fixtures, media[2]),
+                'utf8',
+              );
+              const entries = [
+                ...original.matchAll(/#EXTINF:([\d.]+),[^\n]*\n([^\n]+)/g),
+              ].map((m) => ({ duration: Number(m[1]), uri: m[2] }));
+              const edge = 6 + (Date.now() - starts.get(match[1])) / 1000;
+              let end = 0,
+                count = 0;
+              for (const entry of entries) {
+                if (end + entry.duration > edge) break;
+                end += entry.duration;
+                count++;
+              }
+              const first = Math.max(0, count - 4);
+              const start = entries
+                .slice(0, first)
+                .reduce((sum, e) => sum + e.duration, 0);
+              const map = original.match(/#EXT-X-MAP:[^\n]+/)[0];
+              res.end(
+                `#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:${first}\n${map}\n#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 0, 2) + start * 1000).toISOString()}\n` +
+                  entries
+                    .slice(first, count)
+                    .map((e) => `#EXTINF:${e.duration},\n${e.uri}\n`)
+                    .join(''),
+              );
+              return;
+            }
             relative =
               ['steering-audio', 'steering-abr'].includes(scenario) ||
-              scenario.startsWith('steering-inventory-')
+              scenario.startsWith('steering-inventory-') ||
+              scenario.startsWith('steering-topology-')
                 ? media[2]
                 : 'ts/' + media[2];
           }

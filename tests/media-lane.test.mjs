@@ -90,3 +90,45 @@ test('AVC level changes retain the buffer without changeType, but codec changes 
     else globalThis.MediaSource = original;
   }
 });
+
+test('Continuous fragments do not reassign timestampOffset while the MSE parser retains a segment', async () => {
+  const lane = new MediaLane(
+    {},
+    'main',
+    async () => {},
+    async (data) => data,
+  );
+  let offset = 0,
+    parsing = true;
+  const writes = [],
+    appends = [];
+  lane.buffer = {
+    get timestampOffset() {
+      return offset;
+    },
+    set timestampOffset(value) {
+      if (parsing)
+        throw new DOMException('Parser retains a segment', 'InvalidStateError');
+      writes.push(value);
+      offset = value;
+    },
+    appendBuffer(data) {
+      appends.push(data);
+    },
+  };
+  const prepared = {
+    init: new Uint8Array(),
+    data: new Uint8Array([1]),
+    rawStart: 8,
+    segment: { discontinuity: 0 },
+  };
+  const operation = async (_buffer, action) => action();
+  await lane.append(prepared, 0, operation);
+  assert.equal(appends.length, 1);
+  assert.deepEqual(writes, []);
+  parsing = false;
+  await lane.append(prepared, 2, operation);
+  assert.deepEqual(writes, [2]);
+  await lane.append({ ...prepared, mime: 'audio/mpeg' }, 2, operation);
+  assert.deepEqual(writes, [2, 10]);
+});

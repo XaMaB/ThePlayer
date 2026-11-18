@@ -84,3 +84,7 @@ jobs:
         timeout-minutes: 8
       - run: node tests/hls-708-effects-browser.mjs
         timeout-minutes: 8
+      - run: node tests/hls-steering-topology-browser.mjs
+        timeout-minutes: 8
+      - run: npm run test:hls:sei
+        timeout-minutes: 8

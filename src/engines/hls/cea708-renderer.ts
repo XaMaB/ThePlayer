@@ -15,12 +15,13 @@ export class Cea708Renderer {
   constructor(
     private video: HTMLVideoElement,
     private present: (text: string) => void,
+    private options: { columns?: number; className?: string } = {},
   ) {
     this.parent = video.parentElement!;
     this.previousPosition = this.parent.style.position;
     if (getComputedStyle(this.parent).position === 'static')
       this.parent.style.position = 'relative';
-    this.element.className = 'theplayer-cea708';
+    this.element.className = options.className ?? 'theplayer-cea708';
     this.element.setAttribute('aria-hidden', 'true');
     Object.assign(this.element.style, {
       position: 'absolute',
@@ -105,7 +106,7 @@ export class Cea708Renderer {
     const element = document.createElement('div');
     element.dataset.window = String(window.id);
     const aspect = this.width / this.height,
-      columns = aspect > 1.5 ? 42 : 32;
+      columns = this.options.columns ?? (aspect > 1.5 ? 42 : 32);
     const cellWidth = (this.width * 0.8) / columns,
       cellHeight = (this.height * 0.8) / 15;
     const width = window.columns * cellWidth,

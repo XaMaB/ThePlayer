@@ -67,7 +67,7 @@ MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer a
 | TTML / IMSC1               | Not implemented                    | Implemented text subset                                   | fMP4 stpp, positioned/styled regions, timed spans, discrete style animations and ruby; see profile limits                         |
 | WebVTT inside MP4 (`wvtt`) | Not implemented                    | Implemented subset                                        | fMP4 vttc/vtte samples, sample timing and cue settings                                                                            |
 
-**CEA-608:** parity checks and duplicate-control suppression are implemented. Caption history supports seeking and quality transitions. Field-2 CC3/CC4 and TS/fMP4 SEI carriage are implemented; field-2 XDS packets are skipped. Multiple `c608` tracks, background attributes, flashing and Text/XDS services remain unsupported. Native browser typography means placement is not a pixel-exact broadcast rendering. A live join or seek with insufficient history can wait for the next complete caption update.
+**CEA-608:** parity checks and duplicate-control suppression are implemented. Caption history supports seeking and quality transitions. Field-2 CC3/CC4 and TS/fMP4 SEI carriage are implemented; field-2 XDS packets are skipped. Background/foreground attributes are implemented, including translucent and transparent backgrounds. Firefox uses a feature-detected cell renderer when native cue-class styling is unavailable. Multiple `c608` tracks, flashing and Text/XDS services remain unsupported. Native browser typography means placement is not a pixel-exact broadcast rendering. A live join or seek with insufficient history can wait for the next complete caption update.
 
 **CEA-708:** cues retain source window positions and synchronize to the media clock, including fullscreen letterboxing. P16 consumes both operands atomically: a zero high byte represents one character; other pairs use Unicode code-unit handling or a configured service encoding such as EUC-KR. Invalid surrogate values become replacement characters. HLS has its own original decoder with window/pen colors, print/scroll direction and media-time delays. Its snap display fallback and other limits are described in [HLS support](docs/hls-support.md). The separate MoQ implementation retains its [decoder notes](vendor/mux.js/README.md).
 
@@ -227,7 +227,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Complete remaining HLS profiles and stabilization: audio lane layout changes, advanced caption layout, codec/device interoperability and long-running validation.
+- Complete remaining HLS profiles and stabilization: additional media/text profiles, advanced caption layout, codec/device interoperability and long-running validation.
 - Extend HLS caption attribute and typography coverage.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
@@ -244,6 +244,6 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.42.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.44.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
 
 HLS alternate video angles are available through `player.videoTracks` and `player.selectVideoTrack(name)`, and in the shared Quality menu. Angle identity survives quality changes; audio language remains independent.

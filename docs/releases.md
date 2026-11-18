@@ -1,5 +1,20 @@
 # Release versions
 
+## 0.44.0-alpha.1
+
+- Decode CEA-608 background opacity/color and black foreground attributes, preserving implicit spacing and PAC resets.
+- Render scoped native cue styles when supported; use a feature-detected 32-column DOM renderer in Firefox.
+- Verify actual caption rendering, background pixels, service selection, seeking, Off and teardown across browser engines.
+- Neutralize caption-only MP4 payload boxes only after sample-table ownership checks, fixing an early unbuffered seek failure in WebKit without shifting A/V offsets.
+- Avoid redundant MSE timestampOffset assignments during continuous fragment appends.
+- Includes development milestone 0.43, which was not published separately.
+
+- Allow steering transitions between muxed A/V and separate video/audio lanes by replacing incompatible MediaSource ownership.
+- Fetch and validate both candidate playlists and initial media before detaching the working pipeline.
+- Preserve timeline position, paused/playing state, playback rate and track selections; reuse prepared media during initialization.
+- Reject failed preflight media without interrupting the old pathway; fail explicitly if a committed replacement cannot initialize.
+- Add Fetch/XHR VOD, live, reverse, paused and failed-preflight browser scenarios.
+
 ## 0.42.0-alpha.1
 
 - Render CEA-708 FULL horizontal justification using word spacing, preserving glyph width and nonbreaking spaces.

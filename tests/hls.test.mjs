@@ -529,6 +529,19 @@ test('ancillary c608/c708 tracks cannot block A/V or change fragment offsets', a
     const media = concat(active, fragment(caption, [sample], 0, 2));
     const before = media.slice();
     const output = filterCaptionMedia(media, filtered.ignored);
+    const { fragmentMetadata } = await module('fragment-samples');
+    const sanitized = filterCaptionMedia(
+      media,
+      filtered.ignored,
+      fragmentMetadata(init),
+    );
+    assert.deepEqual(
+      boxes(sanitized).map((box) => box.type),
+      ['moof', 'mdat', 'free', 'free'],
+    );
+    assert.deepEqual(sanitized.subarray(0, active.length), active);
+    assert.equal(sanitized.length, media.length);
+
     assert.deepEqual(media, before);
     assert.equal(output.length, media.length);
     assert.deepEqual(

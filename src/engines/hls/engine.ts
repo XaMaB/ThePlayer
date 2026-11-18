@@ -32,7 +32,8 @@ import { textMetadata, textSamples } from './text-mp4';
 import { PlaylistLoader } from './playlist-reload';
 import { LiveProgress, reconcileLive } from './live';
 import { Cea608Timeline } from './cea608-timeline';
-import { row608Text } from './cea608';
+import { Cea608Renderer } from './cea608-renderer';
+import { row608Text, cea608Styles } from './cea608';
 import type { Track } from './mp4';
 import { selectRendition } from './selection';
 import { AbrController, EmergencySwitch } from './abr';
@@ -104,6 +105,7 @@ export class HlsEngine extends EventTarget {
     declaredGaps: 0,
     audioClockRebases: 0,
     renditionSwitchWaits: 0,
+    topologySwitches: 0,
     live: {
       stale: false,
       unchangedMs: 0,
@@ -244,6 +246,7 @@ export class HlsEngine extends EventTarget {
   private appliedPathway = '';
   private captions608 = new Cea608Timeline();
   private captions708: Cea708Timeline;
+  private renderer608?: Cea608Renderer;
   private renderer708?: Cea708Renderer;
   private captions708Seen = new Map<string, number>();
   private captions608Seen = new Map<string, number>();
@@ -705,6 +708,7 @@ export class HlsEngine extends EventTarget {
       this.captions608.reset();
       this.captions708.reset();
       this.renderer708?.set([]);
+      this.renderer608?.set([]);
       this.main.next = Math.max(0, this.main.next - 3);
       if (!this.subtitleManual) this.selectAutomaticSubtitles();
       if (this.selectedSubtitle.startsWith('hls-608-')) this.render608();
@@ -812,6 +816,7 @@ export class HlsEngine extends EventTarget {
     this.captions608.reset();
     this.captions708.reset();
     this.renderer708?.set([]);
+    this.renderer608?.set([]);
     this.captions608Seen.clear();
     this.captions708Seen.clear();
     this.liveProgress.reset();
@@ -936,6 +941,7 @@ export class HlsEngine extends EventTarget {
     this.generation++;
     this.subtitleAbort?.abort();
     this.renderer708?.set([]);
+    this.renderer608?.set([]);
     this.ttmlRenderer?.destroy();
     this.ttmlRenderer = undefined;
     if (this.textTrack) this.textTrack.mode = 'disabled';
@@ -1118,10 +1124,14 @@ export class HlsEngine extends EventTarget {
       skipped,
     };
   }
-  private assertLayout(prepared: PreparedSegment, lane: MediaLane) {
+  private assertLayout(
+    prepared: PreparedSegment,
+    lane: MediaLane,
+    externalAudio = !!this.audio,
+  ) {
     if (
       lane.role === 'main' &&
-      this.audio &&
+      externalAudio &&
       prepared.tracks.some((t) => t.kind === 'audio')
     )
       throw new Error('External audio requires a video-only main rendition');
@@ -1368,11 +1378,14 @@ export class HlsEngine extends EventTarget {
     }
     this.gaps = this.gaps.filter((g) => g.end >= this.video.currentTime - 35);
   }
-  private async prime() {
+  private async prime(
+    preloaded?: { lane: MediaLane; prepared: PreparedSegment }[],
+  ) {
     for (const lane of this.lanes()) this.skipDeclaredGaps(lane);
     // Install every SourceBuffer before appending media, preserving shared A/V ownership.
-    let first: { lane: MediaLane; prepared: PreparedSegment }[];
-    for (;;) {
+    let first: { lane: MediaLane; prepared: PreparedSegment }[] =
+      preloaded ?? [];
+    for (; !first.length; ) {
       try {
         first = await Promise.all(
           this.lanes().map(async (lane) => ({
@@ -1659,6 +1672,78 @@ export class HlsEngine extends EventTarget {
     }
   }
 
+  /** Preflight all media before replacing incompatible SourceBuffer ownership. */
+  private async replaceTopology(
+    main: Playlist,
+    audio: Playlist | undefined,
+    audioName: string,
+    subtitleName: string,
+  ) {
+    const resume = Math.max(
+      main.segments[0].start,
+      Math.min(
+        this.video.currentTime,
+        main.segments.at(-1)!.start + main.segments.at(-1)!.duration - 0.001,
+      ),
+    );
+    const codec = this.qualityLevels[this.selectedQuality]?.codecs;
+    const mainLane = this.lane(main, 'main', codec);
+    mainLane.next = independentIndex(main, segmentAt(main, resume));
+    const audioLane = audio ? this.lane(audio, 'audio', codec) : undefined;
+    if (audioLane)
+      audioLane.next = independentIndex(
+        audio!,
+        segmentAt(audio!, main.segments[mainLane.next].start),
+      );
+    const first = await Promise.all(
+      [mainLane, ...(audioLane ? [audioLane] : [])].map(async (lane) => ({
+        lane,
+        prepared: await lane.prepare(),
+      })),
+    );
+    for (const { lane, prepared } of first)
+      this.assertLayout(prepared, lane, !!audioLane);
+    const play = this.initial
+      ? (this.resumeAfterReset ?? this.source.autoplay !== false)
+      : !this.video.paused;
+    const rate = this.video.playbackRate;
+    this.generation++;
+    this.initial = true;
+    this.resumeAfterReset = play;
+    this.resumePosition = resume;
+    this.primaryPosition = resume;
+    this.dateRanges.reposition(resume);
+    this.subtitleAbort?.abort();
+    this.video.pause();
+    this.video.removeAttribute('src');
+    this.video.load();
+    if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
+    this.video.playbackRate = rate;
+    this.offsets.clear();
+    this.captions608.reset();
+    this.captions708.reset();
+    this.captions608Seen.clear();
+    this.captions708Seen.clear();
+    this.renderer708?.set([]);
+    this.renderer608?.set([]);
+    this.gaps = [];
+    this.liveProgress.reset();
+    this.ended = false;
+    this.main = mainLane;
+    this.audio = audioLane;
+    this.selectedAudioTrack = audioName;
+    this.selectedSubtitle = subtitleName;
+    this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
+    this.media = new MediaSource();
+    this.mediaUrl = URL.createObjectURL(this.media);
+    const opened = this.event(this.media, 'sourceopen');
+    this.video.src = this.mediaUrl;
+    await opened;
+    this.media.duration = main.live ? Infinity : main.duration;
+    this.diagnostics.topologySwitches++;
+    this.state('buffering');
+    await this.prime(first);
+  }
   private async steerAfterFailure() {
     if (!this.steering) return false;
     this.steering.penalize();
@@ -1683,6 +1768,7 @@ export class HlsEngine extends EventTarget {
       selectedAudio: this.selectedAudioTrack,
       selectedSubtitle: this.selectedSubtitle,
       qualityTimeline: this.qualityTimeline,
+      media: this.media,
     };
     try {
       const replacement = pathwayLadder(
@@ -1712,8 +1798,11 @@ export class HlsEngine extends EventTarget {
           systemLanguages:
             this.source.preferredLanguages ?? navigator.languages,
         });
-      if (!!this.audio !== !!nextAudio)
-        throw new Error('Steering pathway changes the external audio layout');
+      if (audio.length && !nextAudio)
+        throw new Error(
+          'Steering pathway has no automatically selectable audio',
+        );
+      const topologyChanged = !!this.audio !== !!nextAudio;
       const nextSubtitle =
         matchingRendition(subtitles, oldSubtitle) ??
         (!this.subtitleManual
@@ -1763,6 +1852,36 @@ export class HlsEngine extends EventTarget {
           ),
         );
       this.master = catalog;
+      if (topologyChanged) {
+        const main = alignRendition(
+          await this.readPlaylist(
+            videoRenditions(this.master, selected, this.videoName).url,
+            0,
+          ),
+          this.main!.playlist,
+        );
+        const audioPlaylist = nextAudio
+          ? alignRendition(await this.readPlaylist(nextAudio.url!, 0), main)
+          : undefined;
+        const selectedAudio = nextAudio
+          ? this.audioTracks[audioIndex].name
+          : '';
+        await this.replaceTopology(
+          main,
+          audioPlaylist,
+          selectedAudio,
+          subtitleName,
+        );
+        this.publishVideo(selected);
+        this.appliedPathway = steering.diagnostics.pathway;
+        for (const level of this.qualityLevels) this.abr.clear(level.id);
+        this.emit('qualitylevels', this.qualityLevels);
+        this.emit('audiotracks', this.audioTracks);
+        this.emit('audiochange', this.audioTracks[audioIndex] ?? null);
+        this.emit('subtitletracks', this.subtitleTracks);
+        this.emit('pathwaychange', { pathway: this.appliedPathway });
+        return true;
+      }
       if (!this.main?.buffer) {
         const old = this.main!;
         const playlist = alignRendition(
@@ -1815,6 +1934,8 @@ export class HlsEngine extends EventTarget {
       return true;
     } catch (error) {
       this.abort.signal.throwIfAborted();
+      // A committed MSE replacement cannot safely reuse the detached old buffers.
+      if (this.media !== previous.media) throw error;
       if (!previous.main?.buffer) {
         this.main = previous.main;
         this.audio = previous.audioLane;
@@ -2358,6 +2479,8 @@ export class HlsEngine extends EventTarget {
     this.subtitleAbort = undefined;
     this.renderer708?.destroy();
     this.renderer708 = undefined;
+    this.renderer608?.destroy();
+    this.renderer608 = undefined;
     this.ttmlRenderer?.destroy();
     this.ttmlRenderer = undefined;
     this.vttStyles?.destroy();
@@ -2378,7 +2501,7 @@ export class HlsEngine extends EventTarget {
     const textTrack = this.textTrack;
     textTrack.mode = 'showing';
     const update = () => {
-      if (this.ttmlRenderer || this.renderer708) return;
+      if (this.ttmlRenderer || this.renderer708 || this.renderer608) return;
       const text = Array.from(textTrack.activeCues ?? [])
         .map((c) => (c as VTTCue).text)
         .join('\n');
@@ -2411,8 +2534,17 @@ export class HlsEngine extends EventTarget {
       return;
     }
     if (track.format === 'cea-608') {
+      if (!CSS.supports('selector(::cue(.cea608))')) {
+        this.textTrack.mode = 'hidden';
+        this.renderer608 = new Cea608Renderer(this.video, (text) =>
+          this.subtitleCounters.present(
+            text ? { text, rects: [] } : null,
+            !!text,
+          ),
+        );
+      }
       this.vttStyles ??= new WebVttStyles(this.video);
-      this.vttStyles.add('::cue(.cea608) { font-family: monospace; }');
+      this.vttStyles.add(cea608Styles());
       abort.signal.addEventListener(
         'abort',
         () => this.abort.signal.removeEventListener('abort', stop),
@@ -2587,6 +2719,10 @@ export class HlsEngine extends EventTarget {
     if (!this.textTrack) return;
     const service = Number(this.selectedSubtitle.replace('hls-608-', ''));
     const events = this.captions608.events.filter((e) => e.service === service);
+    this.renderer608?.set([
+      ...events,
+      { time: this.captions608.horizon, service, rows: [] },
+    ]);
     for (const cue of Array.from(this.textTrack.cues ?? []))
       this.textTrack.removeCue(cue);
     for (const [key, time] of this.captions608Seen)
@@ -2636,6 +2772,8 @@ export class HlsEngine extends EventTarget {
     this.subtitleAbort?.abort();
     this.renderer708?.destroy();
     this.renderer708 = undefined;
+    this.renderer608?.destroy();
+    this.renderer608 = undefined;
     this.ttmlRenderer?.destroy();
     this.ttmlRenderer = undefined;
     this.vttStyles?.destroy();

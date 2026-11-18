@@ -1,4 +1,5 @@
 import { boxes, type Mp4Box } from './mp4';
+import { fragmentSamples, type FragmentTrack } from './fragment-samples';
 
 export interface IgnoredCaptionTrack {
   id: number;
@@ -12,7 +13,7 @@ const child = (data: Uint8Array, type: string) => {
   return found.body;
 };
 /** Keep byte positions intact: trun offsets, absolute base offsets and indexes
- * still refer to the original media payload. Caption payload is never decoded.
+ * still refer to the original media payload. Caption payload has already been extracted by the caller.
  */
 function neutralize(data: Uint8Array, body: Uint8Array, entry: Mp4Box) {
   const at = body.byteOffset - data.byteOffset + entry.at;
@@ -51,6 +52,8 @@ export function filterCaptionInit(input: Uint8Array) {
 export function filterCaptionMedia(
   input: Uint8Array,
   ignored: IgnoredCaptionTrack[],
+  metadata: FragmentTrack[] = [],
+  resourceOffset = 0,
 ) {
   if (!ignored.length) return input;
   const data = input.slice(),
@@ -63,6 +66,32 @@ export function filterCaptionMedia(
     if (fragments.length && excluded.length === fragments.length)
       neutralize(data, data, moof);
     else for (const traf of excluded) neutralize(data, moof.body, traf);
+  }
+  if (metadata.length) {
+    // An orphan mdat after a removed caption-only moof can leave WebKit's
+    // segment parser open. Neutralize only payloads proven to contain no A/V.
+    // Keep mixed payloads and every byte position intact.
+    let samples: ReturnType<typeof fragmentSamples>;
+    try {
+      samples = fragmentSamples(input, metadata, resourceOffset);
+    } catch {
+      samples = [];
+    } // Caption parse warnings are reported by the caller.
+    for (const mdat of boxes(input).filter((box) => box.type === 'mdat')) {
+      const start = mdat.body.byteOffset,
+        end = start + mdat.body.length;
+      const referenced = samples.filter(
+        (sample) =>
+          sample.data.byteLength &&
+          sample.data.byteOffset >= start &&
+          sample.data.byteOffset + sample.data.byteLength <= end,
+      );
+      if (
+        referenced.length &&
+        referenced.every((sample) => ids.has(sample.track.id))
+      )
+        neutralize(data, data, mdat);
+    }
   }
   return data;
 }
