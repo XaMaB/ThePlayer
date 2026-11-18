@@ -1,5 +1,29 @@
 # Release versions
 
+## 1.2.0-alpha.1
+
+- Add DASH clear-video CEA-608/708 service discovery and rendering, including P16, positioning and seek history.
+- Add declared BaseURL failover, bounded clock/topology restarts, EventStream/emsg metadata and MPD ProducerReferenceTime latency mapping.
+- Add a single bounded retry for a decoded, buffered seek that remains pending after native TextTrack creation in WebKit; retain and deduplicate VTT history across Period seeks.
+- Preserve subtitle timing across playback Period changes and PTO; filter unsupported required extensions at their declared scope.
+- Expand browser regressions and update the README, architecture, DASH integration, support matrix and verification instructions. DASH remains a preview while the explicitly tracked acceptance and extension work is incomplete.
+
+## 1.1.0-alpha.1
+
+- Add DASH external/MP4 WebVTT and TTML, ClearKey CENC/CBCS and Period key rotation; verify public Widevine single/multikey media.
+- Append Fetch CMAF chunks before complete responses, with XHR fallback and ServiceDescription latency control.
+- Add transactional MPD Patch with full-MPD fallback, active representation removal and replacement Period recovery.
+
+## 1.0.0-alpha.9
+
+- Bound live MPD/segment recovery, keep independent lanes progressing and recover expired segments and DVR overruns.
+- Preserve pause behavior and handle dynamic-to-static completion with deterministic browser fault tests.
+
+## 1.0.0-alpha.8
+
+- Introduce the original DASH engine, MPD addressing, fMP4 A/V, live/VOD, quality/audio selection and demo integration.
+- Add deterministic browser fixtures and public interoperability checks.
+
 ## 1.0.0-alpha.6
 
 - Align live video quality/angle switches without PROGRAM-DATE-TIME using a target media timestamp probe, rather than assuming matching media sequence numbers across renditions. Preserve the current media clock through the switch, including MPEG timestamp rollover adjustment.
@@ -270,12 +294,12 @@
 
 `package.json` is the authoritative SemVer version. `src/version.ts` exports it as `VERSION`; the shared controls show it beside ThePlayer in MediaInfo and the context menu. The build writes `dist/version.json` and adds the version to bundle banners. There is no separately edited UI version.
 
-Each published release commit receives an immutable annotated Git tag `v<package version>`. Experimental releases use `-alpha.N`; a higher alpha number identifies a new published build. A tag identifies the exact source snapshot, even while the HLS PR remains a draft. Tags are not moved or reused.
+Each published release commit receives an immutable annotated Git tag `v<package version>`. Experimental releases use `-alpha.N`; a higher alpha number identifies a new published build. A tag identifies the exact source snapshot, including prerelease builds. Tags are not moved or reused.
 
 Before publishing:
 
 1. Update the version and lockfile together (`npm version <version> --no-git-tag-version`).
-2. Run `npm run check`, `npm run fixtures:hls` and `npm run test:hls`.
+2. Run `npm run check` and the affected engine fixture/browser suites (`fixtures:hls` / `test:hls`, `fixtures:dash` / `test:dash`); run cross-engine regressions for shared primitives. Keep public-network and hardware-CDM results separate from deterministic CI.
 3. Commit the verified source and release notes, then create an annotated matching tag.
 4. Push the branch and that specific tag together. Deploy the build from that version.
 

@@ -19,6 +19,9 @@ try {
     'representation',
     'period',
     'patch',
+    'clock',
+    'clock-paused',
+    'topology',
   ]) {
     for (const transport of ['fetch', 'xhr']) {
       const { server, controls } = dashServer();
@@ -59,6 +62,24 @@ try {
         const before = await page
           .locator('video')
           .evaluate((v) => v.currentTime);
+        if (scenario === 'clock-paused') {
+          await page.locator('video').evaluate((v) => v.pause());
+          controls.clockShift = 2000;
+          await page.waitForFunction(
+            () =>
+              window.player.diagnostics.recovery.restarts === 1 &&
+              document.querySelector('video').readyState >= 2,
+          );
+          await page.waitForTimeout(300);
+          assert.equal(
+            await page.locator('video').evaluate((v) => v.paused),
+            true,
+            'Clock recovery preserves explicit pause',
+          );
+          await page.locator('video').evaluate((v) => v.play());
+        }
+        if (scenario === 'topology') controls.removeAudio = true;
+        if (scenario === 'clock') controls.clockShift = 2000;
         if (scenario === 'patch') controls.badPatch = 1;
         if (scenario === 'representation') controls.removeVideo = true;
         if (scenario === 'period') controls.replacePeriod = true;
@@ -132,6 +153,26 @@ try {
             { timeout: 12000 },
           );
           const d = await page.evaluate(() => window.player.diagnostics);
+          if (scenario === 'topology') {
+            assert.equal(d.recovery.restarts, 1);
+            assert.equal(
+              await page.evaluate(() => window.player.audioTracks.length),
+              0,
+            );
+            controls.removeAudio = false;
+            await page.waitForFunction(
+              () => window.player.diagnostics.recovery.restarts === 2,
+            );
+            await page.waitForFunction(
+              () => document.querySelector('video').readyState >= 3,
+            );
+            assert.equal(
+              await page.evaluate(() => window.player.audioTracks.length),
+              2,
+            );
+          }
+          if (scenario === 'clock' || scenario === 'clock-paused')
+            assert.equal(d.recovery.restarts, 1);
           if (scenario === 'patch') {
             assert.equal(d.patches.fallbacks, 1);
             assert.ok(d.patches.applied >= 2);

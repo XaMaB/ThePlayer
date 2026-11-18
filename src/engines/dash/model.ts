@@ -26,6 +26,13 @@ export interface Protection {
   keyIds: string[];
   pssh: Uint8Array[];
 }
+export interface ProducerReference {
+  id: string;
+  type: 'encoder' | 'captured' | 'application';
+  inband: boolean;
+  wallClockTime: number;
+  presentationTime: bigint;
+}
 export interface Representation {
   id: string;
   bandwidth: number;
@@ -37,6 +44,7 @@ export interface Representation {
   baseUrls: string[];
   address: SegmentAddress;
   protection: Protection[];
+  producerReferences?: ProducerReference[];
 }
 export interface Adaptation {
   id: string;
@@ -46,11 +54,21 @@ export interface Adaptation {
   roles: string[];
   representations: Representation[];
 }
+export interface DashEvent {
+  type: 'dash-event';
+  scheme: string;
+  value: string;
+  id: string;
+  time: number;
+  duration?: number;
+  data: string;
+}
 export interface Period {
   id: string;
   start: number;
   duration?: number;
   adaptations: Adaptation[];
+  events?: DashEvent[];
 }
 export interface Manifest {
   url: string;
@@ -65,6 +83,7 @@ export interface Manifest {
   suggestedPresentationDelay?: number;
   service?: {
     targetLatency: number;
+    referenceId?: string;
     minLatency?: number;
     maxLatency?: number;
     minRate: number;
@@ -76,6 +95,7 @@ export interface Manifest {
   periods: Period[];
 }
 export interface SegmentReference extends Resource {
+  alternatives?: string[];
   number: bigint;
   time: bigint;
   start: number;

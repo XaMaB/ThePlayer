@@ -9,3 +9,7 @@ The original generator is `../helpers/encode-he-aac-v2.c`. It uses the documente
 `node scripts/prepare-he-aac-fixtures.mjs` creates TS, fMP4 and packed HLS variants with FFmpeg and ThePlayer's original transmuxer. It independently decodes the ADTS source and remuxed MP4 with FFmpeg and requires byte-identical stereo PCM. Browser tests also check distinct channel frequencies and bidirectional seeking.
 
 On headless Linux, Firefox needs a working audio sink to run its real-time Web Audio graph. CI starts PulseAudio with a null sink before frequency measurements (`pulseaudio --start --exit-idle-time=-1 --load=module-null-sink`). This is a test-host requirement, not a player dependency. A suspended graph must not count as a passed audio assertion.
+
+## Generated DASH fixtures
+
+`npm run fixtures:dash` generates a separate temporary fixture directory (override it with `THEPLAYER_DASH_FIXTURES`). It creates AVC video qualities, independent audio tones, WebVTT/TTML/wvtt/stpp and encrypted media from synthetic content, plus original SEI caption fixtures. The generators and provenance stay in source; generated recordings do not need to be committed. See [DASH verification](../../docs/dash-validation.md).

@@ -23,7 +23,7 @@ Linux, Node.js 24, Playwright 1.65.0, Chromium 158.0.8127.18, Firefox 159.0 and 
 
 The [release-candidate CI workflow](https://github.com/XaMaB/ThePlayer/actions/runs/44228516664) completed successfully: build/checks, full Chromium regression and live soak, Firefox and WebKit. The complete local regression and separate 30-minute candidate soak also exited successfully. The final 0.45.0 build passes formatting, type checks and all 170 unit tests. Its media source is identical to the tested candidate; the additional audio-harness error checks pass all 24 browser/remote cases.
 
-A separate 24-hour soak of the earlier live-delivery baseline is running as supplemental evidence. It is not a completed 24-hour result and must not be attributed to the candidate binary. Its current progress is not a final release gate.
+At the time of this release record, a separate 24-hour soak of an earlier live-delivery baseline had been started. No completed result is recorded here; it must not be attributed to the candidate binary or treated as a current running test.
 
 ## Reproduce
 

@@ -115,3 +115,9 @@ execFileSync(
   [new URL('./prepare-cenc-fixtures.mjs', import.meta.url).pathname],
   { stdio: 'inherit', env: { ...process.env, THEPLAYER_HLS_FIXTURES: root } },
 );
+
+for (const name of ['prepare-sei-fixtures.mjs', 'prepare-708-fixtures.mjs'])
+  execFileSync(process.execPath, [new URL(name, import.meta.url).pathname], {
+    stdio: 'inherit',
+    env: { ...process.env, THEPLAYER_HLS_FIXTURES: root },
+  });

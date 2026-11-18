@@ -100,7 +100,7 @@ jobs:
         timeout-minutes: 3
 
   dash-browsers:
-    timeout-minutes: 20
+    timeout-minutes: 40
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -122,5 +122,11 @@ jobs:
       - run: npm run fixtures:dash
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
       - run: npm run test:dash
+        timeout-minutes: 15
       - run: npm run test:dash:drm
         if: matrix.browser == 'chromium'
+      - run: npm run test:dash:soak
+        if: matrix.browser == 'chromium'
+        timeout-minutes: 5
+        env:
+          DASH_SOAK_SECONDS: 180

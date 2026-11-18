@@ -1,4 +1,5 @@
-import { ResourceClient, delay, type NetworkOptions } from '../hls/network';
+import { delay, type NetworkOptions } from '../hls/network';
+import { DashResourceClient } from './network';
 import {
   parseVtt,
   nativeCue,
@@ -26,7 +27,7 @@ const nativeTracks = new WeakMap<HTMLVideoElement, TextTrack>();
 /** Independent text loader: subtitle delivery cannot block the A/V scheduler. */
 export class DashSubtitles {
   private abort = new AbortController();
-  private client: ResourceClient;
+  private client: DashResourceClient;
   private track?: TextTrack;
   private renderer?: TtmlRenderer;
   private styles?: WebVttStyles;
@@ -47,12 +48,12 @@ export class DashSubtitles {
     network: NetworkOptions | undefined,
     private emit: (name: string, data: unknown) => void,
   ) {
-    this.client = new ResourceClient(network ?? {}, this.abort.signal);
+    this.client = new DashResourceClient(network ?? {}, this.abort.signal);
     video.addEventListener(
       'seeking',
       () => {
         this.generation++;
-        this.clear();
+        this.clear(true);
       },
       { signal: this.abort.signal },
     );
@@ -74,9 +75,9 @@ export class DashSubtitles {
       displayed: this.displayed,
     });
   }
-  private clear() {
+  private clear(preserveNative = false) {
     this.seen.clear();
-    if (this.track)
+    if (this.track && !preserveNative)
       for (const cue of Array.from(this.track.cues ?? []))
         this.track.removeCue(cue);
     this.renderer?.destroy();
@@ -89,7 +90,7 @@ export class DashSubtitles {
     while (!this.abort.signal.aborted) {
       const period = this.period();
       if (this.periodId !== period.id) {
-        this.clear();
+        this.clear(true);
         this.metadata = undefined;
         this.index = undefined;
         this.initialized = false;
@@ -121,6 +122,7 @@ export class DashSubtitles {
             throw new Error('DASH subtitle indexRange is required');
           const data = await this.client.get({
             url: rep.baseUrls[0],
+            alternatives: rep.baseUrls.slice(1),
             range: rep.address.indexRange,
           });
           this.index = parseSidx(
@@ -129,7 +131,10 @@ export class DashSubtitles {
             data.url,
             rep,
             period,
-          );
+          ).map((reference) => ({
+            ...reference,
+            alternatives: rep.baseUrls.filter((url) => url !== data.url),
+          }));
         }
         this.initialized = true;
       }
@@ -211,13 +216,20 @@ export class DashSubtitles {
           );
         }
         this.track.mode = 'showing';
+        const existing = new Set(
+          Array.from(this.track.cues ?? []).map((c) =>
+            JSON.stringify([c.startTime, c.endTime, (c as VTTCue).text]),
+          ),
+        );
         for (const cue of cues) {
           cue.start = Math.max(period.start, cue.start);
           cue.end = Math.min(
             period.start + (period.duration ?? Infinity),
             cue.end,
           );
-          if (cue.end > cue.start) {
+          const key = JSON.stringify([cue.start, cue.end, cue.text]);
+          if (cue.end > cue.start && !existing.has(key)) {
+            existing.add(key);
             this.track.addCue(nativeCue(cue, regions));
             this.received++;
           }

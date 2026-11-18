@@ -14,12 +14,13 @@
 
 ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, original HLS and DASH engines, multilingual audio, broadcast captions and shared playback controls.
 
-[Protocols](#protocols) · [Codecs](#audio-and-video) · [Subtitles](#subtitles) · [HLS features](#hls-features) · [Quick start](#development) · [Integration](#library) · [Architecture](docs/architecture.md)
+[Protocols](#protocols) · [Codecs](#audio-and-video) · [Subtitles](#subtitles) · [HLS features](#hls-features) · [DASH](#dash-preview) · [Quick start](#development) · [Integration](#library) · [Architecture](docs/architecture.md)
 
 ## What you get
 
 - **MoQ live playback:** WebTransport delivery, cached startup and a four-second target reserve.
 - **HLS live, VOD and EVENT playback:** TS/fMP4 segments, Auto ABR, manual quality selection and audio-only streams.
+- **DASH live and VOD:** fMP4, quality/audio selection, text and broadcast captions, MPD Patch, ClearKey/Widevine and low-latency CMAF; see the verified preview scope below.
 - **Multilingual audio and captions:** audio/CC menus, source-positioned broadcast captions and subtitle Off.
 - **Shared controls:** current Auto quality, resolution badges, play/pause, ±10 s seeking, keyboard shortcuts, fullscreen and MediaInfo. LIVE appears only for live presentations.
 - **Independent integration:** explicit source configuration, separate engine modules and no Origin/Relay dashboard dependency.
@@ -47,10 +48,10 @@ The player uses Media Source Extensions (MSE) and browser decoders. It does not 
 | AV1 Main, 8/10-bit             | fMP4 (`av01`)                      | Browser playback, quality changes and seeking tested; no AV1 TS/WebM/raw OBU input                                                                                   |
 | AAC-LC / declared HE-AAC v1/v2 | MPEG-TS and fMP4                   | Implemented, including separate audio renditions; PS uses a mono core with stereo output                                                                             |
 | Audio-only AAC                 | MPEG-TS and fMP4                   | Implemented; bitrate selection and Video / Audio only mode for compatible mixed masters                                                                              |
-| Dolby audio / Atmos            | —                                  | Not implemented                                                                                                                                                      |
+| AC-3 / E-AC-3 audio            | TS, packed audio and fMP4          | Implemented for the documented single-substream profiles; browser decoder required. Atmos is not certified                                                           |
 | Dolby Vision / HDR output      | —                                  | Dolby Vision and HDR display/tone mapping are not validated                                                                                                          |
 
-The MoQ engine appends catalog-advertised fragmented MP4 to MSE. Its codec compatibility depends on the publisher's media profile and the browser; the HLS-specific demux/remux matrix above does not imply equivalent MoQ codec validation. MoQ audio switching replaces the audio subscription/buffer while retaining the video connection and timeline.
+The codec table above describes HLS carriage. DASH currently has browser validation for AVC/AAC fMP4; other codec/device combinations remain unverified for DASH. The MoQ engine appends catalog-advertised fragmented MP4 to MSE. Its codec compatibility depends on the publisher's media profile and the browser; the HLS-specific demux/remux matrix above does not imply equivalent MoQ codec validation. MoQ audio switching replaces the audio subscription/buffer while retaining the video connection and timeline.
 
 MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer and ABR policy. Actual buffer health varies with delivery and GOP structure. Neither target is a guaranteed end-to-end latency. MoQ adaptive bitrate rendition switching is not implemented.
 
@@ -73,11 +74,13 @@ MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer a
 
 **WebVTT:** scoped safe STYLE rules and cue/region placement are supported. Browsers without native VTTRegion use placement fallback; region scrolling/clipping is not emulated. DVB and teletext decoding belongs to the Origin; their availability here does not mean browser-side raw broadcast subtitle decoding.
 
+DASH supports external WebVTT/TTML, fMP4 wvtt/stpp and clear video SEI CEA-608/708 through the shared text/caption renderers. Separate DASH c608/c708 tracks, encrypted text, raw DVB and teletext are not implemented; the MoQ Origin path remains separate.
+
 The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. MediaInfo separates received events, including clears and refreshes, from displayed subtitles. See the [caption support details](docs/hls-support.md).
 
 ## DASH preview
 
-DASH is available in the demo protocol selector and through `protocol: "dash"`. The preview covers MPD addressing and Patch updates, fMP4 VOD/live, quality/audio selection, Period transitions, live recovery, external/MP4 WebVTT and TTML, tested ClearKey/Widevine DRM, and low-latency CMAF Fetch delivery. Advanced extensions and device-specific validation are still in development. See [DASH support](docs/dash-support.md) and the [staged implementation plan](docs/dash-implementation-plan.md).
+DASH is available in the demo protocol selector and through `protocol: "dash"`. The preview covers MPD addressing and Patch updates, fMP4 VOD/live, quality/audio selection, Period transitions, live recovery, external/MP4 WebVTT and TTML, tested ClearKey/Widevine DRM, and low-latency CMAF Fetch delivery. It also handles clear AVC/HEVC SEI CEA-608/708 (including configured P16), declared BaseURL failover, bounded clock/topology recovery, timed EventStream/emsg notifications and MPD producer-clock latency measurements. Advanced extensions and device-specific validation are still in development. See [DASH support and API examples](docs/dash-support.md), [integration and DRM](docs/dash-integration.md), [test coverage](docs/dash-validation.md) and the [staged implementation plan](docs/dash-implementation-plan.md).
 
 ## HLS features
 
@@ -106,7 +109,7 @@ See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [
 
 ## Development
 
-Requires Node.js 24+, npm and Git. Playback requires Media Source Extensions and suitable browser codecs. MoQ additionally requires WebTransport in a secure context; HLS requires HTTP(S) access and suitable CORS headers.
+Requires Node.js 24+, npm and Git. Playback requires Media Source Extensions and suitable browser codecs. MoQ additionally requires WebTransport in a secure context; HLS and DASH require HTTP(S) access and suitable CORS headers.
 
 ```sh
 git clone https://github.com/XaMaB/ThePlayer.git
@@ -120,7 +123,7 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:5173`. For HLS, select HLS and supply a playlist URL. For MoQ, supply a relay URL, namespace and, for a self-signed development relay, its certificate fingerprint. WebTransport requires a secure context: localhost or HTTPS. The demo has no dependency on the Origin or Relay administration applications.
+Open `http://localhost:5173`. For HLS or DASH, select the protocol and supply an M3U8 or MPD URL. For MoQ, supply a relay URL, namespace and, for a self-signed development relay, its certificate fingerprint. WebTransport requires a secure context: localhost or HTTPS. The demo has no dependency on the Origin or Relay administration applications.
 
 The bootstrap checks out moq-dev at `caf6ebc05d0b56a5689af1df431dd13804aaa1a2` into `.cache/moq`. Builds verify this revision. `MOQ_SOURCE` may point to an existing checkout at that revision. Do not replace it with an arbitrary npm version: the protocol and JS API are version sensitive.
 
@@ -145,7 +148,7 @@ await player.load({
 });
 ```
 
-Deploy the entire `dist` directory, including `chunks`; HLS is loaded on demand. LIVE appears only for live presentations; VOD has a seek bar and duration.
+Deploy the entire `dist` directory, including `chunks`; HLS and DASH are loaded on demand. Bundles are generated by `npm run build` and are not checked into GitHub. See [DASH integration](docs/dash-integration.md) for MPD and DRM examples. LIVE appears only for live presentations; VOD has a seek bar and duration.
 
 ## Library
 
@@ -180,7 +183,8 @@ The application provides the video and overlay canvas; position the canvas absol
 
 - `src/core`: common source lifecycle, engine registry and public engine contract; no MoQ imports.
 - `src/engines/moq`: WebTransport connection, catalog, subscriptions, MSE, audio switching and buffering.
-- `src/engines/hls`: playlist/network handling, segment scheduling, ABR, TS/fMP4 processing, WebVTT and CEA-608.
+- `src/engines/hls`: HLS scheduling, shared HTTP/MP4/EME primitives, TS/fMP4 processing, ABR and text/CEA-608/708 renderers.
+- `src/engines/dash`: MPD/Patch parsing, addressing, Period/live recovery, CMAF delivery and DASH text/caption scheduling.
 - `src/subtitles`: cue history/counters, reusable canvas renderer and CEA-708 decoding/layout.
 - `src/ui`: the current in-video controls. These still use the demo's documented DOM IDs; this is not yet a drop-in custom element.
 - `demo`: source form, optional channel directory, embed page and styling.

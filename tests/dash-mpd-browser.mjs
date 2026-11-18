@@ -186,6 +186,39 @@ try {
     results.push(
       'MPD Patch identity, timestamp, selector and namespace validation',
     );
+    const producer = parseMpd(
+      wrap(
+        `<Period><AdaptationSet>${template}<ProducerReferenceTime id="1" wallClockTime="2026-11-18T12:00:00Z" presentationTime="9007199254740993"/>${rep.replace('/>', '><ProducerReferenceTime id="1" type="captured" wallClockTime="2026-11-18T12:00:01Z" presentationTime="9007199254740994"/></Representation>')}</AdaptationSet></Period>`,
+      ),
+      base,
+    ).periods[0].adaptations[0].representations[0].producerReferences;
+    expect(
+      producer.length === 1 &&
+        producer[0].type === 'captured' &&
+        producer[0].presentationTime === 9007199254740994n,
+      'Producer references override by ID without rounding media clocks',
+    );
+    rejects(
+      wrap(
+        `<Period><AdaptationSet>${template}<ProducerReferenceTime id="1" wallClockTime="bad" presentationTime="0"/>${rep}</AdaptationSet></Period>`,
+      ),
+      'Invalid producer UTC',
+    );
+    results.push(
+      'ProducerReferenceTime inheritance and exact timestamp validation',
+    );
+    const alternatives = parseMpd(
+      wrap(
+        `<Period><AdaptationSet id="unsupported"><EssentialProperty schemeIdUri="urn:unknown"/>${template}${rep}</AdaptationSet><AdaptationSet id="supported">${template}${rep}</AdaptationSet></Period>`,
+      ),
+      base,
+    );
+    expect(
+      alternatives.periods[0].adaptations.length === 1 &&
+        alternatives.periods[0].adaptations[0].id === 'supported',
+      'Unsupported mandatory extension excludes its adaptation, not supported siblings',
+    );
+    results.push('EssentialProperty scoped capability filtering');
     return results;
   });
   for (const item of cases) console.log('MPD PASS', item);

@@ -39,7 +39,7 @@ try {
   assert.match(await page.locator('#player-menu').innerText(), /ThePlayer/);
   assert.match(
     await page.locator('#player-menu').innerText(),
-    /1\.1\.0-alpha\.1/,
+    /1\.2\.0-alpha\.1/,
   );
   await page.locator('#hls-url').fill(base + '/dash/live.mpd?session=ui');
   await page.locator('#connect').click();

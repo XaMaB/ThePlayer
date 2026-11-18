@@ -5,6 +5,7 @@ Research baseline: 18 November 2026. DASH is under active implementation; the ex
 ## Standards and references
 
 - [ISO/IEC 23009-1:2026, edition 6](https://www.iso.org/standard/23009-1): current published MPD/segment specification, published July 2026. The catalogue and public material were consulted; this is not a claim to have reviewed all 375 pages of the licensed standard.
+- [MPEG DASH sixth-edition MPD schema](https://github.com/MPEGGroup/DASHSchema/blob/6th-Ed/DASH-MPD.xsd): public element and attribute definitions, including ProducerReferenceTime.
 - [DASH-IF IOP v5](https://dashif.org/guidelines/iop-v5/): independently maintained interoperability guidance for CMAF, VOD/live, protection, audio/video/text and events.
 - [DASH-IF timing model](https://dashif.org/Guidelines-TimingModel/): presentation/sample clocks, addressing and availability.
 - [MPD Patch guidance](https://dashif.org/DASH-IF-IOP/mpd-patch/): incremental timeline updates and full-MPD fallback.
@@ -42,7 +43,7 @@ The following MPDs returned HTTP 200 on 18 November 2026. HTTP availability is n
 | DASH-IF livesim2 number addressing   | <https://livesim.dashif.org/livesim2/testpic_2s/Manifest.mpd>               | Live, wall-clock synchronization                                                                |
 | DASH-IF livesim2 timeline addressing | <https://livesim.dashif.org/livesim2/segtimeline_1/testpic_2s/Manifest.mpd> | Live SegmentTimeline                                                                            |
 
-`tests/dash-public.mjs` probes decoded playback, quality changes, continued progress and VOD seeking. Add profiles such as low latency, MPD Patch and multi-period simulation as their corresponding implementation stages land.
+`tests/dash-public.mjs` probes decoded playback, quality changes, continued progress and VOD seeking. Low-latency, MPD Patch and CEA-608 profiles are now included in the public suite; multi-period fixtures remain deterministic local tests.
 
 ## First delivery: 1.0.0-alpha.8
 
@@ -55,3 +56,9 @@ Stage 3 now includes bounded MPD and segment recovery, per-lane retry scheduling
 ## Text, protection and low latency: 1.1.0-alpha.1
 
 Adds active-representation/Period replacement, external and MP4 text, CENC/CBCS ClearKey, public Widevine single/multikey validation, and Fetch CMAF chunk appends before HTTP completion with ServiceDescription latency/rate settings. XHR remains a full-response fallback. Extension and device-specific limits remain listed in the support matrix; the final documentation audit is still required before the implemented release.
+
+## Captions and delivery resilience: 1.2.0-alpha.1
+
+Adds clear video SEI CEA-608/708, P16/service selection, BaseURL failover, bounded source-clock/topology recovery, EventStream/emsg dispatch and MPD producer-clock latency mapping. Text tests cover PTO and playback Period transitions. Unknown required extensions are excluded at their owning adaptation/representation scope. See [current support](dash-support.md), [integration](dash-integration.md) and [verification](dash-validation.md); milestone entries above describe historical state.
+
+Remaining acceptance work includes sustained live/LL fault and latency tests, additional codec validation and physical-device/CDM testing. Optional extension work remains explicitly open: XLink, content steering/telemetry, ad lifecycle, thumbnails/trick modes, in-band producer references, hierarchical indexes and additional presentation profiles. These stages are not marked complete by the presence of a parser or an API entry point.

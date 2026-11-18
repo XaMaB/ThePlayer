@@ -13,7 +13,7 @@ const browser = await { chromium, firefox, webkit }[name].launch(
 try {
   for (const scenario of (
     process.env.DASH_SCENARIOS ??
-    'timeline,number,list,redirect,pto,periods,audio,live'
+    'timeline,number,list,redirect,pto,periods,audio,live,cdn'
   ).split(',')) {
     for (const transport of ['fetch', 'xhr']) {
       const page = await browser.newPage();
@@ -150,6 +150,12 @@ try {
             { timeout: 15000 },
           );
         }
+        if (scenario === 'cdn')
+          assert.ok(
+            await page.evaluate(
+              () => window.player.diagnostics.delivery.switches > 0,
+            ),
+          );
         await page.evaluate(() => window.player.selectQuality(-1));
         assert.equal(
           await page.evaluate(() => window.player.autoQuality),

@@ -10,108 +10,142 @@ const browser = await { chromium, firefox, webkit }[name].launch(
 const { server } = dashServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 try {
-  for (const transport of ['fetch', 'xhr']) {
-    const page = await browser.newPage();
-    const faults = [];
-    page.on('pageerror', (e) => faults.push(e.message));
-    try {
-      await page.goto(`http://127.0.0.1:${server.address().port}/harness.html`);
-      await page.evaluate(async (transport) => {
-        const { ThePlayer } = await import('/player.js');
-        const video = document.querySelector('video');
-        video.style.width = '640px';
-        video.style.height = '360px';
-        window.player = new ThePlayer(video);
-        window.errors = [];
-        window.warnings = [];
-        window.player.addEventListener('error', (e) =>
-          window.errors.push(e.detail.message),
-        );
-        window.player.addEventListener('captionwarning', (e) =>
-          window.warnings.push(e.detail.message),
-        );
-        await window.player.load({
-          protocol: 'dash',
-          url: location.origin + '/dash/text.mpd',
-          quality: 0,
-          network: { transport },
-        });
-      }, transport);
-      await page.waitForFunction(
-        () => document.querySelector('video').currentTime > 1,
-      );
-      assert.equal(
-        await page.evaluate(() => window.player.subtitleTracks.length),
-        4,
-      );
-      for (const format of ['vtt', 'ttml', 'wvtt', 'stpp']) {
-        console.log('Text case', format);
-        await page.locator('video').evaluate((v) => {
-          v.currentTime = 0.5;
-        });
-        await page.waitForFunction(
-          () => !document.querySelector('video').seeking,
+  for (const scenario of process.env.DASH_TEXT_SCENARIOS?.split(',') ?? [
+    'text',
+    'text-periods',
+    'text-pto',
+  ]) {
+    for (const transport of ['fetch', 'xhr']) {
+      const page = await browser.newPage();
+      const faults = [];
+      page.on('pageerror', (e) => faults.push(e.message));
+      try {
+        await page.goto(
+          `http://127.0.0.1:${server.address().port}/harness.html`,
         );
         await page.evaluate(
-          (format) => window.player.selectSubtitleTrack(format),
-          format,
+          async ({ transport, scenario }) => {
+            const { ThePlayer } = await import('/player.js');
+            const video = document.querySelector('video');
+            video.style.width = '640px';
+            video.style.height = '360px';
+            window.player = new ThePlayer(video);
+            window.errors = [];
+            window.warnings = [];
+            window.player.addEventListener('error', (e) =>
+              window.errors.push(e.detail.message),
+            );
+            window.player.addEventListener('captionwarning', (e) =>
+              window.warnings.push(e.detail.message),
+            );
+            await window.player.load({
+              protocol: 'dash',
+              url: location.origin + '/dash/' + scenario + '.mpd',
+              quality: 0,
+              network: { transport },
+            });
+          },
+          { transport, scenario },
         );
-        await expectCaption(page, format);
-        if (format === 'vtt')
-          assert.equal(
-            await page.evaluate(
-              () =>
-                document.querySelector('video').textTracks[0].activeCues[0]
-                  .align,
-            ),
-            'start',
+        await page.waitForFunction(
+          () => document.querySelector('video').currentTime > 1,
+        );
+        assert.equal(
+          await page.evaluate(() => window.player.subtitleTracks.length),
+          4,
+        );
+        for (const format of ['vtt', 'ttml', 'wvtt', 'stpp']) {
+          console.log('Text case', scenario, format);
+          await page.locator('video').evaluate((v) => {
+            v.currentTime = 0.5;
+          });
+          await page.waitForFunction(
+            () => !document.querySelector('video').seeking,
           );
-        await page.locator('video').evaluate((v) => {
-          v.currentTime = 8.1;
-        });
-        await expectCaption(page, format);
-        await page.evaluate(() => window.player.selectSubtitleTrack(''));
-        assert.equal(await page.locator('.theplayer-ttml').count(), 0);
-        assert.equal(await page.locator('video track').count(), 0);
+          await page.evaluate(
+            (format) => window.player.selectSubtitleTrack(format),
+            format,
+          );
+          await expectCaption(page, format);
+          if (format === 'vtt')
+            assert.equal(
+              await page.evaluate(
+                () =>
+                  document.querySelector('video').textTracks[0].activeCues[0]
+                    .align,
+              ),
+              'start',
+            );
+          await page.locator('video').evaluate(
+            (v, time) => {
+              v.currentTime = time;
+            },
+            scenario === 'text-periods' ? 14.1 : 8.1,
+          );
+          await expectCaption(page, format);
+          const position = await page
+            .locator('video')
+            .evaluate((v) => v.currentTime);
+          await page.waitForFunction(
+            (t) => document.querySelector('video').currentTime > t + 0.15,
+            position,
+            { timeout: 5000 },
+          );
+          await page.evaluate(() => window.player.selectSubtitleTrack(''));
+          assert.equal(await page.locator('.theplayer-ttml').count(), 0);
+          assert.equal(await page.locator('video track').count(), 0);
+        }
+        assert.deepEqual(await page.evaluate(() => window.errors), []);
+        assert.deepEqual(await page.evaluate(() => window.warnings), []);
+        assert.deepEqual(faults, []);
+        await page.evaluate(() => window.player.destroy());
+        assert.equal(
+          await page.locator('.theplayer-ttml, video track').count(),
+          0,
+        );
+        console.log(
+          name,
+          transport,
+          'external WebVTT/TTML, wvtt/stpp, seek, Off and teardown PASS',
+        );
+      } catch (error) {
+        console.dir(
+          await page.evaluate(() => ({
+            errors: window.errors,
+            warnings: window.warnings,
+            tracks: window.player?.subtitleTracks.map((t) => t.name),
+            native: Array.from(document.querySelector('video').textTracks).map(
+              (t) => ({
+                mode: t.mode,
+                cues: Array.from(t.cues ?? []).map((c) => [
+                  c.startTime,
+                  c.endTime,
+                  c.text,
+                ]),
+                active: t.activeCues?.length,
+              }),
+            ),
+            time: document.querySelector('video').currentTime,
+            seeking: document.querySelector('video').seeking,
+            paused: document.querySelector('video').paused,
+            ready: document.querySelector('video').readyState,
+            buffered: Array.from(
+              { length: document.querySelector('video').buffered.length },
+              (_, i) => [
+                document.querySelector('video').buffered.start(i),
+                document.querySelector('video').buffered.end(i),
+              ],
+            ),
+            diagnostics: window.player.diagnostics,
+            text: document.querySelector('.theplayer-ttml')?.textContent,
+          })),
+          { depth: null },
+        );
+        throw error;
+      } finally {
+        await page.evaluate(() => window.player?.destroy());
+        await page.close();
       }
-      assert.deepEqual(await page.evaluate(() => window.errors), []);
-      assert.deepEqual(await page.evaluate(() => window.warnings), []);
-      assert.deepEqual(faults, []);
-      await page.evaluate(() => window.player.destroy());
-      assert.equal(
-        await page.locator('.theplayer-ttml, video track').count(),
-        0,
-      );
-      console.log(
-        name,
-        transport,
-        'external WebVTT/TTML, wvtt/stpp, seek, Off and teardown PASS',
-      );
-    } catch (error) {
-      console.log(
-        await page.evaluate(() => ({
-          errors: window.errors,
-          warnings: window.warnings,
-          tracks: window.player?.subtitleTracks.map((t) => t.name),
-          native: Array.from(document.querySelector('video').textTracks).map(
-            (t) => ({
-              mode: t.mode,
-              cues: Array.from(t.cues ?? []).map((c) => [
-                c.startTime,
-                c.endTime,
-                c.text,
-              ]),
-              active: t.activeCues?.length,
-            }),
-          ),
-          time: document.querySelector('video').currentTime,
-          text: document.querySelector('.theplayer-ttml')?.textContent,
-        })),
-      );
-      throw error;
-    } finally {
-      await page.evaluate(() => window.player?.destroy());
-      await page.close();
     }
   }
 } finally {

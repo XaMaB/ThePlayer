@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import { faultServer } from './helpers/hls-fault-server.mjs';
 const sources = [
   [
+    'livesim-captions',
+    'https://livesim.dashif.org/livesim2/timecc608_CC1-eng/testpic_2s/Manifest.mpd',
+  ],
+  [
     'livesim-ll',
     'https://livesim.dashif.org/livesim2/ato_1.5/chunkdur_0.5/ltgt_3000/testpic_2s/Manifest.mpd',
   ],
@@ -69,6 +73,20 @@ try {
         { timeout: 30000 },
       );
       assert.deepEqual(await page.evaluate(() => window.errors), []);
+      if (id === 'livesim-captions') {
+        await page.waitForFunction(() =>
+          window.player.subtitleTracks.some((t) => t.format === 'cea-608'),
+        );
+        await page.evaluate(() =>
+          window.player.selectSubtitleTrack(
+            window.player.subtitleTracks.find((t) => t.format === 'cea-608')
+              .name,
+          ),
+        );
+        await page.waitForFunction(() =>
+          document.querySelector('.theplayer-cea608')?.textContent.trim(),
+        );
+      }
       const before = await page.locator('video').evaluate((v) => v.currentTime);
       if (await page.evaluate(() => window.player.qualityLevels.length > 1))
         await page.evaluate(() => window.player.selectQuality(1));

@@ -1,14 +1,19 @@
 import type { PlaybackEngine } from '../../core/player';
 import { VERSION } from '../../version';
-import { ResourceClient, delay, type NetworkOptions } from '../hls/network';
+import { delay, type NetworkOptions } from '../hls/network';
 import { HttpError, retryable } from '../hls/recovery';
 import { AbrController } from '../hls/abr';
 import { bufferedAhead, nextGapPosition } from '../hls/buffer';
-import { inspectInit, type Track } from '../hls/mp4';
+import { emsgMetadata, type TimedMetadata } from '../hls/metadata';
+import { inspectInit, decodeTime, type Track } from '../hls/mp4';
 import { EmeController, type DrmOptions } from '../hls/eme';
 import type { Resource } from '../hls/playlist';
 import { parseMpd } from './mpd';
 import { initializationResource, segmentReferences } from './segments';
+import { DashResourceClient } from './network';
+import { DashCaptions } from './captions';
+import type { FragmentTrack } from '../hls/fragment-samples';
+import type { P16Encoding } from '../hls/cea708-packets';
 import { applyMpdPatch } from './patch';
 import { CmafChunks } from './chunks';
 import { DashSubtitles, textFormat } from './subtitles';
@@ -16,6 +21,7 @@ import { parseSidx } from './sidx';
 import { mediaEvent } from './media';
 import type {
   Adaptation,
+  DashEvent,
   Manifest,
   Period,
   Representation,
@@ -36,6 +42,7 @@ export interface DashSource {
   lowLatency?: boolean;
   latencyControl?: boolean;
   useMpdPatch?: boolean;
+  captionEncodings?: Record<number, P16Encoding>;
 }
 interface Lane {
   adaptation: Adaptation;
@@ -51,6 +58,7 @@ interface Lane {
   retryAt?: number;
   failureSince?: number;
   index?: SegmentReference[];
+  captionMetadata?: FragmentTrack[];
 }
 export class DashEngine extends EventTarget implements PlaybackEngine {
   readonly protocol = 'dash';
@@ -62,16 +70,28 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     bytes: 0,
     requests: 0,
     manifestUpdates: 0,
+    metadataEvents: 0,
     patches: { applied: 0, fallbacks: 0 },
+    delivery: { switches: 0, failures: 0, origin: '' },
     clockOffset: 0,
     clockWarning: '',
-    lowLatency: { chunks: 0, latency: 0, target: 0, playbackRate: 1 },
+    lowLatency: {
+      chunks: 0,
+      latency: 0,
+      target: 0,
+      playbackRate: 1,
+      producerLatency: null as number | null,
+      producerType: '',
+    },
     recovery: {
       manifestFailures: 0,
       segmentFailures: 0,
       dvrJumps: 0,
       expiredSegments: 0,
       manifestTransitions: 0,
+      restarts: 0,
+      lastRestart: '',
+      seekRetries: 0,
     },
     buffer: { ahead: 0, target: 12, live: false, mode: 'dash-segment' },
     quality: { mode: 'auto', current: 0, bandwidthEstimate: 0 },
@@ -89,14 +109,16 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   mediaMode: 'video' | 'audio' = 'video';
   private manifest!: Manifest;
   private manifestXml = '';
+  private metadataSeen = new Map<string, number>();
   private period!: Period;
   private lanes: Lane[] = [];
   private abort = new AbortController();
-  private client: ResourceClient;
+  private client: DashResourceClient;
   private media?: MediaSource;
   private mediaUrl = '';
   private eme?: EmeController;
   private subtitles?: DashSubtitles;
+  private captions: DashCaptions;
   private subtitleGeneration = 0;
   private abr = new AbrController();
   private refreshedAt = 0;
@@ -104,9 +126,13 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private dvrJumpAt = -Infinity;
   private generation = 0;
   private seekPosition?: number;
+  private pendingSeek?: { position: number; started: number; retried: boolean };
+  private retrySeekTarget?: number;
   private initial = true;
   private startupSeek?: number;
   private controlledRate = 1;
+  private resumeAfterStart?: boolean;
+  private restartTimes: number[] = [];
   private ended = false;
   private failed = false;
   private startPosition = 0;
@@ -145,7 +171,23 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         source.liveRecoveryWindowMs > 120000)
     )
       throw new Error('Invalid DASH live recovery window');
-    this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
+    this.captions = new DashCaptions(
+      video,
+      source.captionEncodings,
+      (event, detail) => {
+        if (event === 'captiontracks') {
+          this.subtitleTracks = [
+            ...this.subtitleTracks.filter((t) => !t.inband),
+            ...this.captions.tracks,
+          ];
+          this.emit('subtitletracks', this.subtitleTracks);
+        } else this.emit(event, detail);
+      },
+    );
+    this.client = new DashResourceClient(
+      source.network ?? {},
+      this.abort.signal,
+    );
     this.autoQuality = typeof source.quality !== 'number';
     if (source.drm)
       this.eme = new EmeController(video, source.drm, (e) => this.fail(e));
@@ -158,6 +200,19 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
           this.startupSeek = undefined;
           if (internal) return;
         }
+        if (
+          this.retrySeekTarget !== undefined &&
+          Math.abs(video.currentTime - this.retrySeekTarget) < 0.01
+        ) {
+          this.retrySeekTarget = undefined;
+          return;
+        }
+        this.retrySeekTarget = undefined;
+        this.pendingSeek = {
+          position: video.currentTime,
+          started: performance.now(),
+          retried: false,
+        };
         this.generation++;
         this.seekPosition = video.currentTime;
         this.ended = false;
@@ -168,6 +223,14 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
           lane.retryAt = undefined;
           lane.done = false;
         }
+      },
+      { signal: this.abort.signal },
+    );
+    video.addEventListener(
+      'seeked',
+      () => {
+        this.pendingSeek = undefined;
+        this.retrySeekTarget = undefined;
       },
       { signal: this.abort.signal },
     );
@@ -394,6 +457,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         adaptation: a,
         period,
       }));
+    this.subtitleTracks.push(...this.captions.tracks);
     this.emit('qualitylevels', this.qualityLevels);
     this.emit('subtitletracks', this.subtitleTracks);
     return { primary, video, audio };
@@ -421,12 +485,17 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       mime,
       init: response.data,
       tracks,
+      captionMetadata:
+        adaptation.kind === 'video' && !tracks.some((t) => t.encryption)
+          ? this.captions.metadata(response.data)
+          : undefined,
     };
     if (rep.address.kind === 'base') {
       if (!rep.address.indexRange)
         throw new Error('DASH SegmentBase needs indexRange');
       const index = await this.client.get({
         url: rep.baseUrls[0],
+        alternatives: rep.baseUrls.slice(1),
         range: rep.address.indexRange,
       });
       lane.index = parseSidx(
@@ -435,7 +504,10 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         index.url,
         rep,
         period,
-      );
+      ).map((reference) => ({
+        ...reference,
+        alternatives: rep.baseUrls.filter((url) => url !== reference.url),
+      }));
     }
     lane.cursor = this.prerollPosition(lane, cursor);
     return lane;
@@ -574,7 +646,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
             ),
         ))
     )
-      throw new Error('DASH Period track topology changes are not implemented');
+      return this.restart(this.manifest, cursor, 'track-topology');
     if (!this.lanes.length) {
       for (const lane of lanes)
         lane.buffer = this.media!.addSourceBuffer(lane.mime);
@@ -600,6 +672,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       period: period.id,
     };
     this.emit('catalog', this.catalog);
+    this.manifestEvents(period);
   }
   async init() {
     this.state('loading');
@@ -641,6 +714,57 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.emit('streamchange', { live: this.isLive });
     this.runner = this.run().catch((e) => this.fail(e));
   }
+  private async restart(
+    manifest: Manifest,
+    position: number | undefined,
+    reason: string,
+  ): Promise<void> {
+    const now = performance.now();
+    this.restartTimes = this.restartTimes.filter((t) => t > now - 30000);
+    if (this.restartTimes.length >= 3)
+      throw new Error('DASH source repeatedly reset its timeline');
+    this.restartTimes.push(now);
+    this.resumeAfterStart =
+      this.resumeAfterStart ??
+      (this.initial ? this.source.autoplay !== false : !this.video.paused);
+    const subtitle = this.selectedSubtitleTrack;
+    this.generation++;
+    this.initial = true;
+    this.ended = false;
+    this.seekPosition = undefined;
+    this.pendingSeek = undefined;
+    this.retrySeekTarget = undefined;
+    await this.subtitles?.destroy();
+    this.subtitles = undefined;
+    this.captions.reset();
+    this.metadataSeen.clear();
+    this.manifest = manifest;
+    this.isLive = manifest.live;
+    await this.syncClock();
+    this.startPosition =
+      position ??
+      (manifest.live ? this.livePosition() : manifest.periods[0].start);
+    this.lanes = [];
+    this.qualityTimeline = [];
+    const previousUrl = this.mediaUrl;
+    this.media = new MediaSource();
+    this.mediaUrl = URL.createObjectURL(this.media);
+    await mediaEvent(this.media, 'sourceopen', this.abort.signal, () => {
+      this.video.src = this.mediaUrl;
+    });
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    this.media.duration = this.isLive ? Infinity : manifest.duration!;
+    await this.enterPeriod(
+      this.periodAt(this.startPosition),
+      this.startPosition,
+    );
+    if (subtitle && this.subtitleTracks.some((t) => t.name === subtitle))
+      await this.selectSubtitleTrack(subtitle);
+    this.refreshedAt = performance.now();
+    this.diagnostics.recovery.restarts++;
+    this.diagnostics.recovery.lastRestart = reason;
+    this.emit('streamchange', { live: this.isLive });
+  }
   private references(lane: Lane, from: number) {
     let to = from + Math.max(60, this.targetBuffer * 2);
     if (this.isLive)
@@ -656,6 +780,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     const interval = Math.max(500, this.manifest.minimumUpdatePeriod * 1000);
     if (performance.now() - this.refreshedAt < interval) return;
     let next: Manifest;
+    const previousXml = this.manifestXml;
     try {
       next = await this.readUpdate();
       this.manifestFailureSince = undefined;
@@ -672,19 +797,30 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       return;
     }
     if (
-      next.availabilityStartTime !== undefined &&
-      next.availabilityStartTime !== this.manifest.availabilityStartTime
-    )
-      throw new Error('DASH availabilityStartTime changed');
-    if (
       this.manifest.publishTime &&
       next.publishTime &&
       next.publishTime < this.manifest.publishTime
     ) {
       this.refreshedAt = performance.now();
+      this.manifestXml = previousXml;
       return;
     }
+    if (
+      next.availabilityStartTime !== undefined &&
+      next.availabilityStartTime !== this.manifest.availabilityStartTime
+    )
+      return this.restart(next, undefined, 'availability-start-time');
     const period = next.periods.find((p) => p.id === this.period.id);
+    if (
+      period &&
+      period.adaptations.some(
+        (a) =>
+          (a.kind === 'audio' || a.kind === 'video') &&
+          this.usable(a).length &&
+          !this.lanes.some((l) => l.adaptation.kind === a.kind),
+      )
+    )
+      return this.restart(next, this.video.currentTime, 'track-topology');
     const missing =
       !period ||
       this.lanes.some(
@@ -695,7 +831,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       );
     if (period && !missing) {
       if (period.start !== this.period.start)
-        throw new Error('DASH Period start changed');
+        return this.restart(next, undefined, 'period-start');
       for (const lane of this.lanes) {
         const adaptation = period.adaptations.find(
           (a) => a.id === lane.adaptation.id,
@@ -710,7 +846,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
             lane.rep.address.presentationTimeOffset ||
           rep.address.timescale !== lane.rep.address.timescale
         )
-          throw new Error('DASH representation clock changed');
+          return this.restart(next, undefined, 'representation-clock');
         lane.rep = rep;
         lane.period = period;
         lane.adaptation = adaptation;
@@ -775,6 +911,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     }
     this.refreshedAt = performance.now();
     this.diagnostics.manifestUpdates++;
+    this.manifestEvents(this.period);
     if (this.isLive !== next.live) {
       this.isLive = next.live;
       this.media!.duration = next.live ? Infinity : next.duration!;
@@ -814,6 +951,16 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
                   this.abort.signal,
                   () => lane.buffer!.appendBuffer(unit as BufferSource),
                 );
+                if (lane.captionMetadata)
+                  this.captions.consume(
+                    unit,
+                    lane.captionMetadata,
+                    lane.period.start -
+                      Number(lane.rep.address.presentationTimeOffset) /
+                        lane.rep.address.timescale,
+                    lane.period.id,
+                  );
+                this.fragmentEvents(unit, lane);
                 units++;
                 this.diagnostics.lowLatency.chunks++;
                 this.startPlayback();
@@ -873,6 +1020,17 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
         lane.buffer!.appendBuffer((data ?? response!.data) as BufferSource),
       );
+    if (!units) this.fragmentEvents(data ?? response!.data, lane);
+    if (!units && lane.captionMetadata)
+      this.captions.consume(
+        data ?? response!.data,
+        lane.captionMetadata,
+        lane.period.start -
+          Number(lane.rep.address.presentationTimeOffset) /
+            lane.rep.address.timescale,
+        lane.period.id,
+        segment.range?.offset ?? 0,
+      );
     this.startPlayback();
     if (generation === this.generation) {
       lane.cursor = segment.end;
@@ -881,6 +1039,61 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.diagnostics.objects++;
     const start = this.video.buffered.length ? this.video.buffered.start(0) : 0;
     await this.eme?.retainKeys(lane.tracks, segment.end, start);
+  }
+  private metadataEvent(
+    event: (TimedMetadata | DashEvent) & { lane?: string },
+    period: string,
+  ) {
+    const data =
+      typeof event.data === 'string'
+        ? event.data
+        : new TextDecoder().decode(event.data ?? new Uint8Array());
+    if (data.length > 65536 || String(event.scheme).length > 2048) return;
+    let hash = 2166136261;
+    for (let i = 0; i < data.length; i++)
+      hash = Math.imul(hash ^ data.charCodeAt(i), 16777619);
+    const key = JSON.stringify([
+      period,
+      event.scheme,
+      event.value,
+      event.id,
+      event.time,
+      event.duration,
+      hash,
+    ]);
+    if (this.metadataSeen.has(key)) return;
+    this.metadataSeen.set(key, event.time);
+    for (const [id, time] of this.metadataSeen)
+      if (time < this.video.currentTime - 35) this.metadataSeen.delete(id);
+    while (this.metadataSeen.size > 1000)
+      this.metadataSeen.delete(this.metadataSeen.keys().next().value!);
+    this.diagnostics.metadataEvents++;
+    this.emit('metadata', { ...event, period });
+    if (event.scheme === 'urn:mpeg:dash:event:2012') this.refreshedAt = 0;
+  }
+  private manifestEvents(period: Period) {
+    for (const event of period.events ?? [])
+      this.metadataEvent(event, period.id);
+  }
+  private fragmentEvents(data: Uint8Array, lane: Lane) {
+    try {
+      const offset =
+        lane.period.start -
+        Number(lane.rep.address.presentationTimeOffset) /
+          lane.rep.address.timescale;
+      for (const event of emsgMetadata(data, () =>
+        decodeTime(data, lane.tracks),
+      ))
+        this.metadataEvent(
+          { ...event, time: event.time + offset, lane: lane.adaptation.kind },
+          lane.period.id,
+        );
+    } catch (error) {
+      this.emit(
+        'metadatawarning',
+        new Error('DASH emsg metadata could not be decoded', { cause: error }),
+      );
+    }
   }
   private startPlayback() {
     if (this.initial && this.video.buffered.length) {
@@ -895,7 +1108,9 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       );
       this.video.currentTime = this.startupSeek;
       this.initial = false;
-      if (this.source.autoplay !== false) void this.play();
+      const resume = this.resumeAfterStart ?? this.source.autoplay !== false;
+      this.resumeAfterStart = undefined;
+      if (resume) void this.play();
     }
   }
   private updateLatency() {
@@ -903,7 +1118,40 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     const service = this.manifest.service;
     const target =
       service?.targetLatency ?? this.manifest.suggestedPresentationDelay ?? 12;
-    const latency = Math.max(0, this.edge() - this.video.currentTime);
+    const playbackPeriod = this.periodAt(this.video.currentTime);
+    const representation =
+      playbackPeriod.adaptations
+        .find((a) => a.kind === 'video')
+        ?.representations.find(
+          (r) =>
+            r.id === this.qualityLevels[this.currentQuality]?.representationId,
+        ) ??
+      playbackPeriod.adaptations.find(
+        (a) => a.kind === 'video' || a.kind === 'audio',
+      )?.representations[0];
+    const producer = representation?.producerReferences?.find((ref) =>
+      service?.referenceId === undefined
+        ? ref.type === 'encoder'
+        : ref.id === service.referenceId,
+    );
+    const producerLatency =
+      producer && representation
+        ? this.now() -
+          (producer.wallClockTime +
+            this.video.currentTime -
+            playbackPeriod.start -
+            Number(
+              producer.presentationTime -
+                representation.address.presentationTimeOffset,
+            ) /
+              representation.address.timescale)
+        : null;
+    this.diagnostics.lowLatency.producerLatency = producerLatency;
+    this.diagnostics.lowLatency.producerType = producer?.type ?? '';
+    const latency = Math.max(
+      0,
+      producerLatency ?? this.edge() - this.video.currentTime,
+    );
     this.diagnostics.lowLatency.latency = latency;
     this.diagnostics.lowLatency.target = target;
     if (
@@ -931,6 +1179,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.diagnostics.lowLatency.playbackRate = this.video.playbackRate;
   }
   private updateDiagnostics() {
+    this.diagnostics.delivery = { ...this.client.delivery };
     this.diagnostics.bytes = this.client.bytes;
     this.diagnostics.requests = this.client.requests;
     this.diagnostics.buffer = {
@@ -944,6 +1193,34 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       current: this.currentQuality,
       bandwidthEstimate: this.abr.estimate,
     };
+  }
+  private recoverBufferedSeek() {
+    const seek = this.pendingSeek;
+    if (
+      !seek ||
+      seek.retried ||
+      !this.video.seeking ||
+      this.video.readyState < 2 ||
+      performance.now() - seek.started < 1000 ||
+      this.lanes.some((l) => l.needsPreroll || l.buffer?.updating)
+    )
+      return;
+    const ranges = this.video.buffered;
+    for (let i = 0; i < ranges.length; i++) {
+      if (
+        seek.position < ranges.start(i) ||
+        seek.position + 0.05 >= ranges.end(i)
+      )
+        continue;
+      // WebKit can keep a completed MSE seek pending when a native TextTrack
+      // was created after a previous seek. Reissue once, only for buffered
+      // decoded media. The 1 ms change makes it a distinct browser operation.
+      seek.retried = true;
+      this.retrySeekTarget = seek.position + 0.001;
+      this.diagnostics.recovery.seekRetries++;
+      this.video.currentTime = this.retrySeekTarget;
+      return;
+    }
   }
   private async run() {
     while (!this.abort.signal.aborted && !this.failed) {
@@ -979,6 +1256,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       }
       this.startPlayback();
       this.updateDiagnostics();
+      this.recoverBufferedSeek();
       const gap = nextGapPosition(this.video.buffered, this.video.currentTime);
       if (!this.video.paused && this.video.readyState < 3 && gap !== undefined)
         this.video.currentTime = gap;
@@ -1051,12 +1329,9 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
           await this.enterPeriod(next, next.start);
           continue;
         }
-        if (
-          !this.isLive &&
-          !this.ended &&
-          this.media?.readyState === 'open' &&
-          !this.video.seeking
-        ) {
+        if (!this.isLive && !this.ended && this.media?.readyState === 'open') {
+          // EOS is safe while seeking: every final-Period lane has completed
+          // and all append promises have settled.
           this.media.endOfStream();
           this.ended = true;
         }
@@ -1152,11 +1427,15 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       return;
     this.subtitles = undefined;
     this.selectedSubtitleTrack = name;
-    if (selected)
+    this.captions.select(selected?.inband ? name : '');
+    if (selected && !selected.inband)
       this.subtitles = new DashSubtitles(
         this.video,
         selected.adaptation,
-        () => this.period ?? selected.period,
+        () =>
+          this.manifest
+            ? this.periodAt(this.video.currentTime)
+            : selected.period,
         this.source.network,
         (event, detail) => this.emit(event, detail),
       );
@@ -1186,6 +1465,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       await this.runner;
       this.subtitleGeneration++;
       await this.subtitles?.destroy();
+      this.captions.destroy();
       this.video.pause();
       this.video.removeAttribute('src');
       this.video.load();

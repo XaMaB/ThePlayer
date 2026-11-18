@@ -57,6 +57,18 @@ try {
       );
       const diagnostics = await page.evaluate(() => window.player.diagnostics);
       assert.equal(diagnostics.lowLatency.target, 3);
+      assert.equal(diagnostics.lowLatency.producerType, 'encoder');
+      const measured = await page.evaluate(
+        (reference) =>
+          Date.now() / 1000 -
+          reference -
+          document.querySelector('video').currentTime,
+        controls.producerTime,
+      );
+      assert.ok(
+        Math.abs(measured - diagnostics.lowLatency.producerLatency) < 0.5,
+        'Producer reference maps media time to production clock',
+      );
       if (transport === 'fetch') assert.ok(diagnostics.lowLatency.chunks >= 4);
       assert.ok(
         diagnostics.lowLatency.playbackRate >= 0.97 &&

@@ -3,6 +3,7 @@ import type {
   Manifest,
   Period,
   Protection,
+  ProducerReference,
   Representation,
   SegmentAddress,
 } from './model';
@@ -14,6 +15,28 @@ const children = (element: Element, name: string) =>
 const one = (element: Element, name: string) => children(element, name)[0];
 const attr = (element: Element | undefined, name: string) =>
   element?.getAttribute(name) ?? undefined;
+function producerReferences(element: Element): ProducerReference[] {
+  const elements = children(element, 'ProducerReferenceTime');
+  if (elements.length > 16) throw new Error('DASH producer reference limit');
+  return elements.map((e) => {
+    const type = attr(e, 'type') ?? 'encoder';
+    const wallClockTime = date(attr(e, 'wallClockTime'));
+    if (
+      !['encoder', 'captured', 'application'].includes(type) ||
+      wallClockTime === undefined ||
+      attr(e, 'id') === undefined ||
+      attr(e, 'presentationTime') === undefined
+    )
+      throw new Error('Invalid DASH ProducerReferenceTime');
+    return {
+      id: String(integer(attr(e, 'id'), 0n)),
+      type: type as ProducerReference['type'],
+      inband: boolean(attr(e, 'inband'), false),
+      wallClockTime,
+      presentationTime: integer(attr(e, 'presentationTime'), 0n),
+    };
+  });
+}
 export function duration(value: string | undefined): number | undefined {
   if (value === undefined) return;
   const m =
@@ -226,7 +249,7 @@ export function parseMpd(xml: string, url: string): Manifest {
     )
   )
     throw new Error('DASH XLink resolution is not implemented');
-  if (root.getElementsByTagNameNS(ns, 'EssentialProperty').length)
+  if (children(root, 'EssentialProperty').length)
     throw new Error('DASH EssentialProperty profiles are not implemented yet');
   const type = attr(root, 'type') ?? 'static';
   if (!['static', 'dynamic'].includes(type))
@@ -284,6 +307,7 @@ export function parseMpd(xml: string, url: string): Manifest {
       throw new Error('Invalid DASH ServiceDescription bounds');
     manifest.service = {
       targetLatency,
+      referenceId: attr(latency, 'referenceId'),
       minLatency,
       maxLatency,
       minRate,
@@ -293,6 +317,8 @@ export function parseMpd(xml: string, url: string): Manifest {
   const rootBases = bases(root, [url]),
     rootAddress = address(root);
   for (const [pi, pe] of children(root, 'Period').entries()) {
+    if (children(pe, 'EssentialProperty').length)
+      throw new Error('Unsupported DASH Period EssentialProperty');
     const previous = manifest.periods.at(-1);
     const start =
       duration(attr(pe, 'start')) ??
@@ -308,14 +334,48 @@ export function parseMpd(xml: string, url: string): Manifest {
       duration: duration(attr(pe, 'duration')),
       adaptations: [],
     };
+    period.events = children(pe, 'EventStream').flatMap((stream) => {
+      const scale = decimal(attr(stream, 'timescale'), 1, 1);
+      if (!Number.isSafeInteger(scale))
+        throw new Error('Invalid DASH EventStream timescale');
+      const offset = integer(attr(stream, 'presentationTimeOffset'), 0n);
+      return children(stream, 'Event').map((event) => {
+        const data =
+          attr(event, 'messageData') ??
+          Array.from(event.childNodes)
+            .map((n) => new XMLSerializer().serializeToString(n))
+            .join('');
+        if (data.length > 65536)
+          throw new Error('DASH event payload exceeds 64 KiB');
+        return {
+          type: 'dash-event' as const,
+          scheme: attr(stream, 'schemeIdUri') ?? '',
+          value: attr(stream, 'value') ?? '',
+          id: attr(event, 'id') ?? '',
+          time:
+            period.start +
+            Number(integer(attr(event, 'presentationTime'), 0n) - offset) /
+              scale,
+          duration:
+            attr(event, 'duration') === undefined
+              ? undefined
+              : Number(integer(attr(event, 'duration'), 0n)) / scale,
+          data,
+        };
+      });
+    });
+    if (period.events.length > 1000)
+      throw new Error('DASH EventStream event limit');
     const pb = bases(pe, rootBases),
       pa = address(pe, rootAddress);
     for (const [ai, ae] of children(pe, 'AdaptationSet').entries()) {
+      if (children(ae, 'EssentialProperty').length) continue;
       const ab = bases(ae, pb),
         aa = address(ae, pa);
       const roles = children(ae, 'Role').map((e) => attr(e, 'value') ?? '');
       const reps: Representation[] = [];
       for (const [ri, re] of children(ae, 'Representation').entries()) {
+        if (children(re, 'EssentialProperty').length) continue;
         const get = (name: string) => attr(re, name) ?? attr(ae, name);
         const mimeType = get('mimeType') ?? '';
         const externalText = ['text/vtt', 'application/ttml+xml'].includes(
@@ -369,6 +429,13 @@ export function parseMpd(xml: string, url: string): Manifest {
           baseUrls: bases(re, ab),
           address: segmentAddress,
           protection: [...protections(ae), ...protections(re)],
+          producerReferences: [
+            ...new Map(
+              [...producerReferences(ae), ...producerReferences(re)].map(
+                (ref) => [ref.id, ref],
+              ),
+            ).values(),
+          ],
         });
       }
       const mime = reps[0]?.mimeType ?? attr(ae, 'mimeType') ?? '';
@@ -392,6 +459,8 @@ export function parseMpd(xml: string, url: string): Manifest {
           representations: reps,
         });
     }
+    if (!period.adaptations.length)
+      throw new Error('No supported DASH AdaptationSet in Period');
     manifest.periods.push(period);
   }
   if (!manifest.periods.length || manifest.periods.length > 1000)

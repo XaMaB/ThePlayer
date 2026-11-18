@@ -2,7 +2,7 @@
 
 The application supplies a source to `PlayerCore`. Its engine registry maps a protocol name to a factory. The core releases the previous engine before initializing a replacement, forwards events, and destroys subscriptions through the engine lifecycle. Only one engine owns the video element and MediaSource at a time.
 
-`ThePlayer` registers MoQ and lazily imported original HLS and DASH engines. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
+`ThePlayer` registers MoQ and lazily imported original HLS and DASH engines. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source. A supported source replacement releases the old engine before loading the new one; a failed load therefore does not retain the previous stream.
 
 ## Engine contract
 
@@ -13,9 +13,10 @@ The `PlaybackEngine` TypeScript interface in `src/core/player.ts` defines initia
 | Module               | Responsibility                                                                  |
 | -------------------- | ------------------------------------------------------------------------------- |
 | `src/core/player.ts` | Engine registry, serialized source replacement, event forwarding and teardown   |
-| `src/player.ts`      | Default MoQ registration and lazy HLS registration                              |
+| `src/player.ts`      | Default MoQ registration and lazy HLS/DASH registration                         |
 | `src/engines/moq/`   | moq-dev transport integration, media ingestion and group-based buffering        |
 | `src/engines/hls/`   | Original playlist parser, segment scheduling, ABR, demux/remux and HLS captions |
+| `src/engines/dash/`  | MPD/Patch parsing, addressing, live recovery, fMP4/CMAF lanes and captions      |
 | `src/subtitles/`     | MoQ bitmap/CEA-708 caption rendering and shared caption metrics                 |
 | `src/ui/controls.ts` | Playback, quality/audio/CC menus, keyboard controls and MediaInfo               |
 | `demo/`              | Source selection, directory discovery and integration examples                  |
@@ -25,10 +26,15 @@ flowchart TD
   App[Application or demo] --> Core[PlayerCore]
   Core --> MoQ[MoQ engine]
   Core --> HLS[HLS engine]
+  Core --> DASH[DASH engine]
+  DASH --> MSE
+  DASH --> Text
+  DASH --> DOM[TTML / CEA-608 / CEA-708 DOM renderers]
+  HLS --> DOM
   MoQ --> MSE[MediaSource / video element]
   HLS --> MSE
   MoQ --> Canvas[Bitmap / CEA-708 renderer]
-  HLS --> Text[Native WebVTT / CEA-608 text tracks]
+  HLS --> Text[Native WebVTT text tracks]
   Core --> UI[Shared controls and MediaInfo]
 ```
 
@@ -52,7 +58,9 @@ Events forwarded by the core:
 | `caption`         | `{ track, cue }` for the selected subtitle track |
 | `captionwarning`  | Recoverable caption error                        |
 
-Bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` consumes caption events and owns canvas drawing, bitmap decoding and displayed-cue counters. Selection invalidates pending bitmap decodes. Destroying or reattaching the renderer clears listeners and its animation loop.
+Additional engine-specific events forwarded by the core include `metadata`, `metadatawarning`, `videochange`, `videotracks`, `pathwaychange`, the `daterange*` family and the `interstitial*` family. Metadata carries presentation timestamps; it is an availability/append notification, not a playback-time callback. HLS extension events do not imply equivalent DASH extension support.
+
+MoQ bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` consumes caption events and owns canvas drawing, bitmap decoding and displayed-cue counters. Selection invalidates pending bitmap decodes. Destroying or reattaching the renderer clears listeners and its animation loop.
 
 ## HLS media and caption pipeline
 
@@ -74,7 +82,7 @@ Whole-resource AES-128 and AES-256-GCM decryption happens before demux/inspectio
 
 `src/engines/dash/mpd.ts` parses namespaced MPDs and inherited addressing. `segments.ts` produces bounded segment windows using integer media clocks; `sidx.ts` resolves flat byte-range indexes. `engine.ts` owns MPD refresh, Period selection, MSE lanes, quality/audio switching and teardown. It reuses ThePlayer HTTP, MP4 inspection, throughput estimation and EME primitives; HLS manifest/scheduling logic remains separate.
 
-DASH is a preview: see [DASH support](dash-support.md) for verified scope and remaining extension, resilience and device work. DASH text loading runs independently of A/V. CMAF chunk assembly validates complete moof/mdat units before appending; A/V lanes download concurrently. MPD Patch applies to an isolated XML document before parser validation and full-MPD fallback.
+DASH release scope is tracked in [DASH support](dash-support.md) with verified scope and remaining extension, resilience and device work. DASH text loading runs independently of A/V and follows the playback Period rather than a prefetched Period. Clear video SEI captions use the original CEA-608/708 timelines and DOM renderers, retaining service selection, placement and P16 configuration. CMAF chunk assembly validates complete moof/mdat units before appending; A/V lanes download concurrently. MPD Patch applies to an isolated XML document before parser validation and full-MPD fallback.
 
 ## Extending engines
 
@@ -97,3 +105,7 @@ Content steering is isolated in `src/engines/hls/steering.ts`: it validates mani
 `ttml.ts` resolves XML timing and styles. `ttml-animation.ts` compiles discrete changes into bounded time intervals, preserving inherited style resolution during seeking. `ttml-renderer.ts` owns the overlay; `ttml-ruby.ts` maps paired ruby bases/annotations to browser layout. No subtitle markup is injected as HTML.
 
 `playlist-reload.ts` owns normal/blocking/delta updates and initial CDN freshness checks. `cdn-tune-in.ts` computes newer segment/part targets from HTTP Age and actual playlist progress. The network client retains response metadata consistently across Fetch and XHR. Initial preload hints are activated only after tune-in selects a usable playlist.
+
+`dash/network.ts` retries only MPD-declared BaseURL alternatives, temporarily penalizes failed locations and recomputes headers for each destination. It does not replay a partially appended CMAF response from a mirror in the same assembler. Clock/timing or track-topology resets replace MediaSource through a bounded restart path; independent Origin/Relay services are unaffected.
+
+DASH `EventStream` and `emsg` dispatch bounded, deduplicated `metadata` payloads without interpreting scripts. MPD `ProducerReferenceTime` maps the media clock to the producer clock for diagnostics and opt-in latency control. MPD/metadata inspection is not full support for every optional DASH extension. See [integration](dash-integration.md), [test coverage](dash-validation.md) and the explicit [support limits](dash-support.md).

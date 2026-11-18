@@ -44,6 +44,15 @@ export function initializationResource(rep: Representation) {
     throw new Error('DASH initialization segment is required');
   return {
     url: resolveUrl(expandTemplate(a.initialization, rep), rep.baseUrls[0]),
+    ...(rep.baseUrls.length > 1
+      ? {
+          alternatives: rep.baseUrls
+            .slice(1)
+            .map((base) =>
+              resolveUrl(expandTemplate(a.initialization!, rep), base),
+            ),
+        }
+      : {}),
     range: a.initializationRange,
   };
 }
@@ -112,6 +121,25 @@ export function segmentReferences(
             ),
         rep.baseUrls[0],
       ),
+      ...(rep.baseUrls.length > 1
+        ? {
+            alternatives: rep.baseUrls
+              .slice(1)
+              .map((base) =>
+                resolveUrl(
+                  resource
+                    ? resource.media
+                    : expandTemplate(
+                        a.media!,
+                        rep,
+                        number,
+                        a.timeline ? time : time - a.eptDelta,
+                      ),
+                  base,
+                ),
+              ),
+          }
+        : {}),
       range: resource?.range,
     });
     if (out.length > 10000)
