@@ -92,3 +92,5 @@ jobs:
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
       - run: npm run test:hls:he-aac
         timeout-minutes: 8
+      - run: npm run test:hls:live-range
+        timeout-minutes: 3

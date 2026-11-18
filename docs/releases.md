@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.0.0-alpha.1
+
+- Begin the 1.x development series. DASH work is not included in this release.
+- Fix HLS playback stopping after a live quality switch when the aligned rendition advertises segments before presentation time zero. Clamp the MSE live seekable range to zero while preserving internal media timestamps.
+- Add a browser regression that switches from a three-segment window to an older, wider window and verifies continued playback, playlist refreshes and valid MSE ranges through Fetch and XHR.
+
 ## 0.45.0
 
 - Mark HLS delivery as implemented with an explicit support matrix. Promotes the tested 0.45.0-rc.1 media implementation after full regression, cross-browser CI and a 30-minute live soak.

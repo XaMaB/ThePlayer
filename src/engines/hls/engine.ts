@@ -1597,9 +1597,12 @@ export class HlsEngine extends EventTarget {
       this.updateDiagnostics();
       if (this.media?.readyState === 'open' && p.live) {
         const last = p.segments.at(-1)!;
+        // Rendition alignment may place older advertised segments before the
+        // presentation's zero. Preserve those timestamps for synchronization,
+        // but MSE only accepts a nonnegative seekable range.
         this.media.setLiveSeekableRange(
-          p.segments[0].start,
-          last.start + last.duration,
+          Math.max(0, p.segments[0].start),
+          Math.max(0, last.start + last.duration),
         );
       }
       const candidates = this.lanes()
