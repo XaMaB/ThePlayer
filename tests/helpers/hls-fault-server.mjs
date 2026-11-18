@@ -54,6 +54,21 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
+        if (scenario === 'dateranges' && resource === 'index.m3u8') {
+          const original = await readFile(
+            path.join(fixtures, 'ts/index.m3u8'),
+            'utf8',
+          );
+          const metadata =
+            '#EXT-X-PROGRAM-DATE-TIME:2026-01-02T03:04:00Z\n' +
+            '#EXT-X-DATERANGE:ID="pre",START-DATE="2026-01-02T03:04:00Z",CUE="PRE,ONCE"\n' +
+            '#EXT-X-DATERANGE:ID="post",START-DATE="2026-01-02T03:04:00Z",CUE="POST"\n' +
+            '#EXT-X-DATERANGE:ID="once",START-DATE="2026-01-02T03:04:01Z",DURATION=2,CUE="ONCE",SCTE35-OUT=0xfc0011\n' +
+            '#EXT-X-DATERANGE:ID="again",START-DATE="2026-01-02T03:04:01Z",DURATION=2\n' +
+            '#EXT-X-DATERANGE:ID="invalid",START-DATE="not-a-date"\n';
+          res.end(original.replace('#EXTM3U\n', '#EXTM3U\n' + metadata));
+          return;
+        }
         if (scenario.startsWith('steering-')) {
           const origin =
             (req.socket.encrypted ? 'https' : 'http') +
@@ -400,7 +415,9 @@ export function faultServer({
             }
           }
           const first = Math.floor((Date.now() - epoch) / 2000);
-          let skip = url.searchParams.get('_HLS_skip') === 'YES' ? 2 : 0;
+          let skip = ['YES', 'v2'].includes(url.searchParams.get('_HLS_skip'))
+            ? 2
+            : 0;
           if (skip)
             requests.set(
               key + ':delta',
@@ -413,8 +430,34 @@ export function faultServer({
               first +
               '\n#EXT-X-DISCONTINUITY-SEQUENCE:' +
               Math.floor(first / 9) +
-              '\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12\n' +
-              (skip ? '#EXT-X-SKIP:SKIPPED-SEGMENTS=' + skip + '\n' : '') +
+              '\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12' +
+              (scenario.startsWith('ll-dates')
+                ? ',CAN-SKIP-DATERANGES=YES'
+                : '') +
+              '\n' +
+              (skip
+                ? '#EXT-X-SKIP:SKIPPED-SEGMENTS=' +
+                  skip +
+                  (scenario === 'll-dates'
+                    ? ',RECENTLY-REMOVED-DATERANGES="' +
+                      (first >= 2 ? 'old' : '') +
+                      '"'
+                    : '') +
+                  '\n'
+                : '') +
+              (scenario.startsWith('ll-dates')
+                ? '#EXT-X-PROGRAM-DATE-TIME:' +
+                  new Date(
+                    Date.parse('2026-01-02T03:04:00Z') + (first + skip) * 2000,
+                  ).toISOString() +
+                  '\n' +
+                  (first < 2 && !skip
+                    ? '#EXT-X-DATERANGE:ID="old",START-DATE="2026-01-02T03:04:00Z",DURATION=1\n'
+                    : '') +
+                  '#EXT-X-DATERANGE:ID="persist",START-DATE="2026-01-02T03:04:10Z"' +
+                  (first >= 1 ? ',DURATION=4' : '') +
+                  '\n'
+                : '') +
               Array.from({ length: Math.max(1, 8 - skip) }, (_, i) => {
                 const n = first + skip + i;
                 return (

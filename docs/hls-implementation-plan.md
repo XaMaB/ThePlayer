@@ -79,3 +79,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.23.0-alpha.1 extends LL-HLS with growing-response ranges, MAP preloads and encrypted-part validation. Continue with content steering, interstitials/trick-play, remaining text profiles and stabilization.
 
 0.24.0-alpha.1 adds content steering with matching pathway inventories, clones and recovery. Continue with interstitials/trick-play, remaining media/text profiles and stabilization, including the intermittent WebKit CI startup failure.
+
+0.25.0-alpha.1 adds date-range metadata and playback cues plus v2 delta updates. Continue with interstitial asset playback, trick-play and remaining validation/profile gaps.

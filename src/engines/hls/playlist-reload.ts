@@ -33,7 +33,10 @@ export function reloadUrl(
   }
   const skip = Number(previous.serverControl?.['CAN-SKIP-UNTIL']);
   if (skip >= 6 * previous.targetDuration && ageMs <= skip * 500)
-    url.searchParams.set('_HLS_skip', 'YES');
+    url.searchParams.set(
+      '_HLS_skip',
+      previous.serverControl?.['CAN-SKIP-DATERANGES'] === 'YES' ? 'v2' : 'YES',
+    );
   return url.href;
 }
 export function canonicalPlaylistUrl(value: string) {
@@ -125,6 +128,12 @@ export class PlaylistLoader {
         },
       );
       const p = this.parse(response.data, response.url, previous);
+      if (
+        new URL(url).searchParams.get('_HLS_skip') === 'v2' &&
+        p.skipped !== undefined &&
+        p.removedDateRanges === undefined
+      )
+        throw new MissingDeltaBase();
       if (p.skipped !== undefined) this.diagnostics.delta++;
       return p;
     } catch (error) {

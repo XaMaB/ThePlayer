@@ -57,3 +57,4 @@ jobs:
       - run: node tests/hls-parts-browser.mjs
         env:
           HLS_PART_SCENARIOS: ll-parts-open,ll-parts-map,ll-parts-encrypted
+      - run: npm run test:hls:dateranges

@@ -54,6 +54,11 @@ const events = [
   'metadata',
   'metadatawarning',
   'pathwaychange',
+  'daterange',
+  'daterangeremove',
+  'daterangeenter',
+  'daterangeexit',
+  'daterangecue',
 ];
 
 /** No transport imports: applications can supply only the engines they need. */

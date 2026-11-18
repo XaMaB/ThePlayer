@@ -77,26 +77,26 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 
 ## HLS features
 
-| Feature                              | Status                                                                                       |
-| ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| Media and multivariant playlists     | Implemented; relative URLs and playlist variables                                            |
-| Live / VOD / EVENT                   | Implemented; sliding refresh, finite duration, seeking and EVENT-to-ended transitions        |
-| Auto ABR / manual quality            | Implemented for compatible renditions in the same audio/subtitle groups                      |
-| Multilingual external audio          | AAC renditions with independent buffers and selection                                        |
-| DEFAULT / AUTOSELECT / FORCED        | Used for supported rendition selection; explicit choices and subtitle Off take priority      |
-| Network loading                      | Fetch or XHR; abort, timeout, bounded recovery window and byte ranges                        |
-| AES-128 encryption                   | Identity keys, explicit/sequence IV, independent map keys and rotation                       |
-| Discontinuities                      | Timestamp rebasing; arbitrary timeline repair is not supported                               |
-| AES-256-GCM                          | Whole-resource authenticated encryption; embedded IV/tag, including maps                     |
-| Session keys                         | Bounded identity-key preload, consumed by media/map decryption                               |
-| SAMPLE-AES TS                        | AVC/AAC identity keys; rotation and explicit/sequence IV, byte-exact and browser tests       |
-| DRM / EME                            | CENC/CBCS fMP4 through EME; ClearKey, identity keys and license callbacks tested             |
-| Content steering / interstitials     | Not implemented                                                                              |
-| Timed metadata                       | ID3 from TS/packed AAC; emsg v0/v1 and CMAF ID3, with presentation-time event data           |
-| I-frame trick play / image playlists | Not implemented                                                                              |
-| Packed audio                         | ADTS AAC and MP3 with ID3 anchors, rollover and AES-128; AAC SAMPLE-AES; AC-3/E-AC-3 pending |
-| Declared GAP segments                | Skipped without requests; playback resumes at buffered media after the declared interval     |
-| Live timeline resets                 | Bounded coordinated media restart; paused state and track selection retained                 |
+| Feature                              | Status                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Media and multivariant playlists     | Implemented; relative URLs and playlist variables                                                                        |
+| Live / VOD / EVENT                   | Implemented; sliding refresh, finite duration, seeking and EVENT-to-ended transitions                                    |
+| Auto ABR / manual quality            | Implemented for compatible renditions in the same audio/subtitle groups                                                  |
+| Multilingual external audio          | AAC renditions with independent buffers and selection                                                                    |
+| DEFAULT / AUTOSELECT / FORCED        | Used for supported rendition selection; explicit choices and subtitle Off take priority                                  |
+| Network loading                      | Fetch or XHR; abort, timeout, bounded recovery window and byte ranges                                                    |
+| AES-128 encryption                   | Identity keys, explicit/sequence IV, independent map keys and rotation                                                   |
+| Discontinuities                      | Timestamp rebasing; arbitrary timeline repair is not supported                                                           |
+| AES-256-GCM                          | Whole-resource authenticated encryption; embedded IV/tag, including maps                                                 |
+| Session keys                         | Bounded identity-key preload, consumed by media/map decryption                                                           |
+| SAMPLE-AES TS                        | AVC/AAC/AC-3/E-AC-3 identity keys; rotation and explicit/sequence IV, byte-exact and browser tests                       |
+| DRM / EME                            | CENC/CBCS fMP4 through EME; ClearKey, identity keys and license callbacks tested                                         |
+| Content steering / interstitials     | Steering with matching inventories implemented; interstitial playback in progress                                        |
+| Timed metadata                       | ID3 from TS/packed AAC; emsg v0/v1 and CMAF ID3, with presentation-time event data                                       |
+| I-frame trick play / image playlists | Not implemented                                                                                                          |
+| Packed audio                         | ADTS AAC and MP3 with ID3 anchors, rollover and AES-128; AAC/AC-3/E-AC-3 SAMPLE-AES; single independent E-AC-3 substream |
+| Declared GAP segments                | Skipped without requests; playback resumes at buffered media after the declared interval                                 |
+| Live timeline resets                 | Bounded coordinated media restart; paused state and track selection retained                                             |
 
 The HLS engine is original code: it does not bundle or copy hls.js, Video.js/VHS or Shaka implementations. This does not mean the entire player has no dependencies: MoQ uses moq-dev, and the MoQ caption path includes a locally patched mux.js decoder with provenance and licensing. See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [detailed limits](docs/hls-support.md).
 

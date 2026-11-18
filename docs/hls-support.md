@@ -315,3 +315,11 @@ The engine reads EXT-X-CONTENT-STEERING and stable variant/rendition identities,
 Pathway transitions preserve matching quality and language selections, using stable IDs when available. Media switches use the existing rendition boundary machinery; initialization/first-media failures can select a backup before playback. The `pathwaychange` event and `diagnostics.steering` expose state. Deterministic tests cover priority updates, clones, initial/media failure, ABR, separate audio/subtitles, malformed manifests and 410 over Fetch/XHR.
 
 The validated transition profile uses corresponding codecs/qualities and language sets on each pathway. A candidate missing a currently exposed matching quality/language is rejected and penalized. Differing pathway inventories and external alternate video groups need further integration. Manifest fetches have a three-second timeout, a 1 MiB body limit, bounded clones/parameters and a minimum 250 ms reload interval. HLS references steering draft 04; URI and client behavior were also checked against draft 05: https://datatracker.ietf.org/doc/html/draft-pantos-content-steering-05.
+
+## Playlist date ranges (0.25)
+
+EXT-X-DATERANGE consolidates additions by ID, validates immutable attributes and date/duration consistency, resolves END-ON-NEXT and retains class extensions plus SCTE-35 hex payloads. Dates without a zone use UTC. PLANNED-DURATION never masquerades as the actual end. Invalid metadata is ignored with a `metadatawarning` event, preserving media playback.
+
+`daterange` reports new/updated metadata; `daterangeremove` reports playlist removal. `daterangeenter`/`daterangeexit` follow playback time, and `daterangecue` distinguishes PRE, POST, normal playback and seek triggers. ONCE suppresses retriggering across replay. The once-ID cache is bounded at 4096 entries. SCTE-35 payloads are exposed as bytes, not decoded splice commands.
+
+CAN-SKIP-DATERANGES enables `_HLS_skip=v2`; cached ranges are merged and RECENTLY-REMOVED-DATERANGES IDs are removed. A malformed v2 response falls back to a complete playlist. Browser tests verify actual cue timing/replay/post-roll and both successful and malformed delta delivery. Automatic interstitial asset playback is the next layer and is not implied by these metadata events.

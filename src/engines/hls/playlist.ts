@@ -1,3 +1,9 @@
+import {
+  hlsDate,
+  parseDateRange,
+  finishDateRanges,
+  type DateRange,
+} from './date-ranges';
 /** HLS playlist model. Implemented from RFC 8216; no third-party parser. */
 export type Attributes = Record<string, string>;
 export interface ByteRange {
@@ -86,6 +92,9 @@ export interface Playlist {
   skipped?: number;
   unsupported: string[];
   sessionKeys?: Key[];
+  dateRanges?: DateRange[];
+  removedDateRanges?: string[];
+  metadataWarnings?: string[];
   steering?: { url: string; pathway?: string };
 }
 export function attributes(input: string): Attributes {
@@ -207,6 +216,11 @@ export function parsePlaylist(
     date: string | undefined;
   const activeKeys = new Map<string, Key>();
   let keyDeclaration = 0;
+  const dateRanges = new Map<string, DateRange>();
+  const dateWarning = (message: string) => {
+    if ((p.metadataWarnings?.length ?? 0) < 32)
+      (p.metadataWarnings ??= []).push(message);
+  };
   const chooseKey = () =>
     [...activeKeys.values()].find(
       (k) => k.format === 'identity' && (k.versions ?? [1]).includes(1),
@@ -358,8 +372,22 @@ export function parsePlaylist(
       case '#EXT-X-GAP':
         gap = true;
         break;
+      case '#EXT-X-DATERANGE': {
+        try {
+          const a = attributes(value),
+            old =
+              dateRanges.get(a.ID) ??
+              previous?.dateRanges?.find((r) => r.id === a.ID);
+          if (dateRanges.size >= 4096 && !dateRanges.has(a.ID))
+            throw new Error('Too many date ranges');
+          dateRanges.set(a.ID, parseDateRange(a, old));
+        } catch (error) {
+          dateWarning(error instanceof Error ? error.message : String(error));
+        }
+        break;
+      }
       case '#EXT-X-PROGRAM-DATE-TIME':
-        date = value;
+        date = new Date(hlsDate(value)).toISOString();
         break;
       case '#EXT-X-CONTENT-STEERING': {
         const a = attributes(value);
@@ -534,6 +562,15 @@ export function parsePlaylist(
         )
           throw new Error('Invalid delta skip placement');
         p.skipped = count;
+        if (a['RECENTLY-REMOVED-DATERANGES'] !== undefined) {
+          if (!previous) throw new MissingDeltaBase();
+          p.removedDateRanges = a['RECENTLY-REMOVED-DATERANGES']
+            .split('\t')
+            .filter(Boolean);
+          for (const r of previous.dateRanges ?? [])
+            if (!p.removedDateRanges.includes(r.id) && !dateRanges.has(r.id))
+              dateRanges.set(r.id, parseDateRange(r.attributes));
+        }
         const cached =
           (previous?.parents ?? previous?.segments)?.filter(
             (s) => s.sequence >= p.sequence && s.sequence < p.sequence + count,
@@ -584,6 +621,11 @@ export function parsePlaylist(
     throw new Error('Mixed multivariant and media playlist');
   if (p.parts.length && !p.partTarget)
     throw new Error('Partial segments require PART-INF');
+  if (dateRanges.size) {
+    if (![...p.segments, ...p.parts].some((s) => s.programDateTime))
+      dateWarning('DATERANGE requires PROGRAM-DATE-TIME');
+    else p.dateRanges = finishDateRanges([...dateRanges.values()], dateWarning);
+  }
   p.nextMap = map;
   p.duration += partOffset;
   const reportedTail = p.parts.at(-1) ?? p.segments.at(-1);

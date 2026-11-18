@@ -1,3 +1,4 @@
+import { DateRangeTimeline } from './date-ranges';
 import { retryable } from './recovery';
 import { ContentSteering } from './steering';
 import { EmeController, type DrmOptions } from './eme';
@@ -133,6 +134,9 @@ export class HlsEngine extends EventTarget {
     return this.main?.playlist;
   }
   private master?: Playlist;
+  private dateRanges = new DateRangeTimeline((name, detail) =>
+    this.emit(name, detail),
+  );
   private steering?: ContentSteering;
   private appliedPathway = '';
   private captions608 = new Cea608Timeline();
@@ -239,9 +243,26 @@ export class HlsEngine extends EventTarget {
       },
       { signal: this.abort.signal },
     );
-    video.addEventListener('ended', () => this.state('ended'), {
-      signal: this.abort.signal,
-    });
+    video.addEventListener(
+      'timeupdate',
+      () => this.dateRanges.tick(video.currentTime, video.seeking),
+      { signal: this.abort.signal },
+    );
+    video.addEventListener(
+      'seeked',
+      () => this.dateRanges.tick(video.currentTime, true),
+      { signal: this.abort.signal },
+    );
+    video.addEventListener(
+      'ended',
+      () => {
+        this.dateRanges.phase('POST');
+        this.state('ended');
+      },
+      {
+        signal: this.abort.signal,
+      },
+    );
     video.addEventListener('seeking', () => this.onSeek(), {
       signal: this.abort.signal,
     });
@@ -598,6 +619,11 @@ export class HlsEngine extends EventTarget {
     }
     const updated = result.playlist;
     lane.playlist = updated;
+    if (lane === this.main) {
+      this.dateRanges.update(updated);
+      for (const warning of updated.metadataWarnings ?? [])
+        this.emit('metadatawarning', { type: 'daterange', message: warning });
+    }
     lane.refreshedAt = performance.now();
     lane.next =
       token === this.generation
@@ -936,6 +962,9 @@ export class HlsEngine extends EventTarget {
       await this.appendPrepared(lane, prepared);
       lane.next++;
     }
+    this.dateRanges.update(this.main!.playlist);
+    for (const warning of this.main!.playlist.metadataWarnings ?? [])
+      this.emit('metadatawarning', { type: 'daterange', message: warning });
     this.publishCatalog();
     if (this.subtitleManual)
       this.selectSubtitleTrack(this.selectedSubtitle, true);
@@ -1025,6 +1054,7 @@ export class HlsEngine extends EventTarget {
         const autoplay =
           this.resumeAfterReset ?? this.source.autoplay !== false;
         this.resumeAfterReset = undefined;
+        this.dateRanges.phase('PRE');
         if (autoplay) void this.play();
       }
       if (!this.video.paused && this.video.readyState < 3) {
@@ -1437,6 +1467,7 @@ export class HlsEngine extends EventTarget {
       if (!this.subtitleManual) this.selectAutomaticSubtitles();
     } else {
       this.main = lane;
+      this.dateRanges.update(lane.playlist);
       this.selectedQuality = index;
       this.qualityTimeline = this.qualityTimeline.filter(
         (item) => item.at < boundary,

@@ -1,5 +1,12 @@
 # Release versions
 
+## 0.25.0-alpha.1
+
+- EXT-X-DATERANGE merge/validation, END-ON-NEXT, SCTE-35 payload preservation and UTC date handling.
+- Playback entry/exit and PRE/POST/ONCE cue events, plus metadata update/removal events.
+- v2 delta date-range merge/removal and complete-reload fallback for missing removal information.
+- Invalid date-range metadata warns without interrupting video.
+
 ## 0.24.0-alpha.1
 
 - Original HLS content steering: priorities, TTL/reloads, pathway clones and URI overrides.
