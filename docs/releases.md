@@ -1,5 +1,11 @@
 # Release versions
 
+## 0.27.0-alpha.1
+
+- JPEG image playlists, tiled seek thumbnails and live program-date alignment.
+- Bounded resource caching, byte ranges, identity-key encryption and malformed-image isolation.
+- In-player hover previews and original color-grid browser fixtures.
+
 ## 0.26.0-alpha.1
 
 - Original interstitial asset/list resolution and isolated VOD playback with primary timeline restoration.

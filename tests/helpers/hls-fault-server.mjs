@@ -54,6 +54,38 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
+        if (scenario === 'images-live') {
+          const epochKey = match[1] + '-images';
+          if (!epochs.has(epochKey)) epochs.set(epochKey, Date.now());
+          const elapsed = (Date.now() - epochs.get(epochKey)) / 1000;
+          if (resource === 'master.m3u8') {
+            res.end(
+              '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=600000,CODECS="avc1.42c00c,mp4a.40.2"\nprimary.m3u8\n#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=2000,CODECS="jpeg",RESOLUTION=160x90,URI="preview.m3u8"\n',
+            );
+            return;
+          }
+          if (resource === 'primary.m3u8') {
+            const first = Math.min(4, Math.floor(elapsed / 2));
+            let text = `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${first}\n#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 0, 2, 3, 4, first * 2)).toISOString()}\n`;
+            for (let n = first; n <= Math.min(8, first + 6); n++)
+              text += `#EXTINF:2,\nsegment${String(n).padStart(2, '0')}.ts\n`;
+            res.end(text);
+            return;
+          }
+          if (resource === 'preview.m3u8') {
+            const first = Math.floor(elapsed / 4);
+            let text = `#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-IMAGES-ONLY\n#EXT-X-MEDIA-SEQUENCE:${100 + first}\n#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 0, 2, 3, 4, first * 4)).toISOString()}\n`;
+            for (let n = first; n < first + 3; n++)
+              text += `#EXT-X-TILES:RESOLUTION=160x90,LAYOUT=2x2,DURATION=1\n#EXTINF:4,\nsheet${n}.jpg\n`;
+            res.end(text);
+            return;
+          }
+          if (/^sheet\d+\.jpg$/.test(resource)) {
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.end(await readFile(path.join(fixtures, 'images/grid.jpg')));
+            return;
+          }
+        }
         if (scenario.startsWith('interstitial-')) {
           const origin =
             (req.socket.encrypted ? 'https' : 'http') +
@@ -734,6 +766,29 @@ export function faultServer({
               ? 'application/vnd.apple.mpegurl'
               : 'application/octet-stream',
       );
+      const rangeHeader = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '');
+      if (rangeHeader) {
+        const start = Number(rangeHeader[1]),
+          end = Math.min(
+            data.length - 1,
+            rangeHeader[2] ? Number(rangeHeader[2]) : data.length - 1,
+          );
+        if (
+          !Number.isSafeInteger(start) ||
+          start > end ||
+          start >= data.length
+        ) {
+          res.writeHead(416, { 'Content-Range': `bytes */${data.length}` });
+          res.end();
+          return;
+        }
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': end - start + 1,
+        });
+        res.end(data.subarray(start, end + 1));
+        return;
+      }
       res.end(data);
     } catch {
       if (!res.headersSent) res.writeHead(404);

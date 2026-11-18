@@ -1,3 +1,4 @@
+import { ImageThumbnails } from './thumbnails';
 import { DateRangeTimeline, type TimedDateRange } from './date-ranges';
 import {
   parseInterstitial,
@@ -161,6 +162,7 @@ export class HlsEngine extends EventTarget {
     return this.main?.playlist;
   }
   private master?: Playlist;
+  private thumbnails?: ImageThumbnails;
   private dateRanges = new DateRangeTimeline(
     (name, detail) => {
       this.emit(name, detail);
@@ -560,6 +562,10 @@ export class HlsEngine extends EventTarget {
           url: r.url,
         }));
     }
+    if (p.imagesOnly)
+      throw new Error(
+        'Image playlists are for seek previews, not primary playback',
+      );
     if (this.source.interstitialAsset && p.live)
       throw new Error('Interstitial assets must be VOD');
     this.main = this.lane(
@@ -798,6 +804,31 @@ export class HlsEngine extends EventTarget {
     this.state('buffering');
     this.emit('streamchange', { live: this.isLive });
     await this.prime();
+  }
+  async getThumbnail(time: number) {
+    if (this.interstitialActive || !this.main) return;
+    if (!this.thumbnails) {
+      const images = this.master?.images
+        ?.filter((v) => v.codecs === 'jpeg')
+        .sort((a, b) => a.bandwidth - b.bandwidth);
+      if (!images?.length) return;
+      this.thumbnails = new ImageThumbnails(
+        images[0],
+        this.client,
+        () => this.main!.playlist,
+        async (data, segment) => {
+          if (!segment.key) return data;
+          if (
+            !['AES-128', 'AES-256-GCM'].includes(segment.key.method) ||
+            segment.key.format !== 'identity'
+          )
+            throw new Error('Unsupported image encryption');
+          return this.decrypt(data, segment.key, segment.sequence);
+        },
+        () => this.master?.variables ?? {},
+      );
+    }
+    return this.thumbnails.get(time);
   }
   skipInterstitial() {
     return this.interstitialSession?.skipNow() ?? false;
@@ -2339,6 +2370,7 @@ export class HlsEngine extends EventTarget {
   async destroy() {
     if (this.abort.signal.aborted) return;
     this.abort.abort();
+    this.thumbnails?.destroy();
     await this.interstitialPlayer?.destroy();
     for (const request of this.switches.splice(0))
       request.reject(new DOMException('Player closed', 'AbortError'));

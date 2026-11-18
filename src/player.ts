@@ -44,3 +44,5 @@ export class ThePlayer extends PlayerCore {
 export { MoqEngine as MoqPlayer } from './engines/moq/engine';
 
 export type { HlsSource } from './engines/hls/engine';
+
+export type { Thumbnail } from './core/thumbnail';

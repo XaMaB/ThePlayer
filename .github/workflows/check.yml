@@ -64,3 +64,5 @@ jobs:
       - run: npm run test:hls:dateranges
       - run: npm run test:hls:interstitials
         timeout-minutes: 10
+      - run: npm run test:hls:thumbnails
+        timeout-minutes: 8

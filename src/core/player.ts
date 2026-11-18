@@ -1,3 +1,4 @@
+import type { Thumbnail } from './thumbnail';
 /** Common lifecycle. Engines own their transport, buffering and media pipeline. */
 export interface PlaybackSource {
   protocol?: string;
@@ -24,6 +25,7 @@ export interface PlaybackEngine extends EventTarget {
   selectQuality?(index: number): Promise<void>;
   seekToLive?(): void;
   skipInterstitial?(): boolean;
+  getThumbnail?(time: number): Promise<Thumbnail | undefined>;
   init(): Promise<void>;
   play(): Promise<void>;
   destroy(): Promise<void>;
@@ -142,6 +144,9 @@ export class PlayerCore extends EventTarget {
 
   get isLive() {
     return this.engine?.isLive ?? this.engine?.protocol === 'moq';
+  }
+  getThumbnail(time: number): Promise<Thumbnail | undefined> {
+    return this.engine?.getThumbnail?.(time) ?? Promise.resolve(undefined);
   }
   skipInterstitial() {
     return this.engine?.skipInterstitial?.() ?? false;

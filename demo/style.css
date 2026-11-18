@@ -1263,3 +1263,28 @@ video::cue(.cea608) {
 .interstitial-label[hidden] {
   display: none;
 }
+
+.seek-preview {
+  position: absolute;
+  bottom: 76px;
+  z-index: 6;
+  pointer-events: none;
+  padding: 4px;
+  border: 1px solid #ffffff40;
+  border-radius: 8px;
+  background: #12151de8;
+  box-shadow: 0 8px 30px #0008;
+  color: white;
+  text-align: center;
+  font:
+    600 12px / 1.5 system-ui,
+    sans-serif;
+}
+.screen .seek-preview canvas {
+  position: static;
+  display: block;
+  border-radius: 4px;
+}
+.seek-preview[hidden] {
+  display: none;
+}

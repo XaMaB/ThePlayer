@@ -2,16 +2,16 @@
 
 Status: original HLS engine with AVC/HEVC/AAC TS/fMP4, AV1 fMP4, audio-only, ABR, external audio, WebVTT and fMP4 CEA-608. Versions 0.8–0.9 add bounded network recovery, declared gaps, live publisher progress, coordinated encoder/window restarts and complete PSI assembly. See [current support](hls-support.md). The remaining stages below are active work, not completed capabilities.
 
-| Stage                   | Current status                                                                                                                           |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Fault infrastructure    | Local/remote HTTP scenarios, Fetch/XHR checks and CI integration implemented                                                             |
-| Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues                    |
-| TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue             |
-| ABR / buffer policy     | Emergency request abort, bounded fallback and temporary rendition quarantine implemented                                                 |
-| LL-HLS                  | fMP4 parts, blocking/delta, open-range/MAP preloads and encrypted parts implemented; expanded interoperability continues                 |
-| Subtitles               | WebVTT, stpp/TTML, wvtt and fMP4 CEA-608 subsets implemented; broader CEA carriage and advanced text features pending                    |
-| Protection / extensions | AES-128/GCM, sample encryption, EME and timed metadata implemented; steering implemented for matching inventories; interstitials pending |
-| Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                                    |
+| Stage                   | Current status                                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fault infrastructure    | Local/remote HTTP scenarios, Fetch/XHR checks and CI integration implemented                                                                                                         |
+| Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues                                                                |
+| TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue                                                         |
+| ABR / buffer policy     | Emergency request abort, bounded fallback and temporary rendition quarantine implemented                                                                                             |
+| LL-HLS                  | fMP4 parts, blocking/delta, open-range/MAP preloads and encrypted parts implemented; expanded interoperability continues                                                             |
+| Subtitles               | WebVTT, stpp/TTML, wvtt and fMP4 CEA-608 subsets implemented; broader CEA carriage and advanced text features pending                                                                |
+| Protection / extensions | AES-128/GCM, sample encryption, EME and timed metadata implemented; steering for matching inventories, interstitial playback and JPEG seek previews implemented; profile gaps remain |
+| Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                                                                                |
 
 ## Specification baseline
 
@@ -81,3 +81,7 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.24.0-alpha.1 adds content steering with matching pathway inventories, clones and recovery. Continue with interstitials/trick-play, remaining media/text profiles and stabilization, including the intermittent WebKit CI startup failure.
 
 0.25.0-alpha.1 adds date-range metadata and playback cues plus v2 delta updates. Continue with interstitial asset playback, trick-play and remaining validation/profile gaps.
+
+0.26.0-alpha.1 adds interstitial asset playback, primary restoration, navigation restrictions and skip UI. Continue with preload/timeline presentation and remaining profile gaps.
+
+0.27.0-alpha.1 adds JPEG image playlists and tiled seek previews with live alignment. Continue with coded I-frame previews, remaining subtitle/media profiles and stabilization.

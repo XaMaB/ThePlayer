@@ -630,3 +630,5 @@ await import('./prepare-metadata-fixtures.mjs');
 await import('./prepare-mp3-fixtures.mjs');
 
 await import('./prepare-dolby-fixtures.mjs');
+
+await import('./prepare-image-fixtures.mjs');

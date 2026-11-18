@@ -93,7 +93,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 | DRM / EME                            | CENC/CBCS fMP4 through EME; ClearKey, identity keys and license callbacks tested                                         |
 | Content steering / interstitials     | Steering with matching inventories and interstitial playback implemented; see profile limits                             |
 | Timed metadata                       | ID3 from TS/packed AAC; emsg v0/v1 and CMAF ID3, with presentation-time event data                                       |
-| I-frame trick play / image playlists | Not implemented                                                                                                          |
+| I-frame trick play / image playlists | JPEG image/tile seek previews implemented; coded I-frame previews pending                                                |
 | Packed audio                         | ADTS AAC and MP3 with ID3 anchors, rollover and AES-128; AAC/AC-3/E-AC-3 SAMPLE-AES; single independent E-AC-3 substream |
 | Declared GAP segments                | Skipped without requests; playback resumes at buffered media after the declared interval                                 |
 | Live timeline resets                 | Bounded coordinated media restart; paused state and track selection retained                                             |

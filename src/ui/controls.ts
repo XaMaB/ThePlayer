@@ -47,6 +47,7 @@ export function mountControls(
   <button id="live-button" hidden class="live-indicator" title="Return to live" aria-label="Return to live"><span></span>LIVE</button>
   <button id="interstitial-skip" class="interstitial-skip" hidden aria-label="Skip inserted content">Skip</button>
   <div id="interstitial-label" class="interstitial-label" hidden role="status">Inserted content</div>
+  <div id="seek-preview" class="seek-preview" hidden><canvas></canvas><span></span></div>
   <div id="audio-only-label" class="audio-only-label" hidden>Audio only</div>
   <div class="center-controls" role="group" aria-label="Quick playback controls">
    <button id="skip-back" class="icon-button center-button" title="Back 10 seconds (←)" aria-label="Back 10 seconds">${svg('back')}</button>
@@ -594,6 +595,79 @@ export function mountControls(
   seek.oninput = () => {
     video.currentTime = Number(seek.value);
   };
+  const preview = el('seek-preview');
+  let previewToken = 0;
+  let previewTimer: ReturnType<typeof setTimeout>;
+  const hidePreview = () => {
+    previewToken++;
+    clearTimeout(previewTimer);
+    preview.hidden = true;
+  };
+  listen(seek, 'pointerleave', hidePreview);
+  listen(seek, 'pointermove', (event: PointerEvent) => {
+    const p = getPlayer();
+    if (
+      !p?.getThumbnail ||
+      !Number.isFinite(video.duration) ||
+      p?.diagnostics?.interstitial?.active
+    )
+      return hidePreview();
+    const bounds = seek.getBoundingClientRect();
+    const time = Math.max(
+      0,
+      Math.min(
+        video.duration - 0.001,
+        ((event.clientX - bounds.left) / bounds.width) * video.duration,
+      ),
+    );
+    const token = ++previewToken;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      try {
+        const thumbnail = await p.getThumbnail(time);
+        if (token !== previewToken || p !== getPlayer() || !thumbnail) {
+          if (token === previewToken) preview.hidden = true;
+          return;
+        }
+        const image = new Image();
+        image.src = thumbnail.url;
+        await image.decode();
+        if (token !== previewToken || p !== getPlayer()) return;
+        const canvas = preview.querySelector('canvas')!;
+        canvas.width = Math.min(240, thumbnail.width);
+        canvas.height = Math.round(
+          (canvas.width * thumbnail.height) / thumbnail.width,
+        );
+        canvas
+          .getContext('2d')!
+          .drawImage(
+            image,
+            thumbnail.x,
+            thumbnail.y,
+            thumbnail.width,
+            thumbnail.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+        preview.querySelector('span')!.textContent = clock(time);
+        const screenBounds = screen.getBoundingClientRect();
+        preview.style.left =
+          Math.max(
+            8,
+            Math.min(
+              screenBounds.width - canvas.width - 16,
+              event.clientX - screenBounds.left - canvas.width / 2,
+            ),
+          ) + 'px';
+        preview.hidden = false;
+      } catch {
+        if (token === previewToken) preview.hidden = true;
+      }
+    }, 100);
+  });
+
   const clock = (seconds: number) => {
     const n = Math.max(0, Math.floor(seconds));
     return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
@@ -745,6 +819,7 @@ export function mountControls(
       observer.disconnect();
       clearTimeout(hideTimer);
       clearTimeout(feedbackTimer);
+      hidePreview();
       if (keyboardOwner === screen) keyboardOwner = undefined;
       clearInterval(statsTimer);
       for (const child of Array.from(screen.children))

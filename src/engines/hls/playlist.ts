@@ -28,7 +28,15 @@ export interface Key {
   iv?: Uint8Array;
   format: string;
 }
+export interface Tiles {
+  width: number;
+  height: number;
+  columns: number;
+  rows: number;
+  duration: number;
+}
 export interface Segment extends Resource {
+  tiles?: Tiles;
   sequence: number;
   start: number;
   duration: number;
@@ -78,6 +86,8 @@ export interface Playlist {
   duration: number;
   segments: Segment[];
   variants: Variant[];
+  images?: Variant[];
+  imagesOnly?: boolean;
   renditions: Rendition[];
   independent: boolean;
   startOffset?: number;
@@ -206,6 +216,7 @@ export function parsePlaylist(
       throw new Error('HLS resources require HTTP(S)');
     return url.href;
   };
+  let tiles: Tiles | undefined;
   let duration: number | undefined,
     variant: Attributes | undefined,
     byteRange: string | undefined;
@@ -251,6 +262,7 @@ export function parsePlaylist(
       const r = byteRange ? range(byteRange, previousRange, url) : undefined;
       previousRange = r ? { url, end: r.offset + r.length } : undefined;
       p.segments.push({
+        tiles,
         url,
         range: r,
         sequence: p.sequence + p.segments.length,
@@ -267,6 +279,7 @@ export function parsePlaylist(
       partIndex = 0;
       partOffset = 0;
       duration = undefined;
+      tiles = undefined;
       byteRange = undefined;
       gap = false;
       date = undefined;
@@ -397,6 +410,46 @@ export function parsePlaylist(
         if (!['http:', 'https:', 'data:'].includes(url.protocol))
           throw new Error('Unsupported steering URI');
         p.steering = { url: url.href, pathway: a['PATHWAY-ID'] };
+        break;
+      }
+      case '#EXT-X-IMAGE-STREAM-INF': {
+        const a = attributes(value);
+        if (a.CODECS !== 'jpeg') break;
+        if (!a.URI || !a.RESOLUTION || !/^\d+x\d+$/.test(a.RESOLUTION))
+          throw new Error('Invalid image rendition');
+        const [width, height] = a.RESOLUTION.split('x').map(Number);
+        if (!width || !height || width * height > 16777216)
+          throw new Error('Invalid image resolution');
+        (p.images ??= []).push({
+          url: uri(a.URI),
+          bandwidth: number(a.BANDWIDTH, 'image BANDWIDTH', true),
+          codecs: a.CODECS,
+          resolution: a.RESOLUTION,
+        });
+        break;
+      }
+      case '#EXT-X-IMAGES-ONLY':
+        p.imagesOnly = true;
+        break;
+      case '#EXT-X-TILES': {
+        const a = attributes(value);
+        const dimensions = (value: string | undefined) => {
+          if (!value || !/^\d+x\d+$/.test(value))
+            throw new Error('Invalid tile dimensions');
+          const result = value.split('x').map(Number);
+          if (
+            result.some((n) => !Number.isSafeInteger(n) || n <= 0 || n > 32768)
+          )
+            throw new Error('Invalid tile dimensions');
+          return result;
+        };
+        const [width, height] = dimensions(a.RESOLUTION),
+          [columns, rows] = dimensions(a.LAYOUT);
+        if (width * height * columns * rows > 16777216)
+          throw new Error('Image tile grid exceeds pixel limit');
+        const duration = number(a.DURATION, 'tile duration');
+        if (duration <= 0) throw new Error('Invalid tile duration');
+        tiles = { width, height, columns, rows, duration };
         break;
       }
       case '#EXT-X-STREAM-INF':
@@ -617,7 +670,9 @@ export function parsePlaylist(
     throw new Error('Incomplete playlist entry');
   if (p.steering && !p.variants.length)
     throw new Error('Content steering requires a multivariant playlist');
-  if (p.variants.length && p.segments.length)
+  if (!p.imagesOnly && p.segments.some((s) => s.tiles))
+    throw new Error('TILES requires IMAGES-ONLY');
+  if ((p.variants.length || p.images?.length) && p.segments.length)
     throw new Error('Mixed multivariant and media playlist');
   if (p.parts.length && !p.partTarget)
     throw new Error('Partial segments require PART-INF');
