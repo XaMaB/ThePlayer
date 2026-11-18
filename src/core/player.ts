@@ -53,6 +53,7 @@ const events = [
   'captionwarning',
   'metadata',
   'metadatawarning',
+  'pathwaychange',
 ];
 
 /** No transport imports: applications can supply only the engines they need. */

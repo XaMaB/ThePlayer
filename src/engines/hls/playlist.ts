@@ -37,6 +37,8 @@ export interface Segment extends Resource {
   independent?: boolean;
 }
 export interface Variant {
+  stableId?: string;
+  pathway?: string;
   url: string;
   bandwidth: number;
   codecs?: string;
@@ -46,6 +48,7 @@ export interface Variant {
   closedCaptions?: string;
 }
 export interface Rendition {
+  stableId?: string;
   type: string;
   group: string;
   name: string;
@@ -83,6 +86,7 @@ export interface Playlist {
   skipped?: number;
   unsupported: string[];
   sessionKeys?: Key[];
+  steering?: { url: string; pathway?: string };
 }
 export function attributes(input: string): Attributes {
   const result: Attributes = {};
@@ -107,6 +111,11 @@ export function attributes(input: string): Attributes {
       throw new Error('Invalid HLS attribute separator');
   }
   return result;
+}
+function stableIdentity(value: string | undefined) {
+  if (value !== undefined && !/^[A-Za-z0-9+/=._-]+$/.test(value))
+    throw new Error('Invalid HLS stable identifier');
+  return value;
 }
 function number(
   value: string | undefined,
@@ -212,6 +221,8 @@ export function parsePlaylist(
       if (variant) {
         p.variants.push({
           url,
+          stableId: stableIdentity(variant['STABLE-VARIANT-ID']),
+          pathway: variant['PATHWAY-ID'],
           bandwidth: number(variant.BANDWIDTH, 'BANDWIDTH', true),
           codecs: variant.CODECS,
           resolution: variant.RESOLUTION,
@@ -350,6 +361,16 @@ export function parsePlaylist(
       case '#EXT-X-PROGRAM-DATE-TIME':
         date = value;
         break;
+      case '#EXT-X-CONTENT-STEERING': {
+        const a = attributes(value);
+        if (p.steering || !a['SERVER-URI'])
+          throw new Error('Invalid content steering declaration');
+        const url = new URL(uri(a['SERVER-URI'], true));
+        if (!['http:', 'https:', 'data:'].includes(url.protocol))
+          throw new Error('Unsupported steering URI');
+        p.steering = { url: url.href, pathway: a['PATHWAY-ID'] };
+        break;
+      }
       case '#EXT-X-STREAM-INF':
         variant = attributes(value);
         break;
@@ -381,6 +402,7 @@ export function parsePlaylist(
         if (a.DEFAULT === 'YES' && group.some((r) => r.default))
           throw new Error('Multiple DEFAULT renditions in group');
         p.renditions.push({
+          stableId: stableIdentity(a['STABLE-RENDITION-ID']),
           type: a.TYPE,
           group: a['GROUP-ID'],
           name: a.NAME,
@@ -556,6 +578,8 @@ export function parsePlaylist(
   }
   if (variant || duration !== undefined)
     throw new Error('Incomplete playlist entry');
+  if (p.steering && !p.variants.length)
+    throw new Error('Content steering requires a multivariant playlist');
   if (p.variants.length && p.segments.length)
     throw new Error('Mixed multivariant and media playlist');
   if (p.parts.length && !p.partTarget)

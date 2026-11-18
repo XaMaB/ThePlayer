@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.24.0-alpha.1
+
+- Original HLS content steering: priorities, TTL/reloads, pathway clones and URI overrides.
+- Preserve matching ABR/manual quality and audio/subtitle languages across pathways.
+- Backup pathway selection for initial playlist/media failures and later network faults.
+- HTTP 410/429 behavior, malformed-manifest fallback, pathway diagnostics/events and deterministic browser tests.
+- Capture detailed media-event traces for the intermittent WebKit metadata startup failure seen in CI; no claim that the cause is resolved.
+
 ## 0.23.0-alpha.1
 
 - LL-HLS open-range preloads can deliver authoritative parts before the HTTP response ends.

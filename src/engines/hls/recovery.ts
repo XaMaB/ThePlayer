@@ -1,6 +1,9 @@
 /** Recovery classification is separate from the HTTP transport. */
 export class HttpError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly retryAfter?: string | null,
+  ) {
     super(`HLS HTTP ${status}`);
     this.name = 'HttpError';
   }

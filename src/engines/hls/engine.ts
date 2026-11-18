@@ -1,3 +1,5 @@
+import { retryable } from './recovery';
+import { ContentSteering } from './steering';
 import { EmeController, type DrmOptions } from './eme';
 import { decryptSamplePes } from './sample-aes';
 import { Cea708Timeline } from './cea708-timeline';
@@ -65,6 +67,7 @@ export class HlsEngine extends EventTarget {
   readonly protocol = 'hls';
   readonly stack = 'ThePlayer HLS';
   readonly diagnostics = {
+    steering: {} as Record<string, unknown>,
     state: 'idle',
     version: 'baseline',
     objects: 0,
@@ -130,6 +133,8 @@ export class HlsEngine extends EventTarget {
     return this.main?.playlist;
   }
   private master?: Playlist;
+  private steering?: ContentSteering;
+  private appliedPathway = '';
   private captions608 = new Cea608Timeline();
   private captions708: Cea708Timeline;
   private renderer708?: Cea708Renderer;
@@ -285,7 +290,9 @@ export class HlsEngine extends EventTarget {
           !this.initial &&
           'duration' in r;
         return this.client.get(r, {
-          recoveryWindowMs: active || this.abrRecovering ? 0 : undefined,
+          recoveryWindowMs:
+            this.steering || active || this.abrRecovering ? 0 : undefined,
+          retries: this.steering ? 0 : undefined,
           onProgress: active
             ? (progress) => {
                 if (
@@ -332,6 +339,13 @@ export class HlsEngine extends EventTarget {
       throw new Error('Media Source Extensions required');
     let p = await this.readPlaylist(this.source.url);
     if (p.variants.length) {
+      if (p.steering) {
+        this.steering = new ContentSteering(p, this.client);
+        await this.steering.refresh(0);
+        p = this.steering.catalog();
+        this.appliedPathway = this.steering.diagnostics.pathway;
+        this.diagnostics.steering = this.steering.diagnostics;
+      }
       this.master = p;
       for (const key of (p.sessionKeys ?? []).slice(0, 32))
         if (
@@ -391,7 +405,36 @@ export class HlsEngine extends EventTarget {
         this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
         variant = this.qualityLevels[this.selectedQuality];
       }
-      p = await this.readPlaylist(variant.url);
+      for (;;) {
+        try {
+          p = await this.readPlaylist(
+            variant.url,
+            this.steering ? 0 : undefined,
+          );
+          break;
+        } catch (error) {
+          if (!this.steering || !retryable(error)) throw error;
+          const before = this.steering.diagnostics.pathway;
+          this.steering.penalize();
+          if (before === this.steering.diagnostics.pathway) throw error;
+          const catalog = this.steering.catalog();
+          this.qualityLevels = this.qualityLevels.map((old) => {
+            const next = catalog.variants.find((v) =>
+              old.stableId
+                ? v.stableId === old.stableId
+                : v.bandwidth === old.bandwidth &&
+                  v.codecs === old.codecs &&
+                  v.resolution === old.resolution,
+            );
+            if (!next || next.codecs !== old.codecs) throw error;
+            return { ...old, ...next };
+          });
+          variant = this.qualityLevels[this.selectedQuality];
+          this.master = catalog;
+          this.appliedPathway = this.steering.diagnostics.pathway;
+          this.emit('pathwaychange', { pathway: this.appliedPathway });
+        }
+      }
       this.audioTracks = this.master.renditions
         .filter((r) => r.type === 'AUDIO' && r.group === variant.audio && r.url)
         .map((r, index) => ({
@@ -866,12 +909,20 @@ export class HlsEngine extends EventTarget {
   private async prime() {
     for (const lane of this.lanes()) this.skipDeclaredGaps(lane);
     // Install every SourceBuffer before appending media, preserving shared A/V ownership.
-    const first = await Promise.all(
-      this.lanes().map(async (lane) => ({
-        lane,
-        prepared: await lane.prepare(),
-      })),
-    );
+    let first: { lane: MediaLane; prepared: PreparedSegment }[];
+    for (;;) {
+      try {
+        first = await Promise.all(
+          this.lanes().map(async (lane) => ({
+            lane,
+            prepared: await lane.prepare(),
+          })),
+        );
+        break;
+      } catch (error) {
+        if (!retryable(error) || !(await this.steerAfterFailure())) throw error;
+      }
+    }
     for (const { prepared } of first)
       await this.ensureProtection(
         prepared,
@@ -895,6 +946,10 @@ export class HlsEngine extends EventTarget {
   private async run() {
     await this.prime();
     while (!this.abort.signal.aborted && !this.failed) {
+      if (this.steering && !this.initial) {
+        await this.steering.refresh(this.abr.estimate);
+        await this.applySteering();
+      }
       if (this.switches.length) {
         const request = this.switches.shift()!;
         try {
@@ -906,7 +961,12 @@ export class HlsEngine extends EventTarget {
         continue;
       }
       for (const lane of this.lanes()) {
-        await this.refresh(lane);
+        try {
+          await this.refresh(lane);
+        } catch (error) {
+          if (retryable(error) && (await this.steerAfterFailure())) break;
+          throw error;
+        }
         if (lane !== this.main && lane !== this.audio) break;
         this.skipDeclaredGaps(lane);
       }
@@ -1028,6 +1088,11 @@ export class HlsEngine extends EventTarget {
         this.abort.signal.throwIfAborted();
         if (token !== this.generation) continue;
         if (
+          (retryable(error) || error instanceof EmergencySwitch) &&
+          (await this.steerAfterFailure())
+        )
+          continue;
+        if (
           lane.role !== 'main' ||
           !this.autoQuality ||
           this.selectedQuality <= 0
@@ -1045,6 +1110,124 @@ export class HlsEngine extends EventTarget {
         await this.operation(lane.buffer!, () =>
           lane.buffer!.remove(0, cutoff),
         );
+    }
+  }
+
+  private async steerAfterFailure() {
+    if (!this.steering) return false;
+    this.steering.penalize();
+    return this.applySteering();
+  }
+  private async applySteering() {
+    const steering = this.steering;
+    if (!steering || steering.diagnostics.pathway === this.appliedPathway)
+      return false;
+    const catalog = steering.catalog();
+    const previous = {
+      master: this.master,
+      quality: this.qualityLevels,
+      audio: this.audioTracks,
+      subtitles: this.subtitleTracks,
+      main: this.main,
+      audioLane: this.audio,
+    };
+    try {
+      const quality = this.qualityLevels.map((old) => {
+        const v = catalog.variants.find((v) =>
+          old.stableId
+            ? v.stableId === old.stableId
+            : v.bandwidth === old.bandwidth &&
+              v.codecs === old.codecs &&
+              v.resolution === old.resolution,
+        );
+        if (!v || v.codecs !== old.codecs)
+          throw new Error('Steering pathway lacks a compatible quality');
+        return { ...old, ...v };
+      });
+      const selected = quality[this.selectedQuality];
+      const move = (old: any, type: string, group?: string) => {
+        const r = catalog.renditions.find(
+          (r) =>
+            r.type === type &&
+            r.group === group &&
+            (old.stableId
+              ? r.stableId === old.stableId
+              : r.language === old.language && r.name === old.label),
+        );
+        if (!r || !r.url)
+          throw new Error('Steering pathway lacks selected language rendition');
+        return { ...old, ...r, name: old.name, label: r.name };
+      };
+      this.qualityLevels = quality;
+      this.audioTracks = this.audioTracks.map((t) =>
+        move(t, 'AUDIO', selected.audio),
+      );
+      this.subtitleTracks = this.subtitleTracks.map((t) =>
+        t.url ? move(t, 'SUBTITLES', selected.subtitles) : t,
+      );
+      this.master = catalog;
+      if (!this.main?.buffer) {
+        const old = this.main!;
+        const playlist = alignRendition(
+          await this.readPlaylist(selected.url, 0),
+          old.playlist,
+        );
+        this.main = this.lane(playlist, 'main', selected.codecs);
+        this.main.next = independentIndex(
+          playlist,
+          segmentAt(playlist, old.playlist.segments[old.next]?.start ?? 0),
+        );
+        if (this.audio) {
+          const track = this.audioTracks.find(
+            (t) => t.name === this.selectedAudioTrack,
+          );
+          const audio = alignRendition(
+            await this.readPlaylist(track.url, 0),
+            playlist,
+          );
+          this.audio = this.lane(audio, 'audio', selected.codecs);
+          this.audio.next = independentIndex(
+            audio,
+            segmentAt(audio, playlist.segments[this.main.next].start),
+          );
+        }
+        this.appliedPathway = steering.diagnostics.pathway;
+        this.emit('pathwaychange', { pathway: this.appliedPathway });
+        return true;
+      }
+      await this.switchRendition('quality', this.selectedQuality, true);
+      if (this.audio) {
+        const index = this.audioTracks.findIndex(
+          (t) => t.name === this.selectedAudioTrack,
+        );
+        if (index >= 0) await this.switchRendition('audio', index, true);
+      }
+      this.appliedPathway = steering.diagnostics.pathway;
+      if (this.selectedSubtitle)
+        this.selectSubtitleTrack(this.selectedSubtitle, true);
+      this.emit('audiotracks', this.audioTracks);
+      this.emit('subtitletracks', this.subtitleTracks);
+      this.emit('pathwaychange', { pathway: this.appliedPathway });
+      this.publishCatalog();
+      return true;
+    } catch (error) {
+      this.abort.signal.throwIfAborted();
+      if (!previous.main?.buffer) {
+        this.main = previous.main;
+        this.audio = previous.audioLane;
+      } else if (
+        this.main !== previous.main ||
+        this.audio !== previous.audioLane
+      )
+        this.appliedPathway = '!pending';
+      this.master = previous.master;
+      this.qualityLevels = previous.quality;
+      this.audioTracks = previous.audio;
+      this.subtitleTracks = previous.subtitles;
+      steering.diagnostics.warning =
+        error instanceof Error ? error.message : String(error);
+      steering.penalize();
+      return false;
     }
   }
   private async recoverQuality(error: unknown) {
@@ -1155,13 +1338,18 @@ export class HlsEngine extends EventTarget {
       this.switches.push({ kind, index, resolve, reject });
     });
   }
-  private async switchRendition(kind: 'audio' | 'quality', index: number) {
+  private async switchRendition(
+    kind: 'audio' | 'quality',
+    index: number,
+    force = false,
+  ) {
     const old = kind === 'audio' ? this.audio : this.main;
     if (!old) throw new Error('Rendition is not ready');
     if (
-      (kind === 'quality' && index === this.selectedQuality) ||
-      (kind === 'audio' &&
-        this.audioTracks[index].name === this.selectedAudioTrack)
+      !force &&
+      ((kind === 'quality' && index === this.selectedQuality) ||
+        (kind === 'audio' &&
+          this.audioTracks[index].name === this.selectedAudioTrack))
     )
       return;
     const choice =

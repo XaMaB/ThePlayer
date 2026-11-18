@@ -54,6 +54,138 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
+        if (scenario.startsWith('steering-')) {
+          const origin =
+            (req.socket.encrypted ? 'https' : 'http') +
+            '://' +
+            req.headers.host;
+          const prefix = `${origin}/scenario/${match[1]}/${scenario}/`;
+          if (resource === 'master.m3u8') {
+            if (scenario === 'steering-abr') {
+              const variants = ['a', 'b']
+                .flatMap((id) =>
+                  [
+                    ['low', 500000, 'avc1.42c00c', '320x180'],
+                    ['high', 1500000, 'avc1.42c01e', '640x360'],
+                  ].map(
+                    ([level, rate, codec, size]) =>
+                      `#EXT-X-STREAM-INF:BANDWIDTH=${rate},CODECS="${codec}",RESOLUTION=${size},STABLE-VARIANT-ID="${level}",PATHWAY-ID="${id}"\n${id}/video-${level}/index.m3u8\n`,
+                  ),
+                )
+                .join('');
+              res.end(
+                '#EXTM3U\n#EXT-X-CONTENT-STEERING:SERVER-URI="steering.json",PATHWAY-ID="a"\n' +
+                  variants,
+              );
+              return;
+            }
+            if (scenario === 'steering-audio') {
+              const tracks = ['a', 'b']
+                .map(
+                  (id) =>
+                    ['en', 'es']
+                      .map(
+                        (lang, i) =>
+                          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-${id}",NAME="${lang}-${id}",LANGUAGE="${lang}",DEFAULT=${i ? 'NO' : 'YES'},AUTOSELECT=YES,STABLE-RENDITION-ID="audio-${lang}",URI="${id}/audio-${lang}/index.m3u8"\n`,
+                      )
+                      .join('') +
+                    `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs-${id}",NAME="English",LANGUAGE="en",AUTOSELECT=YES,STABLE-RENDITION-ID="subs-en",URI="${id}/subtitles.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=500000,CODECS="avc1.42c00c,mp4a.40.2",STABLE-VARIANT-ID="main",PATHWAY-ID="${id}",AUDIO="audio-${id}",SUBTITLES="subs-${id}"\n${id}/video-low/index.m3u8\n`,
+                )
+                .join('');
+              res.end(
+                '#EXTM3U\n#EXT-X-CONTENT-STEERING:SERVER-URI="steering.json",PATHWAY-ID="a"\n' +
+                  tracks,
+              );
+              return;
+            }
+
+            res.end(
+              '#EXTM3U\n#EXT-X-CONTENT-STEERING:SERVER-URI="steering.json",PATHWAY-ID="a"\n' +
+                ['a', 'b']
+                  .map(
+                    (id) =>
+                      '#EXT-X-STREAM-INF:BANDWIDTH=900000,CODECS="avc1.42c00c,mp4a.40.2",STABLE-VARIANT-ID="main",PATHWAY-ID="' +
+                      id +
+                      '"\n' +
+                      id +
+                      '/index.m3u8\n',
+                  )
+                  .join(''),
+            );
+            return;
+          }
+          if (resource === 'steering.json') {
+            if (scenario === 'steering-gone') {
+              res.writeHead(410);
+              res.end();
+              return;
+            }
+            if (scenario === 'steering-malformed' && count > 1) {
+              res.end('{bad');
+              return;
+            }
+            const target = scenario === 'steering-clone' ? 'c' : 'b';
+            const priority =
+              count > 1 &&
+              ![
+                'steering-failover',
+                'steering-initial',
+                'steering-first-media',
+              ].includes(scenario)
+                ? [target, 'a']
+                : ['a', 'b'];
+            const manifest = {
+              VERSION: 1,
+              TTL: 2,
+              'PATHWAY-PRIORITY': priority,
+            };
+            if (scenario === 'steering-clone')
+              manifest['PATHWAY-CLONES'] = [
+                {
+                  'BASE-ID': 'a',
+                  ID: 'c',
+                  'URI-REPLACEMENT': {
+                    'PER-VARIANT-URIS': { main: prefix + 'c/index.m3u8' },
+                  },
+                },
+              ];
+            res.setHeader(
+              'Content-Type',
+              'application/vnd.apple.steering-list',
+            );
+            res.end(JSON.stringify(manifest));
+            return;
+          }
+          const media = /^([abc])\/(.+)$/.exec(resource);
+          if (media) {
+            if (
+              media[1] === 'a' &&
+              ((scenario === 'steering-initial' && media[2] === 'index.m3u8') ||
+                (scenario === 'steering-first-media' &&
+                  media[2] === 'segment00.ts'))
+            ) {
+              res.writeHead(503);
+              res.end();
+              return;
+            }
+            requests.set(
+              match[1] + ':pathway:' + media[1],
+              (requests.get(match[1] + ':pathway:' + media[1]) ?? 0) + 1,
+            );
+            if (
+              scenario === 'steering-failover' &&
+              media[1] === 'a' &&
+              media[2] === 'segment03.ts'
+            ) {
+              res.writeHead(503);
+              res.end();
+              return;
+            }
+            relative = ['steering-audio', 'steering-abr'].includes(scenario)
+              ? media[2]
+              : 'ts/' + media[2];
+          }
+        }
         if (scenario.startsWith('ll-parts')) {
           relative = 'll-parts/' + resource;
           const key = match[1];

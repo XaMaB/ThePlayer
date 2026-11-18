@@ -179,6 +179,7 @@ export class ResourceClient {
           url: string;
           status: number;
           range: string | null;
+          retryAfter: string | null;
         }>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           const cancel = () => {
@@ -197,6 +198,7 @@ export class ResourceClient {
               url: xhr.responseURL,
               status: xhr.status,
               range: xhr.getResponseHeader('Content-Range'),
+              retryAfter: xhr.getResponseHeader('Retry-After'),
             });
           xhr.onprogress = (event) => {
             loaded = event.loaded;
@@ -214,6 +216,8 @@ export class ResourceClient {
         });
         ({ data, url, status } = result);
         contentRange = result.range;
+        if (status < 200 || status >= 300)
+          throw new HttpError(status, result.retryAfter);
       } else {
         const response = await fetch(resource.url, {
           headers,
@@ -228,7 +232,8 @@ export class ResourceClient {
           length > 0 && !response.headers.get('Content-Encoding')
             ? length
             : undefined;
-        if (!response.ok) throw new HttpError(status);
+        if (!response.ok)
+          throw new HttpError(status, response.headers.get('Retry-After'));
         const openLength =
           resource.rangeStart != null && status === 206
             ? openRangeLength(contentRange, resource.rangeStart)
