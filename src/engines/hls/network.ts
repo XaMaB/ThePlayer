@@ -41,7 +41,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
   recoveryWindowMs?: number;
   onProgress?: (progress: RequestProgress) => void;
-  /** Validated response chunks for speculative open-range delivery. */
+  /** Validated Fetch chunks for full-resource or speculative open-range delivery. */
   onChunk?: (chunk: Uint8Array, url: string) => void;
 }
 export interface ResourceResponse {
@@ -283,9 +283,13 @@ export class ResourceClient {
               throw new Error('HLS resource exceeds 64 MiB limit');
             }
             chunks.push(value);
-            if (chunk && resource.rangeStart != null) {
+            if (
+              chunk &&
+              resource.range == null &&
+              (status === 200 || resource.rangeStart != null)
+            ) {
               const skip =
-                status === 200
+                status === 200 && resource.rangeStart != null
                   ? Math.max(0, resource.rangeStart - (size - value.length))
                   : 0;
               if (skip < value.length) chunk(value.subarray(skip), url);

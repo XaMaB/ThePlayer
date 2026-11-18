@@ -51,3 +51,7 @@ The manifest/addressing foundation and basic fMP4 playback are implemented. All 
 ## Live recovery increment: 1.0.0-alpha.9
 
 Stage 3 now includes bounded MPD and segment recovery, per-lane retry scheduling, expired-segment recovery, pause/resume beyond the DVR window and live-to-static completion. Deterministic fault tests cover Fetch/XHR in Chromium, Firefox and WebKit. Sliding Period removal, changed active representations, clock resets, topology changes and long-running soaks remain open; stage 3 is not marked fully complete.
+
+## Text, protection and low latency: 1.1.0-alpha.1
+
+Adds active-representation/Period replacement, external and MP4 text, CENC/CBCS ClearKey, public Widevine single/multikey validation, and Fetch CMAF chunk appends before HTTP completion with ServiceDescription latency/rate settings. XHR remains a full-response fallback. Extension and device-specific limits remain listed in the support matrix; the final documentation audit is still required before the implemented release.

@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 const bundled = await build({
   stdin: {
     contents:
-      "export * from './segments.ts'; export * from './mpd.ts'; export * from './sidx.ts';",
+      "export * from './segments.ts'; export * from './mpd.ts'; export * from './sidx.ts'; export * from './chunks.ts';",
     resolveDir: new URL('../src/engines/dash/', import.meta.url).pathname,
   },
   bundle: true,
@@ -18,6 +18,7 @@ const {
   duration,
   initializationResource,
   parseSidx,
+  CmafChunks,
 } = await import(
   'data:text/javascript;base64,' +
     Buffer.from(bundled.outputFiles[0].text).toString('base64')
@@ -245,4 +246,38 @@ test('SIDX offsets include the absolute index location and first_offset', () => 
     () => parseSidx(d, 1000, 'https://example.com/file.mp4', rep(), period),
     /Hierarchical/,
   );
+});
+
+test('CMAF streaming frames moof/mdat across every byte boundary', () => {
+  const box = (name, data = Buffer.alloc(0)) => {
+    const b = Buffer.alloc(8 + data.length);
+    b.writeUInt32BE(b.length);
+    b.write(name, 4);
+    data.copy(b, 8);
+    return b;
+  };
+  const unit = Buffer.concat([
+    box('styp'),
+    box('moof', Buffer.alloc(5)),
+    box('mdat', Buffer.alloc(17, 4)),
+  ]);
+  const input = Buffer.concat([unit, unit]);
+  for (let cut = 1; cut < input.length; cut++) {
+    const parser = new CmafChunks();
+    const output = [
+      ...parser.push(input.subarray(0, cut)),
+      ...parser.push(input.subarray(cut)),
+    ];
+    parser.finish();
+    assert.equal(output.length, 2);
+    assert.deepEqual(Buffer.from(output[0]), unit);
+    assert.deepEqual(Buffer.from(output[1]), unit);
+  }
+  const truncated = new CmafChunks();
+  truncated.push(unit.subarray(0, unit.length - 1));
+  assert.throws(() => truncated.finish(), /Truncated/);
+  assert.throws(() => new CmafChunks().push(box('mdat')), /no moof/);
+  const huge = box('moof');
+  huge.writeUInt32BE(0xffffffff);
+  assert.throws(() => new CmafChunks().push(huge), /size/);
 });

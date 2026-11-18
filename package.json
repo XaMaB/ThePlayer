@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.0.0-alpha.9",
+  "version": "1.1.0-alpha.1",
   "private": true,
   "description": "Modular MoQ and HLS player with an original DASH engine preview",
   "type": "module",
@@ -56,9 +56,13 @@
     "test:hls:switch-wait": "node tests/hls-switch-wait-browser.mjs",
     "test:hls:native-clock": "node tests/hls-native-clock-browser.mjs",
     "fixtures:dash": "node scripts/prepare-dash-fixtures.mjs",
-    "test:dash": "node tests/dash-server.mjs && node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs && npm run test:dash:recovery",
+    "test:dash": "node tests/dash-server.mjs && node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs && npm run test:dash:recovery && npm run test:dash:text && npm run test:dash:ll",
     "test:dash:public": "node tests/dash-public.mjs",
-    "test:dash:recovery": "node tests/dash-recovery-browser.mjs"
+    "test:dash:recovery": "node tests/dash-recovery-browser.mjs",
+    "test:dash:text": "node tests/dash-text-browser.mjs",
+    "test:dash:ll": "node tests/dash-ll-browser.mjs",
+    "test:dash:drm": "node tests/dash-drm-browser.mjs",
+    "test:dash:widevine": "node tests/dash-widevine-public.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

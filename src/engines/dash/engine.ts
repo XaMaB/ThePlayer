@@ -9,6 +9,9 @@ import { EmeController, type DrmOptions } from '../hls/eme';
 import type { Resource } from '../hls/playlist';
 import { parseMpd } from './mpd';
 import { initializationResource, segmentReferences } from './segments';
+import { applyMpdPatch } from './patch';
+import { CmafChunks } from './chunks';
+import { DashSubtitles, textFormat } from './subtitles';
 import { parseSidx } from './sidx';
 import { mediaEvent } from './media';
 import type {
@@ -30,6 +33,9 @@ export interface DashSource {
   quality?: 'auto' | number;
   audioLanguage?: string;
   liveRecoveryWindowMs?: number;
+  lowLatency?: boolean;
+  latencyControl?: boolean;
+  useMpdPatch?: boolean;
 }
 interface Lane {
   adaptation: Adaptation;
@@ -56,13 +62,16 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     bytes: 0,
     requests: 0,
     manifestUpdates: 0,
+    patches: { applied: 0, fallbacks: 0 },
     clockOffset: 0,
     clockWarning: '',
+    lowLatency: { chunks: 0, latency: 0, target: 0, playbackRate: 1 },
     recovery: {
       manifestFailures: 0,
       segmentFailures: 0,
       dvrJumps: 0,
       expiredSegments: 0,
+      manifestTransitions: 0,
     },
     buffer: { ahead: 0, target: 12, live: false, mode: 'dash-segment' },
     quality: { mode: 'auto', current: 0, bandwidthEstimate: 0 },
@@ -79,6 +88,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   isLive = false;
   mediaMode: 'video' | 'audio' = 'video';
   private manifest!: Manifest;
+  private manifestXml = '';
   private period!: Period;
   private lanes: Lane[] = [];
   private abort = new AbortController();
@@ -86,6 +96,8 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private media?: MediaSource;
   private mediaUrl = '';
   private eme?: EmeController;
+  private subtitles?: DashSubtitles;
+  private subtitleGeneration = 0;
   private abr = new AbrController();
   private refreshedAt = 0;
   private manifestFailureSince?: number;
@@ -93,6 +105,8 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private generation = 0;
   private seekPosition?: number;
   private initial = true;
+  private startupSeek?: number;
+  private controlledRate = 1;
   private ended = false;
   private failed = false;
   private startPosition = 0;
@@ -139,6 +153,11 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       'seeking',
       () => {
         if (this.initial) return;
+        if (this.startupSeek !== undefined) {
+          const internal = Math.abs(video.currentTime - this.startupSeek) < 0.1;
+          this.startupSeek = undefined;
+          if (internal) return;
+        }
         this.generation++;
         this.seekPosition = video.currentTime;
         this.ended = false;
@@ -152,6 +171,9 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       },
       { signal: this.abort.signal },
     );
+    video.addEventListener('timeupdate', () => this.updateLatency(), {
+      signal: this.abort.signal,
+    });
     video.addEventListener(
       'error',
       () =>
@@ -208,9 +230,40 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     );
     if (result.data.length > 4 * 1024 * 1024)
       throw new Error('DASH MPD exceeds 4 MiB');
-    return parseMpd(
-      new TextDecoder('utf-8', { fatal: true }).decode(result.data),
-      result.url,
+    const xml = new TextDecoder('utf-8', { fatal: true }).decode(result.data);
+    const parsed = parseMpd(xml, result.url);
+    this.manifestXml = xml;
+    return parsed;
+  }
+  private async readUpdate() {
+    const location = this.manifest.patchLocations?.find(
+      (p) =>
+        p.ttl === undefined ||
+        (this.manifest.publishTime !== undefined &&
+          this.now() <= this.manifest.publishTime + p.ttl),
+    );
+    if (location && this.source.useMpdPatch !== false && this.manifestXml) {
+      try {
+        const response = await this.client.get(
+          { url: location.url },
+          this.liveRequestOptions(true),
+        );
+        const patched = applyMpdPatch(
+          this.manifestXml,
+          new TextDecoder('utf-8', { fatal: true }).decode(response.data),
+        );
+        const next = parseMpd(patched, this.manifest.url);
+        this.manifestXml = patched;
+        this.diagnostics.patches.applied++;
+        return next;
+      } catch (error) {
+        this.abort.signal.throwIfAborted();
+        this.diagnostics.patches.fallbacks++;
+      }
+    }
+    return this.readManifest(
+      this.manifest.locations[0] ?? this.manifest.url,
+      true,
     );
   }
   private liveRequestOptions(manifest = false) {
@@ -242,7 +295,10 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     const floor = start + Math.min(2, (this.edge() - start) / 2);
     return Math.max(
       floor,
-      this.edge() - (this.manifest.suggestedPresentationDelay ?? 12),
+      this.edge() -
+        (this.manifest.service?.targetLatency ??
+          this.manifest.suggestedPresentationDelay ??
+          12),
     );
   }
   private now() {
@@ -325,7 +381,19 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       language: a.language,
       adaptation: a,
     }));
-    this.subtitleTracks = [];
+    this.subtitleTracks = period.adaptations
+      .filter(
+        (a) =>
+          a.kind === 'text' && a.representations.some((r) => textFormat(r)),
+      )
+      .map((a) => ({
+        name: a.id,
+        label: a.label,
+        language: a.language,
+        format: textFormat(a.representations[0]),
+        adaptation: a,
+        period,
+      }));
     this.emit('qualitylevels', this.qualityLevels);
     this.emit('subtitletracks', this.subtitleTracks);
     return { primary, video, audio };
@@ -374,6 +442,12 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   }
   private prerollPosition(lane: Lane, time: number) {
     const a = lane.rep.address;
+    if (!a.availabilityTimeComplete)
+      return Math.max(
+        lane.period.start,
+        this.isLive ? this.windowStart() : 0,
+        time - 0.001,
+      );
     const duration =
       lane.index?.reduce((max, s) => Math.max(max, s.end - s.start), 0) ||
       a.timeline?.reduce(
@@ -392,10 +466,26 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     if (!tracks.some((t) => t.encryption)) return;
     if (!this.eme) throw new Error('Encrypted DASH requires drm configuration');
     await this.eme.ensure(tracks);
+    const system = this.source.drm?.keySystem;
+    const scheme =
+      system === 'com.widevine.alpha'
+        ? 'urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed'
+        : system === 'com.microsoft.playready'
+          ? 'urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95'
+          : system === 'org.w3.clearkey'
+            ? 'urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b'
+            : undefined;
     for (const lane of lanes)
-      for (const protection of lane.rep.protection)
+      for (const protection of lane.rep.protection) {
+        if (
+          scheme &&
+          protection.scheme.toLowerCase().startsWith('urn:uuid:') &&
+          protection.scheme.toLowerCase() !== scheme
+        )
+          continue;
         for (const pssh of protection.pssh)
           await this.eme.requestInitData(pssh);
+      }
     if (this.source.drm?.clearKeys) await this.eme.requestKeyIds(tracks);
   }
   private async configure(lane: Lane, previous?: Lane) {
@@ -523,6 +613,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       );
     const edge = this.edge();
     const delay =
+      this.manifest.service?.targetLatency ??
       this.manifest.suggestedPresentationDelay ??
       Math.max(12, 3 * this.manifest.minBufferTime);
     this.startPosition =
@@ -553,13 +644,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private references(lane: Lane, from: number) {
     let to = from + Math.max(60, this.targetBuffer * 2);
     if (this.isLive)
-      to = Math.min(
-        to,
-        this.edge() +
-          (lane.rep.address.availabilityTimeComplete
-            ? lane.rep.address.availabilityTimeOffset
-            : 0),
-      );
+      to = Math.min(to, this.edge() + lane.rep.address.availabilityTimeOffset);
     const references =
       lane.index ?? segmentReferences(lane.rep, lane.period, from, to);
     return references.filter(
@@ -572,10 +657,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     if (performance.now() - this.refreshedAt < interval) return;
     let next: Manifest;
     try {
-      next = await this.readManifest(
-        this.manifest.locations[0] ?? this.manifest.url,
-        true,
-      );
+      next = await this.readUpdate();
       this.manifestFailureSince = undefined;
     } catch (error) {
       this.abort.signal.throwIfAborted();
@@ -603,7 +685,15 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       return;
     }
     const period = next.periods.find((p) => p.id === this.period.id);
-    if (period) {
+    const missing =
+      !period ||
+      this.lanes.some(
+        (lane) =>
+          !period.adaptations
+            .find((a) => a.id === lane.adaptation.id)
+            ?.representations.some((r) => r.id === lane.rep.id),
+      );
+    if (period && !missing) {
       if (period.start !== this.period.start)
         throw new Error('DASH Period start changed');
       for (const lane of this.lanes) {
@@ -628,6 +718,61 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       this.period = period;
     }
     this.manifest = next;
+    if (missing) {
+      const oldPrimary = this.lanes[0];
+      const oldAudio = this.lanes.find((l) => l.adaptation.kind === 'audio');
+      const position = Math.max(this.video.currentTime, this.windowStart());
+      const replacement = period ?? this.periodAt(position);
+      const primary = replacement.adaptations.find(
+        (a) => a.kind === oldPrimary.adaptation.kind && this.usable(a).length,
+      );
+      if (!primary)
+        throw new Error('DASH update has no compatible media adaptation');
+      const representations = this.usable(primary);
+      const same = representations.findIndex((r) => r.id === oldPrimary.rep.id);
+      this.selectedQuality =
+        same >= 0
+          ? same
+          : Math.max(
+              0,
+              representations.findLastIndex(
+                (r) => r.bandwidth <= oldPrimary.rep.bandwidth,
+              ),
+            );
+      if (
+        oldAudio &&
+        !replacement.adaptations.some((a) => a.id === this.selectedAudioTrack)
+      )
+        this.selectedAudioTrack =
+          replacement.adaptations.find(
+            (a) =>
+              a.kind === 'audio' && a.language === oldAudio.adaptation.language,
+          )?.id ?? '';
+      await this.enterPeriod(replacement, position);
+      this.qualityTimeline = [{ at: position, index: this.selectedQuality }];
+      if (!this.video.paused && this.video.currentTime < replacement.start)
+        this.video.currentTime = Math.max(position, replacement.start);
+      this.diagnostics.recovery.manifestTransitions++;
+    } else if (period) {
+      const selectedId = this.lanes[0].rep.id;
+      const previousLevels = this.qualityLevels;
+      this.inventory(period);
+      this.selectedQuality = Math.max(
+        0,
+        this.qualityLevels.findIndex((r) => r.representationId === selectedId),
+      );
+      this.qualityTimeline = this.qualityTimeline.map((entry) => ({
+        at: entry.at,
+        index: Math.max(
+          0,
+          this.qualityLevels.findIndex(
+            (r) =>
+              r.representationId ===
+              previousLevels[entry.index]?.representationId,
+          ),
+        ),
+      }));
+    }
     this.refreshedAt = performance.now();
     this.diagnostics.manifestUpdates++;
     if (this.isLive !== next.live) {
@@ -642,15 +787,54 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     data?: Uint8Array,
   ) {
     const generation = this.generation;
+    const chunked =
+      !data &&
+      this.source.lowLatency !== false &&
+      this.source.network?.transport !== 'xhr' &&
+      !lane.rep.address.availabilityTimeComplete &&
+      !segment.range;
+    const chunks = chunked ? new CmafChunks() : undefined;
+    let work: Promise<void> = Promise.resolve();
+    let appendError: unknown;
+    let units = 0;
+    const onChunk = chunks
+      ? (bytes: Uint8Array) => {
+          for (const unit of chunks.push(bytes)) {
+            work = work
+              .then(async () => {
+                if (
+                  appendError ||
+                  generation !== this.generation ||
+                  this.abort.signal.aborted
+                )
+                  return;
+                await mediaEvent(
+                  lane.buffer!,
+                  'updateend',
+                  this.abort.signal,
+                  () => lane.buffer!.appendBuffer(unit as BufferSource),
+                );
+                units++;
+                this.diagnostics.lowLatency.chunks++;
+                this.startPlayback();
+              })
+              .catch((error) => {
+                appendError = error;
+              });
+          }
+        }
+      : undefined;
     let response;
     try {
       response = data
         ? undefined
-        : await this.client.get(
-            segment,
-            this.isLive ? this.liveRequestOptions() : {},
-          );
+        : await this.client.get(segment, {
+            ...(this.isLive ? this.liveRequestOptions() : {}),
+            onChunk,
+          });
     } catch (error) {
+      await work;
+      if (appendError) throw appendError;
       this.abort.signal.throwIfAborted();
       if (generation !== this.generation) return;
       if (
@@ -678,13 +862,18 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       lane.retryAt = performance.now() + 500;
       return;
     }
+    await work;
+    if (appendError) throw appendError;
+    chunks?.finish();
     lane.failureSince = undefined;
     lane.retryAt = undefined;
     if (generation !== this.generation) return;
     if (response) this.abr.observe(response.data.length, response.elapsed);
-    await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
-      lane.buffer!.appendBuffer((data ?? response!.data) as BufferSource),
-    );
+    if (!units)
+      await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
+        lane.buffer!.appendBuffer((data ?? response!.data) as BufferSource),
+      );
+    this.startPlayback();
     if (generation === this.generation) {
       lane.cursor = segment.end;
       lane.needsPreroll = false;
@@ -692,6 +881,54 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.diagnostics.objects++;
     const start = this.video.buffered.length ? this.video.buffered.start(0) : 0;
     await this.eme?.retainKeys(lane.tracks, segment.end, start);
+  }
+  private startPlayback() {
+    if (this.initial && this.video.buffered.length) {
+      const b = this.video.buffered;
+      const index = Array.from({ length: b.length }, (_, i) => i).find(
+        (i) => b.end(i) > this.startPosition,
+      );
+      if (index === undefined) return;
+      this.startupSeek = Math.max(
+        b.start(index) + 0.001,
+        Math.min(this.startPosition, b.end(index) - 0.001),
+      );
+      this.video.currentTime = this.startupSeek;
+      this.initial = false;
+      if (this.source.autoplay !== false) void this.play();
+    }
+  }
+  private updateLatency() {
+    if (!this.manifest || !this.isLive) return;
+    const service = this.manifest.service;
+    const target =
+      service?.targetLatency ?? this.manifest.suggestedPresentationDelay ?? 12;
+    const latency = Math.max(0, this.edge() - this.video.currentTime);
+    this.diagnostics.lowLatency.latency = latency;
+    this.diagnostics.lowLatency.target = target;
+    if (
+      this.source.latencyControl &&
+      !this.initial &&
+      !this.video.paused &&
+      !this.video.seeking &&
+      this.video.playbackRate === this.controlledRate
+    ) {
+      const reserve = bufferedAhead(
+        this.video.buffered,
+        this.video.currentTime,
+      );
+      const rate =
+        reserve < 0.5
+          ? 1
+          : latency > target + 0.3
+            ? (service?.maxRate ?? 1.03)
+            : latency < target - 0.3
+              ? (service?.minRate ?? 0.97)
+              : 1;
+      this.video.playbackRate = rate;
+      this.controlledRate = rate;
+    }
+    this.diagnostics.lowLatency.playbackRate = this.video.playbackRate;
   }
   private updateDiagnostics() {
     this.diagnostics.bytes = this.client.bytes;
@@ -740,19 +977,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         if (period.id !== this.period.id)
           await this.enterPeriod(period, position);
       }
-      if (this.initial && this.video.buffered.length) {
-        const b = this.video.buffered;
-        const index =
-          Array.from({ length: b.length }, (_, i) => i).find(
-            (i) => b.end(i) > this.startPosition,
-          ) ?? 0;
-        this.video.currentTime = Math.max(
-          b.start(index) + 0.001,
-          Math.min(this.startPosition, b.end(index) - 0.001),
-        );
-        this.initial = false;
-        if (this.source.autoplay !== false) void this.play();
-      }
+      this.startPlayback();
       this.updateDiagnostics();
       const gap = nextGapPosition(this.video.buffered, this.video.currentTime);
       if (!this.video.paused && this.video.readyState < 3 && gap !== undefined)
@@ -784,34 +1009,39 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         }
       }
       let appended = false;
-      for (const lane of this.lanes) {
-        if (
-          lane.done ||
-          (lane.retryAt !== undefined && performance.now() < lane.retryAt) ||
-          (!lane.needsPreroll &&
-            bufferedAhead(lane.buffer!.buffered, this.video.currentTime) >=
-              this.targetBuffer)
-        )
-          continue;
-        const reference = this.references(lane, lane.cursor)[0];
-        if (reference) {
-          await this.append(lane, reference);
-          appended = true;
-        } else if (
-          lane.period.duration !== undefined &&
-          lane.cursor >= lane.period.start + lane.period.duration - 0.05
-        )
-          lane.done = true;
-        const removeBefore = this.video.currentTime - 30;
-        if (
-          removeBefore > 0 &&
-          lane.buffer!.buffered.length &&
-          lane.buffer!.buffered.start(0) < removeBefore - 5
-        )
-          await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
-            lane.buffer!.remove(0, removeBefore),
-          );
-      }
+      const results = await Promise.allSettled(
+        this.lanes.map(async (lane) => {
+          if (
+            lane.done ||
+            (lane.retryAt !== undefined && performance.now() < lane.retryAt) ||
+            (!lane.needsPreroll &&
+              bufferedAhead(lane.buffer!.buffered, this.video.currentTime) >=
+                this.targetBuffer)
+          )
+            return;
+          const reference = this.references(lane, lane.cursor)[0];
+          if (reference) {
+            await this.append(lane, reference);
+            appended = true;
+          } else if (
+            lane.period.duration !== undefined &&
+            lane.cursor >= lane.period.start + lane.period.duration - 0.05
+          )
+            lane.done = true;
+          const removeBefore = this.video.currentTime - 30;
+          if (
+            removeBefore > 0 &&
+            lane.buffer!.buffered.length &&
+            lane.buffer!.buffered.start(0) < removeBefore - 5
+          )
+            await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
+              lane.buffer!.remove(0, removeBefore),
+            );
+        }),
+      );
+      for (const result of results)
+        if (result.status === 'rejected') throw result.reason;
+
       if (this.lanes.every((l) => l.done)) {
         const next =
           this.manifest.periods[
@@ -913,10 +1143,24 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       this.commands.push({ kind, index, resolve, reject }),
     );
   }
-  selectSubtitleTrack(name: string) {
-    if (name) throw new Error('DASH subtitle selection is not implemented yet');
-    this.selectedSubtitleTrack = '';
-    this.emit('subtitlechange', null);
+  async selectSubtitleTrack(name: string) {
+    const selected = this.subtitleTracks.find((t) => t.name === name);
+    if (name && !selected) throw new Error('Unknown DASH subtitle track');
+    const generation = ++this.subtitleGeneration;
+    await this.subtitles?.destroy();
+    if (generation !== this.subtitleGeneration || this.abort.signal.aborted)
+      return;
+    this.subtitles = undefined;
+    this.selectedSubtitleTrack = name;
+    if (selected)
+      this.subtitles = new DashSubtitles(
+        this.video,
+        selected.adaptation,
+        () => this.period ?? selected.period,
+        this.source.network,
+        (event, detail) => this.emit(event, detail),
+      );
+    this.emit('subtitlechange', selected ?? null);
   }
   seekToLive() {
     if (this.isLive) {
@@ -940,11 +1184,15 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       for (const command of this.commands.splice(0))
         command.reject(this.abort.signal.reason);
       await this.runner;
+      this.subtitleGeneration++;
+      await this.subtitles?.destroy();
       this.video.pause();
       this.video.removeAttribute('src');
       this.video.load();
       if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
       await this.eme?.destroy();
+      if (this.video.playbackRate === this.controlledRate)
+        this.video.playbackRate = 1;
       this.lanes = [];
       this.state('destroyed');
     })());

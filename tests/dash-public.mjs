@@ -3,6 +3,14 @@ import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { faultServer } from './helpers/hls-fault-server.mjs';
 const sources = [
+  [
+    'livesim-ll',
+    'https://livesim.dashif.org/livesim2/ato_1.5/chunkdur_0.5/ltgt_3000/testpic_2s/Manifest.mpd',
+  ],
+  [
+    'livesim-patch',
+    'https://livesim.dashif.org/livesim2/patch_60/segtimeline_1/testpic_2s/Manifest.mpd',
+  ],
   ['akamai-bbb', 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd'],
   ['envivio', 'https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd'],
   [
@@ -81,6 +89,18 @@ try {
       }
       assert.deepEqual(await page.evaluate(() => window.errors), []);
       assert.deepEqual(pageErrors, []);
+      if (id === 'livesim-ll')
+        assert.ok(
+          await page.evaluate(
+            () => window.player.diagnostics.lowLatency.chunks > 0,
+          ),
+        );
+      if (id === 'livesim-patch')
+        assert.ok(
+          await page.evaluate(
+            () => window.player.diagnostics.patches.applied > 0,
+          ),
+        );
       console.log(
         id,
         'PASS',

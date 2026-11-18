@@ -16,11 +16,15 @@ try {
     'exhausted',
     'authorization',
     'expired',
+    'representation',
+    'period',
+    'patch',
   ]) {
     for (const transport of ['fetch', 'xhr']) {
       const { server, controls } = dashServer();
       if (scenario === 'pause' || scenario === 'expired') controls.depth = 4;
       await new Promise((r) => server.listen(0, '127.0.0.1', r));
+      if (scenario === 'patch') controls.patch = true;
       const page = await browser.newPage();
       const faults = [];
       page.on('pageerror', (e) => faults.push(e.message));
@@ -39,7 +43,7 @@ try {
             await window.player.load({
               protocol: 'dash',
               url: location.origin + '/dash/live.mpd',
-              quality: 0,
+              quality: scenario === 'representation' ? 1 : 0,
               targetBuffer: 4,
               liveRecoveryWindowMs: scenario === 'exhausted' ? 1000 : 10000,
               network: { transport },
@@ -55,6 +59,9 @@ try {
         const before = await page
           .locator('video')
           .evaluate((v) => v.currentTime);
+        if (scenario === 'patch') controls.badPatch = 1;
+        if (scenario === 'representation') controls.removeVideo = true;
+        if (scenario === 'period') controls.replacePeriod = true;
         if (scenario === 'manifest') controls.manifestFailures = 3;
         if (scenario === 'media') controls.mediaFailures = 3;
         if (scenario === 'expired') {
@@ -125,6 +132,17 @@ try {
             { timeout: 12000 },
           );
           const d = await page.evaluate(() => window.player.diagnostics);
+          if (scenario === 'patch') {
+            assert.equal(d.patches.fallbacks, 1);
+            assert.ok(d.patches.applied >= 2);
+          }
+          if (scenario === 'representation' || scenario === 'period')
+            assert.equal(d.recovery.manifestTransitions, 1);
+          if (scenario === 'representation')
+            assert.equal(
+              await page.evaluate(() => window.player.qualityLevels.length),
+              1,
+            );
           if (scenario === 'manifest')
             assert.equal(d.recovery.manifestFailures, 3);
           if (scenario === 'expired')

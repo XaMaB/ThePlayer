@@ -74,7 +74,7 @@ Whole-resource AES-128 and AES-256-GCM decryption happens before demux/inspectio
 
 `src/engines/dash/mpd.ts` parses namespaced MPDs and inherited addressing. `segments.ts` produces bounded segment windows using integer media clocks; `sidx.ts` resolves flat byte-range indexes. `engine.ts` owns MPD refresh, Period selection, MSE lanes, quality/audio switching and teardown. It reuses ThePlayer HTTP, MP4 inspection, throughput estimation and EME primitives; HLS manifest/scheduling logic remains separate.
 
-DASH is a preview: see [DASH support](dash-support.md) for verified scope and remaining caption, protection, low-latency and resilience work.
+DASH is a preview: see [DASH support](dash-support.md) for verified scope and remaining extension, resilience and device work. DASH text loading runs independently of A/V. CMAF chunk assembly validates complete moof/mdat units before appending; A/V lanes download concurrently. MPD Patch applies to an isolated XML document before parser validation and full-MPD fallback.
 
 ## Extending engines
 

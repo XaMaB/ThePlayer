@@ -2,7 +2,8 @@ import { chromium } from 'playwright';
 import { build } from 'esbuild';
 const bundle = await build({
   stdin: {
-    contents: "export * from './mpd.ts'; export * from './segments.ts';",
+    contents:
+      "export * from './mpd.ts'; export * from './segments.ts'; export * from './patch.ts';",
     resolveDir: new URL('../src/engines/dash/', import.meta.url).pathname,
   },
   bundle: true,
@@ -149,6 +150,41 @@ try {
     );
     results.push(
       'malformed XML, namespace, unsafe URLs, timing and unsupported XLink rejection',
+    );
+    const initial = wrap(
+      `<Period id="p"><AdaptationSet>${template.replace('/>', '><SegmentTimeline><S t="0" d="2000" r="4"/></SegmentTimeline></SegmentTemplate>')}${rep}</AdaptationSet></Period>`,
+      'id="test" publishTime="2026-01-01T00:00:00Z"',
+    );
+    const patch = `<Patch xmlns="urn:mpeg:dash:schema:mpd-patch:2020" mpdId="test" originalPublishTime="2026-01-01T00:00:00Z" publishTime="2026-01-01T00:00:02Z"><replace sel="/MPD/@publishTime">2026-01-01T00:00:02Z</replace><replace sel="/MPD/Period[@id='p']/AdaptationSet/SegmentTemplate/SegmentTimeline/S/@r">5</replace><add sel="/MPD/Period[@id='p']/AdaptationSet/SegmentTemplate/SegmentTimeline"><S d="2000"/></add></Patch>`;
+    const patched = parseMpd(DashTest.applyMpdPatch(initial, patch), base);
+    expect(
+      patched.periods[0].adaptations[0].representations[0].address.timeline
+        .length === 2,
+      'Patch imports children into MPD namespace',
+    );
+    expect(
+      patched.periods[0].adaptations[0].representations[0].address.timeline[0]
+        .repeat === 5,
+      'Patch attribute replacement',
+    );
+    for (const invalid of [
+      patch.replace('mpdId="test"', 'mpdId="other"'),
+      patch.replace(
+        'originalPublishTime="2026-01-01T00:00:00Z"',
+        'originalPublishTime="2026-01-01T00:00:01Z"',
+      ),
+      patch.replace('S/@r', 'S[2]/@r'),
+    ]) {
+      let failed = false;
+      try {
+        DashTest.applyMpdPatch(initial, invalid);
+      } catch {
+        failed = true;
+      }
+      expect(failed, 'Invalid patch rejected transactionally');
+    }
+    results.push(
+      'MPD Patch identity, timestamp, selector and namespace validation',
     );
     return results;
   });

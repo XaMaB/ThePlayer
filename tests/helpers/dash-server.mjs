@@ -18,7 +18,12 @@ export function dashServer() {
     mediaFailureResponses: 0,
     status: 503,
     finish: false,
+    patch: false,
+    badPatch: 0,
+    removeVideo: false,
+    replacePeriod: false,
     depth: 12,
+    chunkResponsesClosed: 0,
   };
   const epochs = new Map();
   const server = createServer(async (req, res) => {
@@ -35,6 +40,24 @@ export function dashServer() {
       if (url.pathname === '/redirect.mpd') {
         res.writeHead(302, { Location: '/dash/timeline.mpd' });
         res.end();
+        return;
+      }
+      if (url.pathname === '/dash/patch.mpp') {
+        if (controls.badPatch > 0) {
+          controls.badPatch--;
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        const previous = url.searchParams.get('publish');
+        const next = new Date(
+          Math.max(Date.now(), Date.parse(previous) + 1),
+        ).toISOString();
+        const location = `/dash/patch.mpp?publish=${encodeURIComponent(next)}`;
+        res.setHeader('Content-Type', 'application/dash-patch+xml');
+        res.end(
+          `<Patch xmlns="urn:mpeg:dash:schema:mpd-patch:2020" mpdId="dash-fixture" originalPublishTime="${previous}" publishTime="${next}"><replace sel="/MPD/@publishTime">${next}</replace><replace sel="/MPD/PatchLocation"><PatchLocation ttl="60">${location}</PatchLocation></replace></Patch>`,
+        );
         return;
       }
       if (url.pathname.startsWith('/dash/') && url.pathname.endsWith('.mpd')) {
@@ -60,6 +83,50 @@ export function dashServer() {
               return `<Representation${attrs}>${content.replace(/<SegmentTemplate([^>]*)>([\s\S]*?)<\/SegmentTemplate>/, (_, a, timeline) => `<SegmentList${a.replace(/\s+(initialization|media)="[^"]*"/g, '')}><Initialization sourceURL="init-${id}.mp4"/>${timeline}${Array.from({ length: 12 }, (_, i) => `<SegmentURL media="segment-${id}-${String(i + 1).padStart(5, '0')}.m4s"/>`).join('')}</SegmentList>`)}</Representation>`;
             },
           );
+        if (/^(cenc|cbcs)(-constant|-rotation)?\.mpd$/.test(mode)) {
+          const scheme = mode.slice(0, -4);
+          body = body.replace(
+            /<Representation id="1"[\s\S]*?<\/Representation>/,
+            '',
+          );
+          body = body.replace(
+            /<Representation id="0"([^>]*)>[\s\S]*?<\/Representation>/,
+            (_, attributes) =>
+              `<Representation id="0"${attributes}><ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="${scheme.startsWith('cbcs') ? 'cbcs' : 'cenc'}"/><SegmentTemplate timescale="1000" duration="2000" startNumber="0" initialization="${scheme}/init.mp4" media="${scheme}/segment$Number%02d$.m4s"/></Representation>`,
+          );
+          if (scheme.endsWith('-rotation')) {
+            const contents = /<Period[^>]*>([\s\S]*?)<\/Period>/.exec(body)[1];
+            const first = contents.replaceAll(
+              `${scheme}/`,
+              `${scheme.split('-')[0]}/`,
+            );
+            const second = contents.replaceAll(
+              `${scheme}/`,
+              `${scheme.split('-')[0]}-key2/`,
+            );
+            body = body.replace(
+              /<Period[^>]*>[\s\S]*?<\/Period>/,
+              `<Period id="key-one" start="PT0S" duration="PT12S">${first}</Period><Period id="key-two" start="PT12S" duration="PT12S">${second}</Period>`,
+            );
+          }
+        }
+        if (mode === 'text.mpd') {
+          const adaptations = ['vtt', 'ttml', 'wvtt', 'stpp']
+            .map((format) => {
+              const mp4 = ['wvtt', 'stpp'].includes(format);
+              const mime = mp4
+                ? 'application/mp4'
+                : format === 'vtt'
+                  ? 'text/vtt'
+                  : 'application/ttml+xml';
+              const addressing = mp4
+                ? `<SegmentTemplate timescale="1000" startNumber="0" initialization="${format}/init.mp4" media="${format}/segment$Number$.m4s"><SegmentTimeline><S t="0" d="2000" r="8"/></SegmentTimeline></SegmentTemplate>`
+                : `<BaseURL>captions.${format}</BaseURL>`;
+              return `<AdaptationSet id="${format}" contentType="text" lang="en" mimeType="${mime}"><Label>${format}</Label><Representation id="${format}" bandwidth="1000" codecs="${mp4 ? format : ''}">${addressing}</Representation></AdaptationSet>`;
+            })
+            .join('');
+          body = body.replace('</Period>', adaptations + '</Period>');
+        }
         if (mode === 'audio.mpd')
           body = body.replace(
             /<AdaptationSet id="0"[\s\S]*?<\/AdaptationSet>/,
@@ -83,7 +150,7 @@ export function dashServer() {
               `<SegmentTemplate presentationTimeOffset="${Number(scale) * 4}" timescale="${scale}"`,
           );
         }
-        if (mode === 'live.mpd' && !controls.finish) {
+        if ((mode === 'live.mpd' || mode === 'll.mpd') && !controls.finish) {
           const session = url.searchParams.get('session') ?? '';
           if (!epochs.has(session)) epochs.set(session, Date.now() - 8000);
           const epoch = epochs.get(session);
@@ -94,8 +161,66 @@ export function dashServer() {
             )
             .replace(/mediaPresentationDuration="[^"]+"/, '');
         }
+        if (controls.patch && mode === 'live.mpd') {
+          const publish = /publishTime="([^"]+)"/.exec(body)[1];
+          body = body
+            .replace('<MPD ', '<MPD id="dash-fixture" ')
+            .replace(
+              '<Period',
+              `<PatchLocation ttl="60">/dash/patch.mpp?publish=${encodeURIComponent(publish)}</PatchLocation><Period`,
+            );
+        }
+        if (mode === 'll.mpd') {
+          body = body.replace(
+            'suggestedPresentationDelay="PT4S"',
+            'suggestedPresentationDelay="PT3S"',
+          );
+          body = body.replace(
+            '<Period',
+            '<ServiceDescription id="0"><Latency target="3000" min="2000" max="5000"/><PlaybackRate min="0.97" max="1.03"/></ServiceDescription><Period',
+          );
+          body = body.replace(
+            /<SegmentTemplate([^>]*)>[\s\S]*?<\/SegmentTemplate>/g,
+            (_, attrs) =>
+              `<SegmentTemplate${attrs.replace(/ media="[^"]*"/, ' media="ll-$RepresentationID$-$Number$.m4s"')} duration="${Number(/timescale="(\d+)"/.exec(attrs)[1]) * 4}" availabilityTimeOffset="2" availabilityTimeComplete="false"/>`,
+          );
+        }
+        if (controls.removeVideo)
+          body = body.replace(
+            /<Representation id="1"[\s\S]*?<\/Representation>/,
+            '',
+          );
+        if (controls.replacePeriod)
+          body = body
+            .replace(/<Period[^>]*>/, '<Period id="replacement" start="PT6S">')
+            .replace(
+              /<SegmentTemplate timescale="(\d+)"/g,
+              (_, scale) =>
+                `<SegmentTemplate presentationTimeOffset="${Number(scale) * 6}" timescale="${scale}"`,
+            );
         res.setHeader('Content-Type', 'application/dash+xml');
         res.end(body);
+        return;
+      }
+      const chunked = /^\/dash\/ll-(\d+)-(\d+)\.m4s$/.exec(url.pathname);
+      if (chunked) {
+        const first = (Number(chunked[2]) - 1) * 2 + 1;
+        const segment = (n) =>
+          readFile(
+            path.join(
+              root,
+              `segment-${chunked[1]}-${String(n).padStart(5, '0')}.m4s`,
+            ),
+          );
+        const [a, b] = await Promise.all([segment(first), segment(first + 1)]);
+        res.setHeader('Content-Type', 'video/mp4');
+        res.write(a.subarray(0, 17));
+        res.write(a.subarray(17));
+        await new Promise((r) => setTimeout(r, 2500));
+        if (!res.destroyed) res.write(b);
+        await new Promise((r) => setTimeout(r, 100));
+        controls.chunkResponsesClosed++;
+        res.end();
         return;
       }
       const directory = url.pathname.startsWith('/dash/') ? root : dist;

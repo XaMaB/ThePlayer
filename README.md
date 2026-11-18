@@ -77,7 +77,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 
 ## DASH preview
 
-DASH is available in the demo protocol selector and through `protocol: "dash"`. The first release covers MPD addressing, fMP4 video/audio, VOD/live, quality and audio selection, seeking and basic Period transitions. DASH subtitles, validated DRM, low latency and advanced extensions are still in development. See [DASH support](docs/dash-support.md) and the [staged implementation plan](docs/dash-implementation-plan.md).
+DASH is available in the demo protocol selector and through `protocol: "dash"`. The preview covers MPD addressing and Patch updates, fMP4 VOD/live, quality/audio selection, Period transitions, live recovery, external/MP4 WebVTT and TTML, tested ClearKey/Widevine DRM, and low-latency CMAF Fetch delivery. Advanced extensions and device-specific validation are still in development. See [DASH support](docs/dash-support.md) and the [staged implementation plan](docs/dash-implementation-plan.md).
 
 ## HLS features
 
@@ -216,7 +216,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 - Extend optional HLS media/text profiles, codec/device interoperability and continuous validation.
 - Extend HLS caption attribute and typography coverage.
-- Add a DASH engine behind the common lifecycle.
+- Complete the DASH interoperability and device acceptance matrix.
 - Normalize track/diagnostic models across engines.
 - Package the controls as a self-contained UI component.
 - Extend caption conformance and fixture coverage.

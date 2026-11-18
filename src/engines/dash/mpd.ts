@@ -248,6 +248,11 @@ export function parseMpd(xml: string, url: string): Manifest {
       scheme: attr(e, 'schemeIdUri') ?? '',
       value: attr(e, 'value') ?? '',
     })),
+    patchLocations: children(root, 'PatchLocation').map((e) => ({
+      url: resolveUrl(e.textContent!.trim(), url),
+      ttl:
+        attr(e, 'ttl') === undefined ? undefined : decimal(attr(e, 'ttl'), 0),
+    })),
     locations: children(root, 'Location').map((e) =>
       resolveUrl(e.textContent!.trim(), url),
     ),
@@ -255,6 +260,36 @@ export function parseMpd(xml: string, url: string): Manifest {
   };
   if (manifest.live && manifest.availabilityStartTime === undefined)
     throw new Error('Dynamic DASH MPD needs availabilityStartTime');
+  const service = one(root, 'ServiceDescription');
+  const latency = service && one(service, 'Latency');
+  if (latency && attr(latency, 'target') !== undefined) {
+    const rate = one(service!, 'PlaybackRate');
+    const targetLatency = decimal(attr(latency, 'target'), 3000, 1) / 1000;
+    const minLatency =
+      attr(latency, 'min') === undefined
+        ? undefined
+        : decimal(attr(latency, 'min'), 0) / 1000;
+    const maxLatency =
+      attr(latency, 'max') === undefined
+        ? undefined
+        : decimal(attr(latency, 'max'), 0) / 1000;
+    const minRate = decimal(attr(rate, 'min'), 1, 0.5);
+    const maxRate = decimal(attr(rate, 'max'), 1, 1);
+    if (
+      minRate > 1 ||
+      maxRate > 2 ||
+      (minLatency !== undefined && minLatency > targetLatency) ||
+      (maxLatency !== undefined && maxLatency < targetLatency)
+    )
+      throw new Error('Invalid DASH ServiceDescription bounds');
+    manifest.service = {
+      targetLatency,
+      minLatency,
+      maxLatency,
+      minRate,
+      maxRate,
+    };
+  }
   const rootBases = bases(root, [url]),
     rootAddress = address(root);
   for (const [pi, pe] of children(root, 'Period').entries()) {
@@ -282,11 +317,37 @@ export function parseMpd(xml: string, url: string): Manifest {
       const reps: Representation[] = [];
       for (const [ri, re] of children(ae, 'Representation').entries()) {
         const get = (name: string) => attr(re, name) ?? attr(ae, name);
-        const segmentAddress = address(re, aa);
+        const mimeType = get('mimeType') ?? '';
+        const externalText = ['text/vtt', 'application/ttml+xml'].includes(
+          mimeType,
+        );
+        const textDuration =
+          period.duration ??
+          (manifest.duration === undefined
+            ? undefined
+            : manifest.duration - period.start);
+        const segmentAddress =
+          address(re, aa) ??
+          (externalText && textDuration && textDuration > 0
+            ? {
+                kind: 'list' as const,
+                timescale: 1000,
+                duration: BigInt(Math.ceil(textDuration * 1000)),
+                presentationTimeOffset: 0n,
+                startNumber: 1n,
+                eptDelta: 0n,
+                availabilityTimeOffset: 0,
+                availabilityTimeComplete: true,
+                urls: [{ media: '' }],
+              }
+            : undefined);
         if (!segmentAddress)
           throw new Error('DASH representation needs segment addressing');
-        const mimeType = get('mimeType') ?? '';
-        const bandwidth = decimal(attr(re, 'bandwidth'), 0, 1);
+        const bandwidth = decimal(
+          attr(re, 'bandwidth'),
+          externalText ? 1 : 0,
+          1,
+        );
         if (!bandwidth) throw new Error('DASH representation needs bandwidth');
         const frame = get('frameRate')?.split('/');
         const frameRate = frame

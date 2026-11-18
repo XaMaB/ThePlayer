@@ -122,3 +122,5 @@ jobs:
       - run: npm run fixtures:dash
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
       - run: npm run test:dash
+      - run: npm run test:dash:drm
+        if: matrix.browser == 'chromium'

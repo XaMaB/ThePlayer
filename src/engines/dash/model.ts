@@ -63,8 +63,16 @@ export interface Manifest {
   publishTime?: number;
   timeShiftBufferDepth?: number;
   suggestedPresentationDelay?: number;
+  service?: {
+    targetLatency: number;
+    minLatency?: number;
+    maxLatency?: number;
+    minRate: number;
+    maxRate: number;
+  };
   utcTiming: { scheme: string; value: string }[];
   locations: string[];
+  patchLocations?: { url: string; ttl?: number }[];
   periods: Period[];
 }
 export interface SegmentReference extends Resource {
