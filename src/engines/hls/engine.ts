@@ -30,7 +30,7 @@ import { TtmlRenderer } from './ttml-renderer';
 import { parseTtml } from './ttml';
 import { textMetadata, textSamples } from './text-mp4';
 import { PlaylistLoader } from './playlist-reload';
-import { LiveProgress, reconcileLive } from './live';
+import { LiveProgress, reconcileLive, timelineDifference } from './live';
 import { Cea608Timeline } from './cea608-timeline';
 import { Cea608Renderer } from './cea608-renderer';
 import { row608Text, cea608Styles } from './cea608';
@@ -111,6 +111,12 @@ export class HlsEngine extends EventTarget {
       unchangedMs: 0,
       restarts: 0,
       reason: '',
+      resetHistory: [] as {
+        reason: string;
+        role: string;
+        quality: number;
+        difference: ReturnType<typeof timelineDifference>;
+      }[],
       lanes: {} as Record<string, { unchangedMs: number; stale: boolean }>,
     },
     recovery: {} as Record<string, unknown>,
@@ -766,6 +772,14 @@ export class HlsEngine extends EventTarget {
       );
     const result = reconcileLive(incoming, p, nextSequence);
     if (result.restart) {
+      this.diagnostics.live.resetHistory.push({
+        reason: result.reason,
+        role: lane.role,
+        quality: this.selectedQuality,
+        difference: timelineDifference(incoming, p),
+      });
+      this.diagnostics.live.resetHistory =
+        this.diagnostics.live.resetHistory.slice(-4);
       await this.restartLive(
         lane === this.main ? incoming : undefined,
         result.reason,

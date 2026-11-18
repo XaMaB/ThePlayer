@@ -55,3 +55,56 @@ export function reconcileLive(
     throw error;
   }
 }
+
+/** Debug timeline decisions without exposing signed resource URLs or key material. */
+export function timelineDifference(next: Playlist, previous: Playlist) {
+  const window = (p: Playlist) => ({
+    first: p.segments[0].sequence,
+    last: p.segments.at(-1)!.sequence,
+    discontinuity: p.segments[0].discontinuity,
+    count: p.segments.length,
+  });
+  const segment = next.segments.find((s) =>
+    previous.segments.some(
+      (old) =>
+        old.sequence === s.sequence && old.discontinuity === s.discontinuity,
+    ),
+  );
+  const old =
+    segment &&
+    previous.segments.find(
+      (s) =>
+        s.sequence === segment.sequence &&
+        s.discontinuity === segment.discontinuity,
+    );
+  const address = (a: string, b: string) => {
+    const x = new URL(a),
+      y = new URL(b);
+    return {
+      origin: x.origin !== y.origin,
+      path: x.pathname !== y.pathname,
+      query: x.search !== y.search,
+    };
+  };
+  return {
+    previous: window(previous),
+    incoming: window(next),
+    overlap:
+      old && segment
+        ? {
+            sequence: segment.sequence,
+            previousPart: old.part ?? null,
+            incomingPart: segment.part ?? null,
+            previousDuration: old.duration,
+            incomingDuration: segment.duration,
+            previousDateTime: old.programDateTime ?? null,
+            incomingDateTime: segment.programDateTime ?? null,
+            addressChanged: address(old.url, segment.url),
+            rangeChanged:
+              JSON.stringify(old.range) !== JSON.stringify(segment.range),
+            initializationChanged:
+              JSON.stringify(old.map) !== JSON.stringify(segment.map),
+          }
+        : null,
+  };
+}

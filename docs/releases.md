@@ -1,5 +1,10 @@
 # Release versions
 
+## 1.0.0-alpha.2
+
+- Add a bounded, URL-redacted live reset history to distinguish sequence, resource, duration, date-time and initialization changes. Record the triggering comparison even when the restart limit stops playback. This is diagnostic instrumentation, not a change to recovery policy.
+- Extend the live-window browser regression to quality switches in both directions and assert that valid switches do not restart the presentation.
+
 ## 1.0.0-alpha.1
 
 - Begin the 1.x development series. DASH work is not included in this release.

@@ -1384,3 +1384,28 @@ test('SESSION-KEY is distinct from media encryption and repeated key declaration
   );
   assert.notEqual(media.segments[0].key.scope, media.segments[1].key.scope);
 });
+
+test('Live reset diagnostics identify changes without exposing signed URLs', async () => {
+  const { timelineDifference } = await module('live');
+  const before = parsePlaylist(
+    vod('#EXTINF:2,\na.ts?token=secret-before', 10),
+    base,
+  );
+  const after = parsePlaylist(
+    vod('#EXTINF:2.4,\na.ts?token=secret-after', 10),
+    base,
+  );
+  const diff = timelineDifference(after, before);
+  assert.equal(diff.overlap.sequence, 10);
+  assert.equal(diff.overlap.previousDuration, 2);
+  assert.equal(diff.overlap.incomingDuration, 2.4);
+  assert.deepEqual(diff.overlap.addressChanged, {
+    origin: false,
+    path: false,
+    query: true,
+  });
+  assert.ok(!JSON.stringify(diff).includes('secret'));
+  assert.ok(!JSON.stringify(diff).includes('example.com'));
+  const reset = parsePlaylist(vod('#EXTINF:2,\nnew.ts', 0), base);
+  assert.equal(timelineDifference(reset, before).overlap, null);
+});
