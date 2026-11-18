@@ -111,6 +111,49 @@ export function faultServer({
             '://' +
             req.headers.host;
           const prefix = `${origin}/scenario/${match[1]}/${scenario}/`;
+          if (scenario.startsWith('interstitial-preload-')) {
+            const mode = scenario.slice('interstitial-preload-'.length);
+            if (resource === 'index.m3u8') {
+              let source = await readFile(
+                path.join(fixtures, 'ts/index.m3u8'),
+                'utf8',
+              );
+              if (mode !== 'vod')
+                source = source
+                  .replace('#EXT-X-ENDLIST', '')
+                  .replace(
+                    '#EXT-X-PLAYLIST-TYPE:VOD',
+                    '#EXT-X-PLAYLIST-TYPE:EVENT',
+                  );
+              const list = mode === 'list';
+              const target = `#EXT-X-DATERANGE:ID="ad",CLASS="com.apple.hls.interstitial",START-DATE="2026-01-02T03:04:04Z",DURATION=4,CUE="ONCE",X-RESUME-OFFSET=0,${list ? 'X-ASSET-LIST="list.json"' : `X-ASSET-URI="${prefix}ad.m3u8"`}\n`;
+              const hint = `#EXT-X-DATERANGE:ID="hint",CLASS="com.apple.hls.preload",START-DATE="2026-01-02T03:04:00Z",DURATION=1,X-TARGET-ID="ad",X-TARGET-CLASS="com.apple.hls.interstitial",X-URI="${mode === 'mismatch' ? 'unused.m3u8' : list ? 'list.json' : 'ad.m3u8'}"\n`;
+              res.end(
+                source.replace(
+                  '#EXTM3U\n',
+                  '#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-01-02T03:04:00Z\n' +
+                    (list && count === 1 ? '' : target) +
+                    (mode === 'removed' && count > 1 ? '' : hint),
+                ),
+              );
+              return;
+            }
+            if (resource === 'list.json') {
+              res.end(
+                JSON.stringify({
+                  ASSETS: [{ URI: prefix + 'ad.m3u8', DURATION: 4 }],
+                }),
+              );
+              return;
+            }
+            if (resource === 'ad.m3u8' && count === 1 && mode === 'fault') {
+              res.writeHead(503);
+              res.end();
+              return;
+            }
+            if (resource === 'ad.m3u8' && count === 1 && mode === 'slow')
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+          }
           if (scenario === 'interstitial-live' && resource === 'index.m3u8') {
             const key = url.pathname;
             if (!epochs.has(key)) epochs.set(key, Date.now());
@@ -148,11 +191,13 @@ export function faultServer({
             const offset =
               kind === 'default'
                 ? ''
-                : `,X-RESUME-OFFSET=${kind === 'negative' ? -1 : kind === 'multiple' ? 1 : 0}`;
+                : `,X-RESUME-OFFSET=${kind === 'negative' ? -1 : kind === 'multiple' ? 1 : kind === 'ui' ? 2 : 0}`;
             const extras =
               {
                 limit: ',X-PLAYOUT-LIMIT=1',
                 skip: ',X-RESTRICT="SKIP",X-SKIP-CONTROL-OFFSET=1',
+                ui: ',X-TIMELINE-OCCUPIES="RANGE",X-SKIP-CONTROL-OFFSET=0,X-SKIP-CONTROL-LABEL-ID="Continue"',
+                controls: ',X-SKIP-CONTROL-OFFSET=0',
                 jump: ',X-RESTRICT="JUMP"',
                 snap: ',X-SNAP="OUT,IN"',
               }[kind] ?? '';
@@ -185,6 +230,22 @@ export function faultServer({
             return;
           }
           if (resource === 'ad.m3u8') {
+            if (scenario === 'interstitial-controls') {
+              let master = await readFile(
+                path.join(fixtures, 'renditions.m3u8'),
+                'utf8',
+              );
+              master = master
+                .replace(
+                  /URI="([^\"]+)"/g,
+                  (_, uri) => `URI="${origin}/fixture/${uri}"`,
+                )
+                .replace(/^(video-[^\n]+)$/gm, `${origin}/fixture/$1`)
+                .replace(/AUDIO="audio"/g, 'AUDIO="audio",SUBTITLES="s"');
+              master += `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="English",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,URI="${origin}/fixture/subtitles.m3u8"\n`;
+              res.end(master);
+              return;
+            }
             let content =
               '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:2,\nsegment06.ts\n#EXTINF:2,\nsegment07.ts\n#EXT-X-ENDLIST\n';
             if (scenario === 'interstitial-nested')

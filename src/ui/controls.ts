@@ -1,6 +1,11 @@
 import { VERSION } from '../version';
 
 let keyboardOwner: HTMLElement | undefined;
+export interface ControlsOptions {
+  /** Application localization; keys are HLS X-SKIP-CONTROL-LABEL-ID values. */
+  skipLabels?: Readonly<Record<string, string>>;
+  labels?: { skip?: string; insertedContent?: string };
+}
 
 /** In-video controls shared by the playground and standalone embed. No timeline for live TV. */
 export function mountControls(
@@ -8,6 +13,7 @@ export function mountControls(
   video: HTMLVideoElement,
   getPlayer: () => any,
   report: (message: string) => void,
+  config: ControlsOptions = {},
 ) {
   // The existing ThePlayer mark, inline so embeds do not need an asset URL.
   const brand =
@@ -59,7 +65,7 @@ export function mountControls(
    <button id="play-toggle" class="icon-button" title="Play (K)" aria-label="Play">${svg('play')}</button>
    <button id="mute-toggle" class="icon-button" title="Unmute (M)" aria-label="Unmute">${svg('muted')}</button>
    <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
-   <span id="playback-time" class="playback-time" hidden></span><input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="any" value="0" aria-label="Playback position" hidden/><span id="control-spacer" class="control-spacer"></span>
+   <span id="playback-time" class="playback-time" hidden></span><input id="seek-bar" class="seek-bar" type="range" min="0" max="0" step="any" value="0" aria-label="Playback position" hidden/><div id="timeline-markers" class="timeline-markers" aria-hidden="true" hidden></div><span id="control-spacer" class="control-spacer"></span>
    <button id="quality-toggle" class="icon-button" title="Quality" aria-label="Quality" aria-expanded="false" aria-controls="quality-menu" disabled>${svg('quality')}<span class="quality-copy"><span id="quality-mode">Auto</span><span id="quality-resolution">—</span></span></button>
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>
@@ -169,6 +175,55 @@ export function mountControls(
   };
   for (const e of ['play', 'pause', 'volumechange']) listen(video, e, sync);
   const select = el('subtitle-select') as HTMLSelectElement;
+  let subtitleMenuSignature = '';
+  let boundPlayer: EventTarget | undefined;
+  let playerEvents: AbortController | undefined;
+  function bindPlayer() {
+    const player = getPlayer();
+    if (boundPlayer !== player) {
+      playerEvents?.abort();
+      boundPlayer = player;
+      playerEvents = new AbortController();
+      for (const event of ['catalog', 'subtitletracks', 'subtitlechange'])
+        player?.addEventListener(event, syncSubtitles, {
+          signal: playerEvents.signal,
+        });
+    }
+    syncSubtitles();
+  }
+  for (const event of ['loadstart', 'loadedmetadata', 'play', 'emptied'])
+    listen(video, event, bindPlayer);
+  function syncSubtitles() {
+    const p = getPlayer(),
+      tracks = p?.subtitleTracks ?? [];
+    const selected = p?.selectedSubtitleTrack ?? '';
+    const signature = JSON.stringify([
+      selected,
+      tracks.map((t: any) => [t.name, t.label, t.language, t.format, t.inband]),
+    ]);
+    if (signature !== subtitleMenuSignature) {
+      subtitleMenuSignature = signature;
+      const choices = [new Option('Off', '')];
+      for (const track of tracks) {
+        let language = track.language ?? 'und';
+        try {
+          language =
+            new Intl.DisplayNames(['en'], { type: 'language' }).of(language) ??
+            language;
+        } catch {}
+        const label =
+          track.inband && track.language && track.language !== 'und'
+            ? language + ' · ' + track.label
+            : (track.label ?? language);
+        const choice = new Option(label, track.name);
+        choice.dataset.format = track.format ?? '';
+        choices.push(choice);
+      }
+      select.replaceChildren(...choices);
+      select.value = selected;
+    }
+    cc.classList.toggle('selected', !!selected);
+  }
   function option(
     container: HTMLElement,
     value: string,
@@ -227,6 +282,7 @@ export function mountControls(
     container.append(button);
   }
   function renderSubtitles() {
+    syncSubtitles();
     const list = ccMenu.querySelector<HTMLElement>('.track-options')!;
     list.replaceChildren();
     for (const o of select.options)
@@ -249,6 +305,11 @@ export function mountControls(
     subtree: true,
   });
   listen(select, 'change', () => {
+    try {
+      getPlayer()?.selectSubtitleTrack(select.value);
+    } catch (error: any) {
+      report(error.message);
+    }
     cc.classList.toggle('selected', !!select.value);
     closeMenus();
     cc.focus();
@@ -713,6 +774,7 @@ export function mountControls(
       autoOption.firstElementChild!.textContent = p?.autoQuality ? '✓' : '';
     }
   }
+  let lastInserted = false;
   const statsTimer = setInterval(() => {
     (quality as HTMLButtonElement).disabled =
       (getPlayer()?.qualityLevels?.length ?? 0) < 2 &&
@@ -722,15 +784,29 @@ export function mountControls(
       q = video.getVideoPlaybackQuality(),
       d = p?.diagnostics;
     const inserted = !!d?.interstitial?.active;
-    (cc as HTMLButtonElement).disabled = inserted || !p?.subtitleTracks?.length;
+    (cc as HTMLButtonElement).disabled = !p?.subtitleTracks?.length;
+    bindPlayer();
     el('interstitial-label').hidden = !inserted;
+    const insertedLabel = config.labels?.insertedContent || 'Inserted content';
+    if (el('interstitial-label').textContent !== insertedLabel)
+      el('interstitial-label').textContent = insertedLabel;
     el('interstitial-skip').hidden = !inserted || !d.interstitial.skippable;
-    if (inserted) {
-      (quality as HTMLButtonElement).disabled = true;
-      (audio as HTMLButtonElement).disabled = true;
-      (cc as HTMLButtonElement).disabled = true;
-      closeMenus();
-    }
+    const labelId = d?.interstitial?.label;
+    const label =
+      typeof labelId === 'string' &&
+      config.skipLabels &&
+      Object.hasOwn(config.skipLabels, labelId)
+        ? config.skipLabels[labelId]
+        : undefined;
+    const skipLabel = label || config.labels?.skip || 'Skip';
+    if (el('interstitial-skip').textContent !== skipLabel)
+      el('interstitial-skip').textContent = skipLabel;
+    el('interstitial-skip').setAttribute(
+      'aria-label',
+      label || config.labels?.skip || 'Skip inserted content',
+    );
+    if (inserted !== lastInserted) closeMenus();
+    lastInserted = inserted;
     syncQuality();
     const bounds = seekBounds();
     (el('skip-back') as HTMLButtonElement).disabled =
@@ -752,6 +828,42 @@ export function mountControls(
       seek.value = String(video.currentTime);
       el('playback-time').textContent =
         `${clock(video.currentTime)} / ${clock(Number.isFinite(video.duration) ? video.duration : 0)}`;
+    }
+    const markers = el('timeline-markers');
+    markers.hidden =
+      seek.hidden ||
+      inserted ||
+      !Number.isFinite(video.duration) ||
+      video.duration <= 0;
+    if (!markers.hidden) {
+      markers.style.left = seek.offsetLeft + 8 + 'px';
+      markers.style.top = seek.offsetTop + seek.clientHeight / 2 + 'px';
+      markers.style.width = Math.max(0, seek.clientWidth - 16) + 'px';
+      const items = (p?.timelineMarkers ?? []).filter(
+        (m: any) =>
+          Number.isFinite(m.time) && m.time >= 0 && m.time <= video.duration,
+      );
+      const signature = JSON.stringify([video.duration, items]);
+      if (markers.dataset.signature !== signature) {
+        markers.dataset.signature = signature;
+        markers.replaceChildren(
+          ...items.map((m: any) => {
+            const item = document.createElement('span');
+            item.className =
+              'timeline-marker ' +
+              (m.style === 'primary' ? 'primary' : 'highlight');
+            item.style.left = (m.time / video.duration) * 100 + '%';
+            const end = Number.isFinite(m.end)
+              ? Math.min(video.duration, Math.max(m.time, m.end))
+              : m.time;
+            if (end > m.time)
+              item.style.width = ((end - m.time) / video.duration) * 100 + '%';
+            item.dataset.id = m.id;
+            item.title = m.label;
+            return item;
+          }),
+        );
+      }
     }
     el('frames').textContent =
       p?.mediaMode === 'audio'
@@ -812,10 +924,12 @@ export function mountControls(
       el('bitrate').textContent = '—';
     }
   }, 500);
+  bindPlayer();
   sync();
   return {
     destroy() {
       abort.abort();
+      playerEvents?.abort();
       observer.disconnect();
       clearTimeout(hideTimer);
       clearTimeout(feedbackTimer);

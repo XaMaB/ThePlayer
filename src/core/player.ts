@@ -1,4 +1,6 @@
 import type { Thumbnail } from './thumbnail';
+import type { TimelineMarker } from './timeline';
+export type { TimelineMarker } from './timeline';
 /** Common lifecycle. Engines own their transport, buffering and media pipeline. */
 export interface PlaybackSource {
   protocol?: string;
@@ -15,6 +17,9 @@ export interface PlaybackEngine extends EventTarget {
   readonly audioTracks: any[];
   readonly subtitleTracks: any[];
   readonly selectedAudioTrack: string;
+  readonly selectedSubtitleTrack?: string;
+  /** An inserted presentation; null means transition, undefined means primary. */
+  readonly presentation?: PlaybackEngine | null;
   readonly isLive?: boolean;
   readonly mediaMode?: 'video' | 'audio';
   readonly availableMediaModes?: ('video' | 'audio')[];
@@ -22,6 +27,7 @@ export interface PlaybackEngine extends EventTarget {
   readonly selectedQuality?: number;
   readonly currentQuality?: number;
   readonly autoQuality?: boolean;
+  readonly timelineMarkers?: TimelineMarker[];
   selectQuality?(index: number): Promise<void>;
   seekToLive?(): void;
   skipInterstitial?(): boolean;
@@ -75,6 +81,11 @@ export class PlayerCore extends EventTarget {
   private listeners?: AbortController;
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
+  private get activePresentation() {
+    return this.engine?.presentation === undefined
+      ? this.engine
+      : (this.engine.presentation ?? undefined);
+  }
 
   constructor(
     readonly video: HTMLVideoElement,
@@ -148,6 +159,9 @@ export class PlayerCore extends EventTarget {
   getThumbnail(time: number): Promise<Thumbnail | undefined> {
     return this.engine?.getThumbnail?.(time) ?? Promise.resolve(undefined);
   }
+  get timelineMarkers(): TimelineMarker[] {
+    return this.engine?.timelineMarkers ?? [];
+  }
   skipInterstitial() {
     return this.engine?.skipInterstitial?.() ?? false;
   }
@@ -175,28 +189,39 @@ export class PlayerCore extends EventTarget {
     return this.engine?.source;
   }
   get diagnostics() {
-    return this.engine?.diagnostics;
+    const active = this.activePresentation;
+    return active && active !== this.engine
+      ? {
+          ...active.diagnostics,
+          interstitial: this.engine?.diagnostics?.interstitial,
+        }
+      : this.engine?.diagnostics;
   }
   get catalog() {
-    return this.engine?.catalog;
+    return this.activePresentation?.catalog;
   }
   get targetBuffer() {
-    return this.engine?.targetBuffer ?? 4;
+    return this.activePresentation?.targetBuffer ?? 4;
   }
   get audioTracks() {
-    return this.engine?.audioTracks ?? [];
+    return this.activePresentation?.audioTracks ?? [];
   }
   get subtitleTracks() {
-    return this.engine?.subtitleTracks ?? [];
+    return this.activePresentation?.subtitleTracks ?? [];
   }
   get selectedAudioTrack() {
-    return this.engine?.selectedAudioTrack ?? '';
+    return this.activePresentation?.selectedAudioTrack ?? '';
+  }
+  get selectedSubtitleTrack() {
+    return this.activePresentation?.selectedSubtitleTrack ?? '';
   }
   get mediaMode() {
-    return this.engine?.mediaMode ?? 'video';
+    return this.activePresentation?.mediaMode ?? 'video';
   }
   get availableMediaModes() {
-    return this.engine?.availableMediaModes ?? [];
+    return this.engine?.presentation === undefined
+      ? (this.engine?.availableMediaModes ?? [])
+      : [];
   }
   async selectMediaMode(media: 'video' | 'audio') {
     if (this.protocol !== 'hls' || !this.availableMediaModes.includes(media))
@@ -211,34 +236,37 @@ export class PlayerCore extends EventTarget {
     });
   }
   get qualityLevels() {
-    return this.engine?.qualityLevels ?? [];
+    return this.activePresentation?.qualityLevels ?? [];
   }
   get selectedQuality() {
-    return this.engine?.selectedQuality ?? -1;
+    return this.activePresentation?.selectedQuality ?? -1;
   }
   get currentQuality() {
-    return this.engine?.currentQuality ?? this.selectedQuality;
+    return this.activePresentation?.currentQuality ?? this.selectedQuality;
   }
   get autoQuality() {
-    return this.engine?.autoQuality ?? false;
+    return this.activePresentation?.autoQuality ?? false;
   }
   async selectQuality(index: number) {
-    if (!this.engine?.selectQuality)
+    const engine = this.activePresentation;
+    if (!engine?.selectQuality)
       throw new Error('Quality selection is not supported');
-    await this.engine.selectQuality(index);
+    await engine.selectQuality(index);
   }
   subtitleHistory(name: string) {
-    return this.engine?.subtitleHistory?.(name) ?? [];
+    return this.activePresentation?.subtitleHistory?.(name) ?? [];
   }
   async play() {
     await this.engine?.play();
   }
   async selectAudioTrack(name: string) {
-    if (!this.engine) throw new Error('No source loaded');
-    await this.engine.selectAudioTrack(name);
+    const engine = this.activePresentation;
+    if (!engine) throw new Error('No active presentation');
+    await engine.selectAudioTrack(name);
   }
   selectSubtitleTrack(name: string) {
-    if (!this.engine) throw new Error('No source loaded');
-    this.engine.selectSubtitleTrack(name);
+    const engine = this.activePresentation;
+    if (!engine) throw new Error('No active presentation');
+    engine.selectSubtitleTrack(name);
   }
 }

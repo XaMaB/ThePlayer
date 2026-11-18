@@ -74,3 +74,7 @@ jobs:
         timeout-minutes: 8
       - run: npm run test:hls:cdn
         timeout-minutes: 8
+      - run: npm run test:hls:date-preload
+        timeout-minutes: 8
+        env:
+          HLS_DATE_PRELOAD_SCENARIOS: direct,list

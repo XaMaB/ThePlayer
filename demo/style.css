@@ -951,6 +951,22 @@ body[data-embed] .screen {
   width: 100px;
   accent-color: #61ffe0;
 }
+.timeline-markers {
+  position: absolute;
+  height: 4px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.timeline-marker {
+  position: absolute;
+  height: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: #ffd66e;
+}
+.timeline-marker.primary {
+  background: #61ffe0;
+}
 .playback-time {
   color: #e8eef6;
   font-size: 11px;

@@ -1,12 +1,15 @@
 import type { TimedDateRange } from './date-ranges';
 import type { Playlist } from './playlist';
-import { ResourceClient } from './network';
+import { ResourceClient, type ResourceResponse } from './network';
+import type { TimelineMarker } from '../../core/timeline';
 export interface SkipControl {
   offset?: number;
   duration?: number;
   label?: string;
 }
 export interface Interstitial {
+  /** Runtime live tune-in offset, distinct from ordinary cue scheduling delay. */
+  startOffset?: number;
   range: TimedDateRange;
   uri?: string;
   list?: string;
@@ -149,6 +152,7 @@ export async function resolveInterstitial(
   client: ResourceClient,
   session: string,
   startOffset?: number,
+  preload?: (url: string) => ResourceResponse | undefined,
 ) {
   if (event.uri)
     return {
@@ -159,10 +163,18 @@ export async function resolveInterstitial(
       ] as InterstitialAsset[],
       skip: event.skip,
     };
-  const response = await client.get(
-    { url: interstitialUrl(event.list!, event.range.id, session, startOffset) },
-    { timeoutMs: 60000, recoveryWindowMs: 0, retries: 0 },
+  const url = interstitialUrl(
+    event.list!,
+    event.range.id,
+    session,
+    startOffset,
   );
+  const response =
+    preload?.(url) ??
+    (await client.get(
+      { url },
+      { timeoutMs: 60000, recoveryWindowMs: 0, retries: 0 },
+    ));
   if (response.data.length > 1024 * 1024)
     throw new Error('Interstitial asset list exceeds 1 MiB');
   const result = parseAssetList(
@@ -217,4 +229,27 @@ export function interstitialResume(
         ? 0
         : (event.resumeOffset ?? Math.min(played, event.limit ?? Infinity))),
   );
+}
+export function interstitialMarker(
+  event: Interstitial,
+  duration: number,
+): TimelineMarker {
+  const time = event.range.cue.includes('PRE')
+    ? 0
+    : event.range.cue.includes('POST')
+      ? duration
+      : event.range.start;
+  const length =
+    event.resumeOffset ??
+    Math.min(
+      event.range.duration ?? event.range.plannedDuration ?? 0,
+      event.limit ?? Infinity,
+    );
+  return {
+    id: event.range.id,
+    time,
+    end: event.occupies === 'RANGE' ? time + Math.max(0, length) : undefined,
+    label: 'Inserted content',
+    style: event.style === 'PRIMARY' ? 'primary' : 'highlight',
+  };
 }

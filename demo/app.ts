@@ -12,24 +12,9 @@ mountControls(
   () => player,
   (message) => error(message),
 );
-const select = $('subtitle-select') as HTMLSelectElement;
-
-const langs: Record<string, string> = {
-  eng: 'English',
-  ind: 'Indonesian',
-  spa: 'Spanish',
-  ara: 'Arabic',
-  ben: 'Bengali',
-  bul: 'Bulgarian',
-  deu: 'German',
-  fra: 'French',
-  ita: 'Italian',
-  und: 'Unknown',
-};
 let state: any;
 let channel: any;
 let player: any;
-let client: any;
 let activeNamespace = '';
 let playing = false;
 let opening = false;
@@ -85,38 +70,6 @@ function escape(s: any) {
 async function stopSubtitles() {
   renderer.destroy();
 }
-async function chooseSubtitles() {
-  selectedLanguage = select.value;
-  diagnostics.subtitleLanguage = selectedLanguage;
-  if (!client) return;
-  try {
-    client.selectSubtitleTrack(selectedLanguage);
-  } catch (e: any) {
-    error(e.message);
-  }
-}
-select.addEventListener('change', () => void chooseSubtitles());
-
-function updateSubtitleMenu(subs: any[]) {
-  ($('cc-toggle') as HTMLButtonElement).disabled = subs.length === 0;
-  select.innerHTML =
-    '<option value="">Off</option>' +
-    subs
-      .map((s: any) => {
-        const label = s.inband
-          ? s.language && s.language !== 'und'
-            ? (langs[s.language] ?? s.language) + ' · ' + s.label
-            : s.label
-          : (s.label ?? langs[s.language] ?? s.language);
-        return `<option value="${escape(s.name)}" data-format="${escape(s.format)}">${escape(label)}</option>`;
-      })
-      .join('');
-  select.value = selectedLanguage;
-  selectedLanguage = select.value;
-  diagnostics.subtitleLanguage = selectedLanguage;
-  $('cc-toggle').classList.toggle('selected', !!selectedLanguage);
-}
-
 async function openChannel(next: any) {
   if (opening || !next.source || next.status !== 'live') return;
   opening = true;
@@ -126,7 +79,6 @@ async function openChannel(next: any) {
     await player?.destroy();
     if (token !== operation) return;
     player = null;
-    client = null;
     channel = next;
     activeNamespace = next.namespace;
     playing = false;
@@ -184,7 +136,6 @@ async function openChannel(next: any) {
     });
     player.addEventListener('catalog', (e: any) => {
       if (token !== operation) return;
-      updateSubtitleMenu(player.subtitleTracks);
       text(
         'details',
         JSON.stringify(
@@ -201,10 +152,7 @@ async function openChannel(next: any) {
     player.addEventListener('subtitlechange', (e: any) => {
       if (token !== operation) return;
       selectedLanguage = e.detail?.name ?? '';
-      updateSubtitleMenu(player.subtitleTracks);
-    });
-    player.addEventListener('subtitletracks', (e: any) => {
-      if (token === operation) updateSubtitleMenu(e.detail);
+      diagnostics.subtitleLanguage = selectedLanguage;
     });
     player.addEventListener('captionwarning', (e: any) => {
       if (token === operation) error(e.detail.message);
@@ -219,8 +167,11 @@ async function openChannel(next: any) {
     if (next.protocol !== 'hls') renderer.attach(player);
     await player.init();
     if (token !== operation) return;
-    client = player;
-    if (selectedLanguage) void chooseSubtitles();
+    if (
+      selectedLanguage &&
+      player.subtitleTracks.some((t: any) => t.name === selectedLanguage)
+    )
+      player.selectSubtitleTrack(selectedLanguage);
   } catch (e: any) {
     if (token === operation) {
       error(e.message);
@@ -334,7 +285,6 @@ $('disconnect').addEventListener('click', async () => {
   await stopSubtitles();
   await player?.destroy();
   player = null;
-  client = null;
   activeNamespace = '';
   playing = false;
   opening = false;

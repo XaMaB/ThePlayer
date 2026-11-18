@@ -91,3 +91,5 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 Widevine initialization from playlist PSSH data also passes single/multi-key Fetch/XHR playback with in-band PSSH neutralized.
 
 Temporary DRM sessions now retire when known keys leave buffered/prepared media. Tests exercise 80 KIDs and rewind reacquisition; unknown sample-group KIDs remain conservatively retained. The 64-simultaneous-session bound remains explicit.
+
+0.39.0-alpha.1 adds interstitial timeline annotations, application-localized Skip labels, bounded date-range preloads and active-asset audio/CC/quality controls. Milestones 0.37–0.38 are bundled. Standalone subtitle controls no longer depend on demo code. Remaining work includes differing steering inventories, alternate video, further text/media profiles and device/stability gates.

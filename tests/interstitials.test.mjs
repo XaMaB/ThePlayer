@@ -17,6 +17,7 @@ const {
   parseAssetList,
   interstitialUrl,
   interstitialResume,
+  interstitialMarker,
   skipAvailable,
   snapInterstitial,
 } = await import(
@@ -32,6 +33,48 @@ const range = (extra = {}) => ({
     ...extra,
   }),
   start: 4,
+});
+test('Interstitial timeline markers distinguish points, skipped ranges and PRE/POST', () => {
+  const parse = (attributes) =>
+    parseInterstitial(range(attributes), 'https://example.com/master.m3u8');
+  assert.equal(interstitialMarker(parse({}), 12).end, undefined);
+  assert.deepEqual(
+    interstitialMarker(
+      parse({
+        'X-TIMELINE-OCCUPIES': 'RANGE',
+        'X-RESUME-OFFSET': '3',
+        'X-TIMELINE-STYLE': 'PRIMARY',
+      }),
+      12,
+    ),
+    {
+      id: 'ad',
+      time: 4,
+      end: 7,
+      label: 'Inserted content',
+      style: 'primary',
+    },
+  );
+  assert.equal(
+    interstitialMarker(
+      parse({
+        'X-TIMELINE-OCCUPIES': 'RANGE',
+        'PLANNED-DURATION': '8',
+        'X-PLAYOUT-LIMIT': '2',
+      }),
+      12,
+    ).end,
+    6,
+  );
+  assert.equal(interstitialMarker(parse({ CUE: 'PRE' }), 12).time, 0);
+  assert.equal(interstitialMarker(parse({ CUE: 'POST' }), 12).time, 12);
+  assert.equal(
+    interstitialMarker(
+      parse({ 'X-TIMELINE-OCCUPIES': 'RANGE', 'X-RESUME-OFFSET': '-2' }),
+      12,
+    ).end,
+    4,
+  );
 });
 test('Interstitial assets, signed resume offsets, limits and skip windows', () => {
   const event = parseInterstitial(

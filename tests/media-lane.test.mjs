@@ -51,3 +51,42 @@ test('Same-codec rendition replacement works without SourceBuffer.changeType', (
     else globalThis.MediaSource = original;
   }
 });
+
+test('AVC level changes retain the buffer without changeType, but codec changes fail clearly', () => {
+  const original = globalThis.MediaSource;
+  globalThis.MediaSource = { isTypeSupported: () => true };
+  try {
+    const lane = new MediaLane(
+      {},
+      'main',
+      async () => {},
+      async (data) => data,
+    );
+    const buffer = { mode: '' };
+    const media = { addSourceBuffer: () => buffer };
+    lane.configure(media, {
+      tracks: [{ kind: 'video', codec: 'avc1.42c00c' }],
+    });
+    lane.configure(media, {
+      tracks: [{ kind: 'video', codec: 'avc1.42c01e' }],
+    });
+    assert.equal(lane.buffer, buffer);
+    assert.throws(
+      () =>
+        lane.configure(media, {
+          tracks: [{ kind: 'video', codec: 'avc1.64001e' }],
+        }),
+      /cannot switch SourceBuffer codec types/,
+    );
+    assert.throws(
+      () =>
+        lane.configure(media, {
+          tracks: [{ kind: 'video', codec: 'hvc1.1.6.L93.B0' }],
+        }),
+      /cannot switch SourceBuffer codec types/,
+    );
+  } finally {
+    if (original === undefined) delete globalThis.MediaSource;
+    else globalThis.MediaSource = original;
+  }
+});

@@ -205,12 +205,12 @@ export class DateRangeTimeline {
     for (const r of this.ranges)
       if (r.cue.includes(phase)) this.trigger(r, phase);
   }
-  private trigger(r: TimedDateRange, cause: string) {
+  private trigger(r: TimedDateRange, cause: string, context = {}) {
     if (this.fired.has(r.id) || (r.cue.includes('ONCE') && this.once.has(r.id)))
       return;
     this.fired.add(r.id);
     if (r.cue.includes('ONCE')) this.once.add(r.id);
-    this.emit('daterangecue', { ...r, cause });
+    this.emit('daterangecue', { ...r, cause, ...context });
   }
   tick(time: number, seeking = false) {
     const backwards = this.last !== undefined && time < this.last;
@@ -233,7 +233,10 @@ export class DateRangeTimeline {
         !r.cue.includes('POST') &&
         (cueInside || (crossed && !seeking))
       )
-        this.trigger(r, seeking ? 'seek' : 'playback');
+        this.trigger(r, seeking ? 'seek' : 'playback', {
+          initial: this.last === undefined,
+          position: time,
+        });
     }
     this.last = time;
   }

@@ -64,7 +64,10 @@ export class MoqEngine extends EventTarget {
   subtitleHistory(name: string) {
     return this.captions?.history(name) ?? [];
   }
-  private selectedSubtitleTrack = '';
+  private selectedSubtitle = '';
+  get selectedSubtitleTrack() {
+    return this.selectedSubtitle;
+  }
   private subtitleGeneration = 0;
   private subtitleSubscription?: ReturnType<MoqEngine['subscribe']>;
   selectSubtitleTrack(name: string) {
@@ -73,7 +76,7 @@ export class MoqEngine extends EventTarget {
     const generation = ++this.subtitleGeneration;
     this.subtitleSubscription?.close();
     this.subtitleSubscription = undefined;
-    this.selectedSubtitleTrack = name;
+    this.selectedSubtitle = name;
     this.emit('subtitlechange', track ?? null);
     if (!track) return;
     if (track.inband) {

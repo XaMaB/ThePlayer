@@ -9,11 +9,13 @@ export type {
   PlaybackSource,
   EngineFactory,
   EngineRegistry,
+  TimelineMarker,
 } from './core/player';
 export { MoqEngine } from './engines/moq/engine';
 export type { PlayerSource } from './engines/moq/engine';
 export { SubtitleRenderer } from './subtitles/renderer';
 export { mountControls } from './ui/controls';
+export type { ControlsOptions } from './ui/controls';
 
 /** Default distribution includes MoQ. Use PlayerCore for a custom engine set. */
 export class ThePlayer extends PlayerCore {

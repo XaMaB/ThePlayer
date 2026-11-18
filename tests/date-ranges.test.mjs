@@ -31,6 +31,32 @@ const body = (metadata, tail = '#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts\n') =>
   metadata +
   '\n' +
   tail;
+test('Date range cues distinguish initial tune-in from ordinary scheduling delay', () => {
+  const p = parsePlaylist(
+    body(
+      '#EXT-X-DATERANGE:ID="ad",START-DATE="2026-01-02T03:04:01Z",DURATION=5',
+    ),
+    base,
+  );
+  const joined = [],
+    normal = [];
+  const first = new DateRangeTimeline((name, detail) => {
+    if (name === 'daterangecue') joined.push(detail);
+  });
+  first.update(p);
+  first.tick(2);
+  assert.equal(joined[0].initial, true);
+  assert.equal(joined[0].position, 2);
+  const playing = new DateRangeTimeline((name, detail) => {
+    if (name === 'daterangecue') normal.push(detail);
+  });
+  playing.update(p);
+  playing.tick(0);
+  playing.tick(1.02);
+  assert.equal(normal[0].initial, false);
+  assert.equal(normal[0].position, 1.02);
+  assert.equal(normal[0].cause, 'playback');
+});
 test('Date ranges consolidate attributes, decode SCTE-35 bytes and retain unknown extension values', () => {
   const p = parsePlaylist(
     body(

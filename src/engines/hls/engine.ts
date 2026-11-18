@@ -5,10 +5,13 @@ import {
   parseInterstitial,
   resolveInterstitial,
   interstitialResume,
+  interstitialMarker,
   snapInterstitial,
   type Interstitial,
 } from './interstitials';
 import { InterstitialSession } from './interstitial-session';
+import { DateRangePreloads } from './date-range-preloads';
+import type { ResourceResponse } from './network';
 import { retryable } from './recovery';
 import { ContentSteering } from './steering';
 import { EmeController, type DrmOptions } from './eme';
@@ -159,6 +162,7 @@ export class HlsEngine extends EventTarget {
   private gaps: { start: number; end: number }[] = [];
   private abort = new AbortController();
   private client: ResourceClient;
+  private dateRangePreloads: DateRangePreloads;
   private playlistLoader: PlaylistLoader;
   private get playlist() {
     return this.main?.playlist;
@@ -174,7 +178,11 @@ export class HlsEngine extends EventTarget {
         (name === 'daterange' || name === 'daterangecue') &&
         this.source.interstitials !== false
       ) {
-        const range = detail as TimedDateRange;
+        const range = detail as TimedDateRange & {
+          initial?: boolean;
+          cause?: string;
+          position?: number;
+        };
         if (range.class === 'com.apple.hls.interstitial') {
           try {
             const event = parseInterstitial(
@@ -190,7 +198,15 @@ export class HlsEngine extends EventTarget {
                 this.interstitialAutoplay = range.cue.includes('PRE')
                   ? this.source.autoplay !== false
                   : range.cue.includes('POST') || !this.video.paused;
-              this.interstitialQueue.push(event);
+              this.interstitialQueue.push({
+                ...event,
+                startOffset:
+                  this.main?.playlist.live &&
+                  (range.initial || range.cause === 'seek') &&
+                  (range.position ?? range.start) > range.start
+                    ? range.position! - range.start
+                    : undefined,
+              });
               this.video.pause();
             }
           } catch (error) {
@@ -255,6 +271,7 @@ export class HlsEngine extends EventTarget {
   constructor(
     readonly video: HTMLVideoElement,
     readonly source: HlsSource,
+    prefetched?: (resource: Resource) => ResourceResponse | undefined,
   ) {
     super();
     for (const [service, encoding] of Object.entries(
@@ -302,7 +319,16 @@ export class HlsEngine extends EventTarget {
       this.eme = new EmeController(video, source.drm, (error) =>
         this.fail(error),
       );
-    this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
+    this.client = new ResourceClient(
+      source.network ?? {},
+      this.abort.signal,
+      prefetched,
+    );
+    this.dateRangePreloads = new DateRangePreloads(
+      this.client,
+      this.primarySession,
+      (message) => this.emit('interstitialwarning', { message }),
+    );
     this.playlistLoader = new PlaylistLoader(
       this.client,
       () => this.master?.variables ?? {},
@@ -321,6 +347,8 @@ export class HlsEngine extends EventTarget {
     video.addEventListener(
       'timeupdate',
       () => {
+        if (!this.interstitialActive)
+          this.dateRangePreloads.tick(video.currentTime);
         if (!this.interstitialActive && !this.initial && !this.interstitialEnd)
           this.dateRanges.tick(video.currentTime, video.seeking);
         if (!this.interstitialActive && !this.initial && !video.seeking)
@@ -731,6 +759,8 @@ export class HlsEngine extends EventTarget {
     lane.playlist = updated;
     if (lane === this.main) {
       this.dateRanges.update(updated);
+      if (this.source.interstitials !== false)
+        this.dateRangePreloads.update(updated, this.video.currentTime);
       for (const warning of updated.metadataWarnings ?? [])
         this.emit('metadatawarning', { type: 'daterange', message: warning });
     }
@@ -859,6 +889,19 @@ export class HlsEngine extends EventTarget {
   skipInterstitial() {
     return this.interstitialSession?.skipNow() ?? false;
   }
+  get presentation(): HlsEngine | null | undefined {
+    return this.interstitialActive
+      ? (this.interstitialPlayer ?? null)
+      : undefined;
+  }
+  get selectedSubtitleTrack() {
+    return this.selectedSubtitle;
+  }
+  get timelineMarkers() {
+    return [...this.interstitialRanges.values()].map((event) =>
+      interstitialMarker(event, this.main?.playlist.duration ?? 0),
+    );
+  }
   private async playInterstitial(event: Interstitial) {
     const primary = this.main!.playlist;
     const oldAudio = this.audio?.playlist;
@@ -902,9 +945,8 @@ export class HlsEngine extends EventTarget {
         event,
         this.client,
         this.primarySession,
-        primary.live && this.video.currentTime > scheduled
-          ? this.video.currentTime - scheduled
-          : undefined,
+        event.startOffset,
+        (url) => this.dateRangePreloads.take(event.range.id, url),
       );
       await this.eme?.destroy();
       this.eme = undefined;
@@ -922,22 +964,49 @@ export class HlsEngine extends EventTarget {
       ({ played, cancelled, skipped } = await this.interstitialSession.run(
         resolved.assets,
         (url) => {
-          this.interstitialPlayer = new HlsEngine(this.video, {
-            protocol: 'hls',
-            url,
-            network: {
-              recoveryWindowMs: 5000,
-              retries: 1,
-              ...this.source.network,
+          this.interstitialPlayer = new HlsEngine(
+            this.video,
+            {
+              protocol: 'hls',
+              url,
+              network: {
+                recoveryWindowMs: 5000,
+                retries: 1,
+                ...this.source.network,
+              },
+              drm: this.source.drm,
+              autoplay: this.interstitialAutoplay,
+              interstitials: false,
+              interstitialAsset: true,
+              targetBuffer: this.targetBuffer,
+              audioLanguage: this.source.audioLanguage,
+              subtitleLanguage: this.source.subtitleLanguage,
             },
-            drm: this.source.drm,
-            autoplay: this.interstitialAutoplay,
-            interstitials: false,
-            interstitialAsset: true,
-            targetBuffer: this.targetBuffer,
-            audioLanguage: this.source.audioLanguage,
-            subtitleLanguage: this.source.subtitleLanguage,
-          });
+            (resource) =>
+              resource.range || resource.rangeStart !== undefined
+                ? undefined
+                : this.dateRangePreloads.take(event.range.id, resource.url),
+          );
+          for (const type of [
+            'catalog',
+            'audiochange',
+            'qualitylevels',
+            'qualitychange',
+            'subtitletracks',
+            'subtitlechange',
+            'subtitlemetrics',
+            'caption',
+            'captionwarning',
+            'metadata',
+            'metadatawarning',
+          ]) {
+            const child = this.interstitialPlayer;
+            child.addEventListener(
+              type,
+              (event) => this.emit(type, (event as CustomEvent).detail),
+              { signal: child.abort.signal },
+            );
+          }
           return this.interstitialPlayer;
         },
       ));
@@ -1024,6 +1093,7 @@ export class HlsEngine extends EventTarget {
     this.media.duration = main.live ? Infinity : end;
     await this.prime();
     this.interstitialActive = false;
+    this.publishCatalog();
     this.diagnostics.interstitial = { active: false };
     this.interstitialEnd = {
       id: event.range.id,
@@ -1314,6 +1384,11 @@ export class HlsEngine extends EventTarget {
       lane.next++;
     }
     this.dateRanges.update(this.main!.playlist);
+    if (this.source.interstitials !== false)
+      this.dateRangePreloads.update(
+        this.main!.playlist,
+        this.video.currentTime,
+      );
     for (const warning of this.main!.playlist.metadataWarnings ?? [])
       this.emit('metadatawarning', { type: 'daterange', message: warning });
     this.publishCatalog();
@@ -1888,6 +1963,8 @@ export class HlsEngine extends EventTarget {
     } else {
       this.main = lane;
       this.dateRanges.update(lane.playlist);
+      if (this.source.interstitials !== false)
+        this.dateRangePreloads.update(lane.playlist, this.video.currentTime);
       this.selectedQuality = index;
       this.qualityTimeline = this.qualityTimeline.filter(
         (item) => item.at < boundary,
@@ -2413,6 +2490,7 @@ export class HlsEngine extends EventTarget {
   async destroy() {
     if (this.abort.signal.aborted) return;
     this.abort.abort();
+    this.dateRangePreloads.clear();
     this.thumbnails?.destroy();
     await this.interstitialPlayer?.destroy();
     for (const request of this.switches.splice(0))

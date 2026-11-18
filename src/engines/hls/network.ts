@@ -44,6 +44,13 @@ export interface RequestOptions {
   /** Validated response chunks for speculative open-range delivery. */
   onChunk?: (chunk: Uint8Array, url: string) => void;
 }
+export interface ResourceResponse {
+  data: Uint8Array;
+  url: string;
+  elapsed: number;
+  age?: number;
+  receivedAt: number;
+}
 export class ResourceClient {
   bytes = 0;
   requests = 0;
@@ -58,6 +65,9 @@ export class ResourceClient {
   constructor(
     readonly options: NetworkOptions,
     readonly signal: AbortSignal,
+    private readonly prefetched?: (
+      resource: Resource,
+    ) => ResourceResponse | undefined,
   ) {
     for (const [name, value, minimum] of [
       ['timeoutMs', options.timeoutMs, 1],
@@ -76,13 +86,11 @@ export class ResourceClient {
   async get(
     resource: Resource,
     request: RequestOptions = {},
-  ): Promise<{
-    data: Uint8Array;
-    url: string;
-    elapsed: number;
-    age?: number;
-    receivedAt: number;
-  }> {
+  ): Promise<ResourceResponse> {
+    this.signal.throwIfAborted();
+    request.signal?.throwIfAborted();
+    const cached = this.prefetched?.(resource);
+    if (cached) return cached;
     const linked = request.signal ? new AbortController() : undefined;
     const stop = () => linked?.abort(this.signal.reason);
     const cancel = () => linked?.abort(request.signal!.reason);

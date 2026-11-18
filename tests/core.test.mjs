@@ -61,6 +61,69 @@ test('unsupported engine does not interrupt current source', async () => {
   assert.equal(engines[0].destroyed, undefined);
   await player.destroy();
 });
+test('Inserted presentations own track controls while primary source and selections survive', async () => {
+  const { player, engines } = fixture();
+  await player.load({ protocol: 'test', url: 'primary' });
+  const parent = engines[0],
+    calls = [];
+  Object.assign(parent, {
+    isLive: true,
+    audioTracks: [{ name: 'primary-audio' }],
+    subtitleTracks: [{ name: 'primary-text' }],
+    selectedAudioTrack: 'primary-audio',
+    selectedSubtitleTrack: 'primary-text',
+    qualityLevels: [{ id: 0 }],
+    selectedQuality: 0,
+    diagnostics: { interstitial: { active: true } },
+  });
+  const child = {
+    audioTracks: [{ name: 'asset-audio' }],
+    subtitleTracks: [{ name: 'asset-text' }],
+    selectedAudioTrack: 'asset-audio',
+    selectedSubtitleTrack: 'asset-text',
+    qualityLevels: [{ id: 1 }],
+    selectedQuality: 1,
+    diagnostics: { state: 'playing' },
+    async selectAudioTrack(name) {
+      calls.push(['audio', name]);
+    },
+    selectSubtitleTrack(name) {
+      calls.push(['subtitle', name]);
+    },
+    async selectQuality(id) {
+      calls.push(['quality', id]);
+    },
+  };
+  parent.presentation = child;
+  assert.equal(player.isLive, true);
+  assert.equal(player.source.url, 'primary');
+  assert.equal(player.selectedAudioTrack, 'asset-audio');
+  assert.equal(player.selectedSubtitleTrack, 'asset-text');
+  assert.equal(player.qualityLevels[0].id, 1);
+  assert.deepEqual(player.availableMediaModes, []);
+  assert.equal(player.diagnostics.interstitial.active, true);
+  assert.equal(player.diagnostics.state, 'playing');
+  await player.selectAudioTrack('other');
+  player.selectSubtitleTrack('');
+  await player.selectQuality(2);
+  assert.deepEqual(calls, [
+    ['audio', 'other'],
+    ['subtitle', ''],
+    ['quality', 2],
+  ]);
+  parent.presentation = null;
+  assert.deepEqual(player.audioTracks, []);
+  assert.deepEqual(player.subtitleTracks, []);
+  await assert.rejects(
+    player.selectAudioTrack('primary-audio'),
+    /No active presentation/,
+  );
+  parent.presentation = undefined;
+  assert.equal(player.selectedAudioTrack, 'primary-audio');
+  assert.equal(player.selectedSubtitleTrack, 'primary-text');
+  assert.equal(player.selectedQuality, 0);
+  await player.destroy();
+});
 test('failed initialization releases media ownership', async () => {
   const { player, engines } = fixture(true);
   await assert.rejects(player.load({ protocol: 'test' }), /failed/);

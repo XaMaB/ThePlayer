@@ -331,7 +331,19 @@ export class MediaLane {
       this.buffer = media.addSourceBuffer(mime);
       this.buffer.mode = mime === 'audio/mpeg' ? 'sequence' : 'segments';
     } else if (this.mime !== mime) {
-      this.buffer.changeType(mime);
+      if (typeof this.buffer.changeType === 'function') {
+        this.buffer.changeType(mime);
+      } else {
+        // AVC level changes carry their new SPS/PPS in the next init segment.
+        // Older WebKit MSE has no changeType; allow only an unchanged sample
+        // entry, profile and constraints, with all other tracks identical.
+        const withoutAvcLevel = (value: string) =>
+          value.replace(/\b(avc[13]\.[0-9a-f]{4})[0-9a-f]{2}\b/gi, '$1');
+        if (withoutAvcLevel(this.mime) !== withoutAvcLevel(mime))
+          throw new Error(
+            'This browser cannot switch SourceBuffer codec types',
+          );
+      }
       this.appendedInit = undefined;
       this.buffer.mode = mime === 'audio/mpeg' ? 'sequence' : 'segments';
     }

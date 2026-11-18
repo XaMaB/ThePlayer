@@ -1,5 +1,22 @@
 # Release versions
 
+## 0.39.0-alpha.1
+
+- Route audio, subtitle and quality controls to the active interstitial asset and preserve primary selections on return.
+- Make subtitle selection part of the shared standalone controls, including immediate engine-event updates and listener cleanup.
+- Support AVC level-only rendition switches on MSE implementations without changeType; reject incompatible codec changes explicitly.
+- Verify paused asset switches, displayed WebVTT cues and primary restoration over Fetch/XHR in Chromium, Firefox and WebKit.
+- Includes development milestones 0.37–0.38, which were not published separately.
+
+- Schedule bounded Appendix F interstitial preloads within future date ranges and reuse completed direct-playlist/asset-list responses.
+- Discard removed/mismatched preloads, ignore ended playlists and fall back immediately when a speculative request is unfinished or fails.
+- Distinguish initial live tune-in from ordinary cue delay when adding interstitial start-offset query parameters.
+- Add deterministic scheduling/retention tests and browser timing, reuse, removal, failure and cancellation scenarios.
+
+- Expose protocol-neutral primary timeline markers and render interstitial point/range annotations in the VOD seek bar.
+- Respect timeline style and PRE/POST placement, clamp ranges and hide primary markers during inserted playback.
+- Allow application-provided Skip labels keyed by X-SKIP-CONTROL-LABEL-ID, with safe text rendering and English defaults.
+
 ## 0.36.0-alpha.1
 
 - Retire temporary DRM sessions only after all their known KIDs leave buffered/prepared media; preserve unknown and pending key dependencies.
