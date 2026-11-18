@@ -12,7 +12,7 @@
 
 **Live television deserves a player that understands broadcast.**
 
-ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, an original experimental HLS engine, multilingual audio, broadcast captions and shared playback controls.
+ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, an original HLS engine, multilingual audio, broadcast captions and shared playback controls.
 
 [Protocols](#protocols) · [Codecs](#audio-and-video) · [Subtitles](#subtitles) · [HLS features](#hls-features) · [Quick start](#development) · [Integration](#library) · [Architecture](docs/architecture.md)
 
@@ -26,13 +26,13 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 
 ## Protocols
 
-| Protocol              | Status                      | Implemented scope                                                                                      |
-| --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| MoQ over WebTransport | Implemented                 | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                      |
-| HLS over HTTP(S)      | Experimental implementation | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                  |
-| LL-HLS                | Implemented fMP4 baseline   | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache |
-| MPEG-DASH             | Planned                     | No DASH engine ships yet                                                                               |
-| UDP/RTP multicast     | Origin input only           | The browser does not join multicast groups; use an Origin to ingest and publish media                  |
+| Protocol              | Status                    | Implemented scope                                                                                      |
+| --------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| MoQ over WebTransport | Implemented               | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                      |
+| HLS over HTTP(S)      | Implemented               | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                  |
+| LL-HLS                | Implemented fMP4 delivery | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache |
+| MPEG-DASH             | Planned                   | No DASH engine ships yet                                                                               |
+| UDP/RTP multicast     | Origin input only         | The browser does not join multicast groups; use an Origin to ingest and publish media                  |
 
 MoQ transport compatibility alone does not guarantee interoperability: the publisher and player must also agree on the catalog and media profile. HLS is a tested subset, not a claim of full support for every protocol version. See the [HLS support matrix](docs/hls-support.md).
 
@@ -40,15 +40,15 @@ MoQ transport compatibility alone does not guarantee interoperability: the publi
 
 The player uses Media Source Extensions (MSE) and browser decoders. It does not transcode or bundle software video decoders.
 
-| Codec / mode                 | HLS carriage                       | Status and limits                                                                                                                                                    |
-| ---------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AVC / H.264                  | MPEG-TS and fMP4                   | Implemented; browser playback tested                                                                                                                                 |
-| HEVC / H.265 Main and Main10 | MPEG-TS and fMP4 (`hvc1` / `hev1`) | Remux/configuration implemented and independently decoded with FFmpeg; browser/OS HEVC decoder required; visual HEVC browser playback not validated on the test host |
-| AV1 Main, 8/10-bit           | fMP4 (`av01`)                      | Browser playback, quality changes and seeking tested; no AV1 TS/WebM/raw OBU input                                                                                   |
-| AAC-LC / declared HE-AAC v1  | MPEG-TS and fMP4                   | Implemented, including separate audio renditions; HE-AAC v2 is excluded                                                                                              |
-| Audio-only AAC               | MPEG-TS and fMP4                   | Implemented; bitrate selection and Video / Audio only mode for compatible mixed masters                                                                              |
-| Dolby audio / Atmos          | —                                  | Not implemented                                                                                                                                                      |
-| Dolby Vision / HDR output    | —                                  | Dolby Vision and HDR display/tone mapping are not validated                                                                                                          |
+| Codec / mode                   | HLS carriage                       | Status and limits                                                                                                                                                    |
+| ------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AVC / H.264                    | MPEG-TS and fMP4                   | Implemented; browser playback tested                                                                                                                                 |
+| HEVC / H.265 Main and Main10   | MPEG-TS and fMP4 (`hvc1` / `hev1`) | Remux/configuration implemented and independently decoded with FFmpeg; browser/OS HEVC decoder required; visual HEVC browser playback not validated on the test host |
+| AV1 Main, 8/10-bit             | fMP4 (`av01`)                      | Browser playback, quality changes and seeking tested; no AV1 TS/WebM/raw OBU input                                                                                   |
+| AAC-LC / declared HE-AAC v1/v2 | MPEG-TS and fMP4                   | Implemented, including separate audio renditions; PS uses a mono core with stereo output                                                                             |
+| Audio-only AAC                 | MPEG-TS and fMP4                   | Implemented; bitrate selection and Video / Audio only mode for compatible mixed masters                                                                              |
+| Dolby audio / Atmos            | —                                  | Not implemented                                                                                                                                                      |
+| Dolby Vision / HDR output      | —                                  | Dolby Vision and HDR display/tone mapping are not validated                                                                                                          |
 
 The MoQ engine appends catalog-advertised fragmented MP4 to MSE. Its codec compatibility depends on the publisher's media profile and the browser; the HLS-specific demux/remux matrix above does not imply equivalent MoQ codec validation. MoQ audio switching replaces the audio subscription/buffer while retaining the video connection and timeline.
 
@@ -131,7 +131,7 @@ The package remains private to prevent accidental npm publication. This does not
 
 ## HLS integration
 
-Choose **HLS · experimental** in the demo and enter a playlist URL. The engine is our own implementation, with no hls.js, Video.js/VHS or Shaka runtime dependency. See [architecture research](docs/hls-research.md) and [tested coverage](docs/hls-support.md).
+Choose **HLS** in the demo and enter a playlist URL. The engine is our own implementation, with no hls.js, Video.js/VHS or Shaka runtime dependency. See [architecture research](docs/hls-research.md) and [tested coverage](docs/hls-support.md).
 
 ```js
 const player = new ThePlayer(video);
@@ -244,6 +244,6 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.44.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current release candidate: **0.45.0-rc.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
 
 HLS alternate video angles are available through `player.videoTracks` and `player.selectVideoTrack(name)`, and in the shared Quality menu. Angle identity survives quality changes; audio language remains independent.

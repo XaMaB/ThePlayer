@@ -297,6 +297,28 @@ test('HE-AAC ASC signals SBR and preserves the duration of its LC core', () => {
   assert.throws(() => aacConfiguration(0, 2, 'mp4a.40.5'), /output rate/);
 });
 
+test('HE-AAC v2 declares PS with a mono core and stereo output at the original sample clock', async () => {
+  const config = aacConfiguration(6, 1, 'mp4a.40.29');
+  assert.equal(config.codec, 'mp4a.40.29');
+  assert.equal(config.channels, 2);
+  assert.equal(config.rate, 48000);
+  assert.equal(config.duration / config.rate, 1024 / 24000);
+  assert.deepEqual([...config.asc], [0xeb, 0x09, 0x88, 0x00]);
+  assert.throws(() => aacConfiguration(6, 2, 'mp4a.40.29'), /mono AAC core/);
+  const { initialization, inspectInit } = await module('mp4');
+  const init = initialization([
+    {
+      id: 2,
+      kind: 'audio',
+      timescale: config.rate,
+      channels: config.channels,
+      codec: config.codec,
+      asc: config.asc,
+    },
+  ]);
+  assert.equal(inspectInit(init)[0].codec, 'mp4a.40.29');
+});
+
 const { selectRendition } = await module('selection');
 const renditionMaster = (body) =>
   `#EXTM3U\n${body}\n#EXT-X-STREAM-INF:BANDWIDTH=100000\nv.m3u8`;

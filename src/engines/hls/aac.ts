@@ -11,9 +11,13 @@ export function aacConfiguration(
   const coreRate = sampleRates[index];
   if (!coreRate || channels < 1 || channels > 7)
     throw new Error('Unsupported AAC configuration');
-  if (codec !== 'mp4a.40.5')
+  const ps = codec === 'mp4a.40.29';
+  if (ps && channels !== 1)
+    throw new Error('HE-AAC v2 requires a mono AAC core');
+  if (codec !== 'mp4a.40.5' && !ps)
     return {
       rate: coreRate,
+      channels,
       duration: 1024,
       codec: 'mp4a.40.2',
       asc: new Uint8Array([
@@ -26,7 +30,7 @@ export function aacConfiguration(
   // AudioSpecificConfig: SBR AOT, core frequency, channels, output frequency,
   // AAC-LC extension AOT and GASpecificConfig (1024 samples, no dependency).
   const bits = [
-    [5, 5],
+    [ps ? 29 : 5, 5],
     [index, 4],
     [channels, 4],
     [outputIndex, 4],
@@ -38,5 +42,11 @@ export function aacConfiguration(
   for (const [value, length] of bits)
     for (let n = length - 1; n >= 0; n--, at++)
       asc[at >>> 3] |= ((value >>> n) & 1) << (7 - (at & 7));
-  return { rate: coreRate * 2, duration: 2048, codec, asc };
+  return {
+    rate: coreRate * 2,
+    channels: ps ? 2 : channels,
+    duration: 2048,
+    codec,
+    asc,
+  };
 }

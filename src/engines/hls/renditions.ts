@@ -20,7 +20,7 @@ export function normalizeCodec(value: string): string {
   if (profile < 1 || profile > 255 || level < 1 || level > 255) return codec;
   return `avc1.${profile.toString(16).padStart(2, '0')}00${level.toString(16).padStart(2, '0')}`;
 }
-/** The demuxers currently support AVC, HEVC, AV1 (fMP4), AAC-LC and HE-AAC v1; filter declared unsupported codecs. */
+/** The demuxers currently support AVC, HEVC, AV1 (fMP4), AAC-LC and HE-AAC v1/v2; filter declared unsupported codecs. */
 export function compatibleVariants(variants: Variant[]): Variant[] {
   return variants
     .map((v) => ({
@@ -39,7 +39,7 @@ export function compatibleVariants(variants: Variant[]): Variant[] {
               ) ||
               ['mp3', 'ac-3', 'ec-3'].includes(codec) ||
               !!normalizeAv1Codec(codec) ||
-              /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.[25])$/.test(
+              /^(avc[13]\.[0-9a-f]{6}|(?:hvc1|hev1)\.[ABC]?\d+\.[0-9A-F]+\.[LH]\d+(?:\.[0-9A-F]{2})*|mp4a\.40\.(?:2|5|29))$/.test(
                 codec,
               ),
           ),

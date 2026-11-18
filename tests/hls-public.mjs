@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { hlsExamples } from '../demo/hls-examples.mjs';
-const root = fileURLToPath(new URL('../dist/', import.meta.url));
+const root =
+  process.env.THEPLAYER_DIST ??
+  fileURLToPath(new URL('../dist/', import.meta.url));
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost'),

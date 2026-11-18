@@ -1,5 +1,14 @@
 # Release versions
 
+## 0.45.0-rc.1
+
+- Mark HLS delivery as implemented with an explicit support matrix; this release candidate is undergoing final stabilization.
+- Support declared HE-AAC v2 / Parametric Stereo in TS, fMP4 and packed audio.
+- Preserve mono core configuration while signaling stereo output and the SBR sample clock.
+- Add an original synthetic two-channel fixture, independent PCM equality checks and actual browser frequency/seek tests.
+- Provide a real headless audio sink in CI and bounded frequency convergence checks after audio-graph startup/resume.
+- Make optional public-stream tests honor isolated candidate builds.
+
 ## 0.44.0-alpha.1
 
 - Decode CEA-608 background opacity/color and black foreground attributes, preserving implicit spacing and PAC resets.

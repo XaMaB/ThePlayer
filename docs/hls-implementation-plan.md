@@ -1,17 +1,26 @@
 # HLS implementation plan
 
-Status: original HLS engine with AVC/HEVC/AAC TS/fMP4, AV1 fMP4, audio-only, ABR, external audio, WebVTT and fMP4 CEA-608. Versions 0.8–0.9 add bounded network recovery, declared gaps, live publisher progress, coordinated encoder/window restarts and complete PSI assembly. See [current support](hls-support.md). The remaining stages below are active work, not completed capabilities.
+Status: the original engine implements the delivery, media, selection, subtitle and extension stages below. Final release validation is active. The entries under **Delivery history** record what was pending at each historical milestone; they are not the current support matrix. See [tested profiles and explicit limits](hls-support.md).
 
-| Stage                   | Current status                                                                                                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Fault infrastructure    | Local/remote HTTP scenarios, Fetch/XHR checks and CI integration implemented                                                                                                         |
-| Recovery / timeline     | Network, declared gaps, stale publisher and detected live resets implemented; additional edge-case coverage continues                                                                |
-| TS/fMP4 hardening       | Multi-packet/versioned PSI, CRC and AVC/HEVC access-unit/PES assembly implemented; remaining timing/seek edge cases continue                                                         |
-| ABR / buffer policy     | Emergency request abort, bounded fallback and temporary rendition quarantine implemented                                                                                             |
-| LL-HLS                  | fMP4 parts, blocking/delta, open-range/MAP preloads and encrypted parts implemented; expanded interoperability continues                                                             |
-| Subtitles               | WebVTT, stpp/TTML, wvtt and fMP4 CEA-608 subsets implemented; broader CEA carriage and advanced text features pending                                                                |
-| Protection / extensions | AES-128/GCM, sample encryption, EME and timed metadata implemented; steering for matching inventories, interstitial playback and JPEG seek previews implemented; profile gaps remain |
-| Stabilization           | Regression matrix active; long-running live soak started; device-specific validation remains required                                                                                |
+| Stage                   | Implemented behavior                                                                                      | Validation                                                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Fault infrastructure    | Local and Amsterdam HTTP/TLS fixtures, Fetch/XHR, cancellation and CI                                     | Actual injected faults and request assertions                   |
+| Recovery / timeline     | Retry, gaps, publisher stalls, independent-audio restarts, seek/DVR and pause preservation                | Browser recovery matrix                                         |
+| TS/fMP4 hardening       | PSI/PES/access units, AVC/HEVC/AV1, AAC including PS, packed MP3/Dolby, captions                          | Independent decode/PCM/frame checks and MSE playback            |
+| ABR / buffer policy     | Throughput estimation, emergency cancellation/downshift, quarantine, Auto/manual selection                | Throttled bodies/TTFB, failures and continued playback          |
+| LL-HLS                  | Parts, dependent-part startup, blocking/delta updates, growing-range/MAP preloads and encrypted parts     | Observed requests plus independent audio/video playback         |
+| Subtitles               | WebVTT/wvtt, TTML text profile, CEA-608 and CEA-708 via SEI/CDP/sample tracks                             | Timing, geometry, rendered pixels, selection, seek and teardown |
+| Protection / extensions | AES-128/GCM, SAMPLE-AES, CENC/CBCS/EME, key rotation, metadata, steering, interstitials and seek previews | Generated vectors, public Widevine and browser/remote scenarios |
+| Stabilization           | Isolated builds, release snapshots, CI matrix and continuous live soak                                    | Final regression/soak results pending                           |
+
+## Release acceptance
+
+- Unit, formatting, type and isolated build checks must pass for the published source.
+- Full deterministic Chromium regression and targeted Firefox/WebKit playback must pass; capability rejection must remain distinct from a passed decode.
+- Repeat the new network-facing scenarios through the Amsterdam test origin.
+- Record the live soak duration and observed errors, dropped frames, restarts and memory; never report an unfinished duration as passed.
+- Publish matching source/tag/build version and update the actual demo only after its applicable checks pass.
+- Keep optional device and presentation profiles explicit. An implemented engine is not blanket certification of every codec, CDM, browser or CTA/TTML presentation feature. Unsupported combinations must remain documented or fail clearly.
 
 ## Specification baseline
 
@@ -42,7 +51,7 @@ Keep conformance results separate from parser support. Explicitly reject unsuppo
 
 A third-party engine adapter and an independently implemented engine are different deliverables. The selected direction is an independently implemented HLS engine. Any reused source must retain its license and attribution. An independent engine should derive behavior from the specifications and validate interoperability against other players without presenting their implementation as original work.
 
-## Resilience delivery status
+## Delivery history
 
 0.8.0-alpha.1 starts stages 1–2: deterministic HTTP faults, bounded resource recovery and declared-gap scheduling. The fault server can run locally in CI or on a separate HTTP host. This delivery does not complete the overall plan.
 
@@ -103,3 +112,5 @@ Temporary DRM sessions now retire when known keys leave buffered/prepared media.
 0.43.0-alpha.1 adds clear-stream steering between muxed and separate audio topologies, with media preflight, preserved pause/position and live validation. Post-commit failures are explicit; encrypted topology combinations and manual cross-topology selection remain separately scoped.
 
 0.44.0-alpha.1 bundles milestone 0.43 and implements CEA-608 background attributes with feature-detected native/DOM presentation. Browser checks verify real rendered pixels and HLS caption carriage, selection, seeking and cleanup. Remaining media profiles and final stabilization gates are still active.
+
+0.45.0-rc.1 extends the audio profile to declared HE-AAC v2 / PS, including mono-core/stereo-output configuration and independent sample-accurate decoding checks. Advanced audio-setup metadata and final stabilization remain active.

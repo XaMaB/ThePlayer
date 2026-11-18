@@ -451,11 +451,21 @@ try {
               if (bins[i] > bins[peak]) peak = i;
             return (peak * context.sampleRate) / analyser.fftSize;
           });
-        await page.waitForTimeout(200);
-        assert.ok(
-          Math.abs((await tone()) - 440) < 30,
-          'English track must decode the 440 Hz fixture',
-        );
+        const expectTone = async (expected, message) => {
+          // A real headless audio sink and Web Audio graph can lag the media
+          // element after startup/resume. Require the decoded tone to converge
+          // within a bounded interval instead of sampling once after 200 ms.
+          const observations = [];
+          const deadline = Date.now() + 3000;
+          do {
+            const hz = await tone();
+            observations.push(hz);
+            if (Math.abs(hz - expected) < 30) return;
+            await page.waitForTimeout(100);
+          } while (Date.now() < deadline);
+          assert.fail(message + ': ' + JSON.stringify(observations));
+        };
+        await expectTone(440, 'English track must decode the 440 Hz fixture');
         await page.locator('#screen').hover();
         await page.locator('#audio-toggle').click();
         await page.locator('#audio-menu [data-track="hls-audio-1"]').click();
@@ -472,10 +482,7 @@ try {
           audioAt,
           { timeout: 12000 },
         );
-        assert.ok(
-          Math.abs((await tone()) - 880) < 30,
-          'Spanish track must decode the 880 Hz fixture',
-        );
+        await expectTone(880, 'Spanish track must decode the 880 Hz fixture');
         assert.equal(
           await page.evaluate(() => document.querySelector('video').src),
           mediaSource,
@@ -494,10 +501,7 @@ try {
           await page.evaluate(() => document.querySelector('video').src),
           mediaSource,
         );
-        assert.ok(
-          Math.abs((await tone()) - 880) < 30,
-          'Quality change must keep selected audio',
-        );
+        await expectTone(880, 'Quality change must keep selected audio');
         await page.evaluate(() => document.querySelector('video').pause());
         await page.evaluate(() =>
           window.player.selectAudioTrack('hls-audio-0'),
@@ -524,10 +528,7 @@ try {
           backAt,
           { timeout: 12000 },
         );
-        assert.ok(
-          Math.abs((await tone()) - 440) < 30,
-          'Switching back must decode the original audio',
-        );
+        await expectTone(440, 'Switching back must decode the original audio');
         assert.equal(
           await page.evaluate(() => document.querySelector('video').videoWidth),
           320,

@@ -1,33 +1,33 @@
-# Original HLS engine: experimental baseline
+# Original HLS engine: implemented profiles
 
 This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is bundled. The initial implementation deliberately exposes a smaller, tested subset instead of claiming full compatibility with every HLS protocol version.
 
 ## Current coverage
 
-| Area                             | Implementation                                                                                    | Validation                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Media and multivariant playlists | Original parser; compatible low-bandwidth startup; Auto ABR and manual quality selection          | Unit tests and browser playback                              |
-| MPEG-TS                          | 188-byte packets, PAT/PMT, PES, AVC/H.264, HEVC/H.265 and ADTS AAC-LC / declared HE-AAC v1 → fMP4 | Original synthetic fixtures; independent FFmpeg decode check |
-| Fragmented MP4                   | EXT-X-MAP, AVC/HEVC/AV1/AAC initialization, fragment timing and MSE appends                       | Browser playback and seeking                                 |
-| Live                             | Sliding playlist refresh, sequence alignment, hold-back and LIVE indicator                        | Local moving-window server                                   |
-| VOD                              | ENDLIST, finite duration, timeline, seek and playback completion                                  | Browser seek tests                                           |
-| EVENT → ended                    | Playlist updates can remove live status on ENDLIST                                                | Local dynamic fixture                                        |
-| Requests                         | Fetch or XHR, abort, timeouts, bounded retry, relative URLs and redirects                         | Browser Fetch/XHR; injected HTTP 503; teardown tests         |
-| Byte ranges                      | Explicit and implicit segment offsets; initialization ranges                                      | Unit tests and HTTP range fixture                            |
-| AES-128                          | Identity keys, explicit or sequence IV, Web Crypto AES-CBC                                        | FFmpeg-encrypted TS fixture                                  |
-| Discontinuities                  | Media timestamps rebased at a discontinuity                                                       | Reset-timestamp TS fixture                                   |
-| WebVTT                           | Subtitle rendition selection, timestamp map, basic cue placement, Off                             | Parser and browser text-track tests                          |
-| Variables                        | NAME/VALUE, IMPORT and QUERYPARAM parsing                                                         | Parser coverage; not an exhaustive conformance suite         |
+| Area                             | Implementation                                                                                       | Validation                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Media and multivariant playlists | Original parser; compatible low-bandwidth startup; Auto ABR and manual quality selection             | Unit tests and browser playback                              |
+| MPEG-TS                          | 188-byte packets, PAT/PMT, PES, AVC/H.264, HEVC/H.265 and ADTS AAC-LC / declared HE-AAC v1/v2 → fMP4 | Original synthetic fixtures; independent FFmpeg decode check |
+| Fragmented MP4                   | EXT-X-MAP, AVC/HEVC/AV1/AAC initialization, fragment timing and MSE appends                          | Browser playback and seeking                                 |
+| Live                             | Sliding playlist refresh, sequence alignment, hold-back and LIVE indicator                           | Local moving-window server                                   |
+| VOD                              | ENDLIST, finite duration, timeline, seek and playback completion                                     | Browser seek tests                                           |
+| EVENT → ended                    | Playlist updates can remove live status on ENDLIST                                                   | Local dynamic fixture                                        |
+| Requests                         | Fetch or XHR, abort, timeouts, bounded retry, relative URLs and redirects                            | Browser Fetch/XHR; injected HTTP 503; teardown tests         |
+| Byte ranges                      | Explicit and implicit segment offsets; initialization ranges                                         | Unit tests and HTTP range fixture                            |
+| AES-128                          | Identity keys, explicit or sequence IV, Web Crypto AES-CBC                                           | FFmpeg-encrypted TS fixture                                  |
+| Discontinuities                  | Media timestamps rebased at a discontinuity                                                          | Reset-timestamp TS fixture                                   |
+| WebVTT                           | Subtitle rendition selection, timestamp map, basic cue placement, Off                                | Parser and browser text-track tests                          |
+| Variables                        | NAME/VALUE, IMPORT and QUERYPARAM parsing                                                            | Parser coverage; not an exhaustive conformance suite         |
 
 ## Explicit limits
 
 - **No full protocol-version claim.** The parser recognizes version numbers through 13 and rejects higher versions. Acceptance of a version number does not certify all its optional features.
 - **LL-HLS fMP4 baseline is implemented.** Partial-only startup, dependent parts, parent completion, blocking reload, delta merge/full reload fallback and speculative whole-resource/bounded-range preload hints are supported. Rendition-report positions are used when available. Open-ended hinted ranges and MAP hints are supported; Fetch can consume confirmed ranges from a growing response, while XHR falls back to a bounded request when the hinted response has not completed. See the validation scope below.
-- **Auto ABR and manual switching** support browser-compatible AVC/HEVC/AV1/AAC-LC/HE-AAC v1 variants in the same audio/subtitle groups. Switching takes effect at a future segment boundary.
+- **Auto ABR and manual switching** support browser-compatible AVC/HEVC/AV1/AAC-LC/HE-AAC v1/v2 variants in the same audio/subtitle groups. Switching takes effect at a future segment boundary.
 - External AAC audio renditions have independent SourceBuffers and language selection. Audio and video must share a media clock; live playlists need matching sequence/discontinuity positions or PROGRAM-DATE-TIME anchors. Arbitrary timeline repair is not supported.
 - **TTML/IMSC text and MP4 WebVTT are implemented subsets.** See the text-profile scope below. HLS CEA-708 SEI decoding uses an original implementation separate from the MoQ decoder; see its scope below.
 - TS supports one video/audio stream, supported access-unit timing and complete PES packets. Multi-packet PAT/PMT sections are assembled and CRC-checked. Annex-B NAL units may span PES boundaries, and multiple pictures per PES are supported for the timing profiles below. IDR and immediate AVC intra recovery points are marked as random access; other segment starts preserve continuity and MSE waits for a random access point when required. Unsupported codecs still fail explicitly. More broadcast edge-case testing is needed.
-- AVC, HEVC Main/Main10, AV1 Main 8/10-bit (fMP4) and AAC-LC/declared HE-AAC v1 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. Packed AAC/MP3 and AC-3 are supported as described below. JPEG image playlist previews are supported as described below; coded I-frame seek previews are described below; continuous trick-play remains pending.
+- AVC, HEVC Main/Main10, AV1 Main 8/10-bit (fMP4) and AAC-LC/declared HE-AAC v1/v2 are supported. HEVC needs a browser/OS decoder exposed through MSE; unsupported variants are filtered before ABR. Multilayer HEVC, Dolby Vision and HDR display/tone mapping are not validated. Packed AAC/MP3 and AC-3 are supported as described below. JPEG image playlist previews are supported as described below; coded I-frame seek previews are described below; continuous trick-play remains pending.
 - SAMPLE-AES supports TS AVC/AAC/AC-3/E-AC-3 and packed AAC/AC-3/E-AC-3 identity keys. fMP4 cenc/cbcs uses EME, with ClearKey and public Widevine CBCS validated in their documented configurations. Content steering is described below; interstitial playback is described below; ID3/emsg metadata delivery is described below.
 - Declared GAP segments have bounded scheduling/playback recovery; see the validation scope below. Live-window loss and detected timeline resets now trigger a bounded coordinated media restart; see below.
 - The network client bounds individual resources at 64 MiB. No server proxy is provided; cross-origin resources need appropriate CORS headers.
@@ -90,7 +90,7 @@ This is a conservative ABR policy. Slow in-flight requests can trigger emergency
 
 Source options `audioLanguage` and `subtitleLanguage` supply explicit preferences; `subtitleLanguage: 'off'` suppresses automatic captions. `preferredLanguages` overrides the browser language list. Non-default, non-forced subtitles need an explicit selection. Forced subtitle matching considers the selected audio language. User subtitle selection/Off persists through quality and audio switches. Accessibility characteristics and associated language are parsed and exposed, but no OS accessibility preference is inferred.
 
-HE-AAC v1 MPEG-TS uses the declared `mp4a.40.5` profile to signal SBR and its doubled output rate correctly. HE-AAC v2/PS and detecting undeclared SBR in raw ADTS remain unsupported. The Mux test checks all five advertised AVC profiles, including transitions between AAC-LC and HE-AAC, with ongoing video and audio decoding.
+HE-AAC v1 MPEG-TS uses the declared `mp4a.40.5` profile to signal SBR and its doubled output rate correctly. Declared HE-AAC v2/PS (`mp4a.40.29`) is supported by the later implementation below; detecting undeclared SBR/PS in raw ADTS remains outside this profile. The Mux test checks all five advertised AVC profiles, including transitions between AAC-LC and HE-AAC, with ongoing video and audio decoding.
 
 ## Mux catalog audit — 2026-11-17
 
@@ -131,7 +131,7 @@ The embed also accepts `&media=audio`. Later milestones below add MP3, AC-3/E-AC
 
 ## Apple AV1 sample audit
 
-The [Apple AV1 sample](https://devstreaming-cdn.apple.com/videos/streaming/examples/av1-sample/av1-sample.m3u8) advertises 10-bit AV1 (`av01`), several audio groups (AAC-LC, HE-AAC v1/v2, AC-3 and E-AC-3), description audio, and multilingual WebVTT renditions. Version 0.6.0-alpha.1 adds AV1 fMP4 playback and this source as an optional demo preset/test. The compatible audio/subtitle group is retained through quality switches; unsupported HE-AAC v2 and Dolby combinations remain excluded. The public test passed on 2026-11-17 with 927 rendered frames, decoded audio, 13 available video qualities, a quality transition, seek to 60 seconds, English → English DVS audio switching and active English WebVTT cues. This validates the tested transitions, not every quality/device combination. Run `HLS_PUBLIC_SOURCE=apple-av1 npm run test:hls:public`.
+The [Apple AV1 sample](https://devstreaming-cdn.apple.com/videos/streaming/examples/av1-sample/av1-sample.m3u8) advertises 10-bit AV1 (`av01`), several audio groups (AAC-LC, HE-AAC v1/v2, AC-3 and E-AC-3), description audio, and multilingual WebVTT renditions. Version 0.6.0-alpha.1 adds AV1 fMP4 playback and this source as an optional demo preset/test. The compatible audio/subtitle group is retained through quality switches; At that version, HE-AAC v2 and Dolby combinations were excluded; later sections document their expanded support. The public test passed on 2026-11-17 with 927 rendered frames, decoded audio, 13 available video qualities, a quality transition, seek to 60 seconds, English → English DVS audio switching and active English WebVTT cues. This validates the tested transitions, not every quality/device combination. Run `HLS_PUBLIC_SOURCE=apple-av1 npm run test:hls:public`.
 
 The live Unified Streaming audio-only URL was checked separately: the 64 kb/s variant decoded audio in Chromium. A later 128 kb/s switch encountered upstream HTTP 503 responses without CORS headers, surfaced by the browser as a fetch failure. Local 64/128 kb/s switching, including a two-second buffer switching to four-second segments, is covered by deterministic tests; this network failure is not reported as a successful public switch.
 
@@ -445,3 +445,9 @@ Background attribute commands preserve the eight-color palette with opaque or ha
 When the browser supports cue-class selectors, native positioned WebVTT cues apply the cell colors. Firefox currently lacks that selector capability, so a feature-detected 32-column DOM compositor renders the same decoded snapshots while the text track remains hidden for timing/metadata. The fallback preserves row/column position, foreground/background, italics and underline and is removed on Off or destruction.
 
 `npm run test:hls:sei` verifies background pixels over a known video color, actual AVC SEI and separate `c608` carriage, caption selection, early unbuffered seeking and cleanup over Fetch/XHR in Chromium, Firefox and WebKit. This is a tested caption profile, not full CTA-608 receiver certification; flashing and Text/XDS services remain excluded. Attribute mapping follows [SMPTE RP 2052-10](https://pub.smpte.org/pub/rp2052-10/rp2052-10-2013.pdf).
+
+## HE-AAC v2 / Parametric Stereo
+
+Declared `mp4a.40.29` variants are admitted subject to browser MSE capability. TS and packed ADTS retain the mono AAC core in AudioSpecificConfig while explicitly signaling PS/SBR, a doubled output sample rate and two output channels. fMP4 accepts audio object type 29 in the decoder configuration. Stereo-core declarations for this profile fail explicitly; undeclared PS detection is not inferred from the ADTS header.
+
+`npm run test:hls:he-aac` creates TS/fMP4/packed variants from an original 440 Hz left / 880 Hz right fixture. FFmpeg independently decodes the source and remuxed MP4 to byte-identical stereo PCM. Browser tests measure distinct output-channel frequencies and seek in both directions through Fetch/XHR. The checked-in synthetic recording includes its original generator and provenance; the external encoder is needed only to regenerate that recording, never for player runtime or ordinary CI.

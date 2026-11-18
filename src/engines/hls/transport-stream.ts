@@ -525,11 +525,14 @@ export class TsTransmuxer {
             id: 2,
             kind: 'audio',
             timescale: config.rate,
-            channels,
+            channels: config.channels,
             codec: config.codec,
             asc: config.asc,
           };
-        if (track.timescale !== config.rate || track.channels !== channels)
+        if (
+          track.timescale !== config.rate ||
+          track.channels !== config.channels
+        )
           throw new Error('AAC configuration changed within a segment');
         samples.push({
           data: bytes.slice(at + header, at + length),

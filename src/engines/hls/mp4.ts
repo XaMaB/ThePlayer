@@ -127,7 +127,7 @@ function audioObjectType(data: Uint8Array): number {
     if (tag === 5) {
       if (body.length < 2) throw new Error('Truncated AudioSpecificConfig');
       const type = body[0] >>> 3;
-      if (![2, 5].includes(type))
+      if (![2, 5, 29].includes(type))
         throw new Error('Unsupported AAC object type');
       return type;
     }
