@@ -39,6 +39,8 @@ export interface PreparedSegment {
   data: Uint8Array;
   tracks: Track[];
   rawStart: number;
+  /** Native MPEG timestamp rollover period, when the input uses a 33-bit clock. */
+  timestampWrap?: number;
   bytes: number;
   elapsed: number;
   ignoredCaptions: IgnoredCaptionTrack[];
@@ -123,6 +125,7 @@ export class MediaLane {
     let init: Uint8Array,
       tracks: Track[],
       rawStart: number,
+      timestampWrap: number | undefined,
       mime: string | undefined;
     let digitalPackets: CcData[] = [];
     let metadata: TimedMetadata[] = [];
@@ -246,6 +249,7 @@ export class MediaLane {
       );
       this.packedClock = timestamp;
       rawStart = timestamp / 90000;
+      timestampWrap = 2 ** 33 / 90000;
       tracks = [packed.track];
       data = packed.data;
       init = new Uint8Array();
@@ -285,6 +289,7 @@ export class MediaLane {
       tracks = result.tracks;
       data = result.media;
       rawStart = result.start;
+      timestampWrap = 2 ** 33 / 90000;
       metadataError = result.metadataError;
       metadata = (packed?.metadata ?? result.metadata).map((item) => ({
         ...item,
@@ -317,6 +322,7 @@ export class MediaLane {
       data,
       tracks,
       rawStart,
+      timestampWrap,
       bytes: response.data.length,
       elapsed: response.elapsed,
       ignoredCaptions: this.ignoredCaptions,

@@ -466,3 +466,9 @@ console.log(player.diagnostics.live.resetHistory);
 ```
 
 The history retains at most four reset decisions and omits resource URLs and tokens. Without `debug: true`, `resetHistory` is undefined and detailed comparisons are not collected. Restart counts and reasons remain available in `diagnostics.live` in both modes. This option does not change playback or recovery behavior.
+
+## Live video rendition clock alignment
+
+For live quality/angle switches without PROGRAM-DATE-TIME, the engine probes a target segment's video sample timestamps and aligns the playlist to the active media clock. It does not equate media sequence numbers across renditions. The probe uses a separate decoder instance; its state never enters the playback decoder. The selected lane retains the media-clock offset instead of rebasing every rendition from its playlist sequence. MPEG 33-bit clocks are unwrapped near the active presentation.
+
+This path requires renditions to share a media timestamp domain within the same discontinuity. PROGRAM-DATE-TIME alignment and alternate-audio handling retain their existing paths. It does not attempt content matching between independently clocked encoders without timing metadata. `npm run test:hls:native-clock` covers shifted and disjoint sequence spaces through Fetch/XHR.

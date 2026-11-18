@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.0.0-alpha.6
+
+- Align live video quality/angle switches without PROGRAM-DATE-TIME using a target media timestamp probe, rather than assuming matching media sequence numbers across renditions. Preserve the current media clock through the switch, including MPEG timestamp rollover adjustment.
+- Keep probe decoder state separate from the playback lane and bridge active media through the switching boundary. This avoids timeline shifts and buffer holes when independently segmented renditions use different sequence spaces.
+- Add browser coverage for overlapping-but-offset and completely disjoint rendition sequence numbers, repeated bidirectional switches, refreshed query parameters and continued playback.
+
 ## 1.0.0-alpha.5
 
 - Wait for a delayed live rendition to publish a future switching boundary using a segment-duration-based time budget, replacing the previous two 250 ms retries.

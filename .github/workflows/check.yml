@@ -96,3 +96,5 @@ jobs:
         timeout-minutes: 3
       - run: npm run test:hls:switch-wait
         timeout-minutes: 3
+      - run: npm run test:hls:native-clock
+        timeout-minutes: 3

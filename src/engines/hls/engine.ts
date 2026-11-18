@@ -35,6 +35,7 @@ import { Cea608Timeline } from './cea608-timeline';
 import { Cea608Renderer } from './cea608-renderer';
 import { row608Text, cea608Styles } from './cea608';
 import type { Track } from './mp4';
+import { fragmentMetadata, fragmentSamples } from './fragment-samples';
 import { selectRendition } from './selection';
 import { AbrController, EmergencySwitch } from './abr';
 import { bufferedAhead, nextGapPosition, declaredGapPosition } from './buffer';
@@ -42,6 +43,7 @@ import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
   parsePlaylist,
   alignPlaylist,
+  shiftPlaylist,
   independentIndex,
   holdBack,
   type Playlist,
@@ -2142,11 +2144,8 @@ export class HlsEngine extends EventTarget {
         : undefined;
     if (kind === 'video' && !this.videoTracks[index])
       throw new Error('Unknown video rendition');
-    let p = alignRendition(
-      await this.playlistLoader.rendition(
-        nextVideo?.url ?? choice.url,
-        old.playlist,
-      ),
+    let p = await this.playlistLoader.rendition(
+      nextVideo?.url ?? choice.url,
       old.playlist,
     );
     const lane = this.lane(
@@ -2156,6 +2155,54 @@ export class HlsEngine extends EventTarget {
         ? choice.codecs
         : this.qualityLevels[this.selectedQuality]?.codecs,
     );
+    let nativeOffset: number | undefined;
+    const alignTarget = async (incoming: Playlist): Promise<Playlist> => {
+      nativeOffset = undefined;
+      const useMediaClock =
+        incoming.live &&
+        old.playlist.live &&
+        kind !== 'audio' &&
+        old.tracks.some((track) => track.kind === 'video') &&
+        !incoming.segments.some((s) => s.programDateTime) &&
+        !old.playlist.segments.some((s) => s.programDateTime);
+      if (!useMediaClock) return alignRendition(incoming, old.playlist);
+      // Media sequence numbers are local to a rendition. Probe its native video
+      // clock rather than equating sequence N in two independently segmented streams.
+      const candidates = incoming.segments
+        .map((segment, index) => ({ segment, index }))
+        .filter(
+          ({ segment }) =>
+            !segment.gap && segment.discontinuity === old.discontinuity,
+        );
+      const probe = candidates[Math.floor(candidates.length / 2)];
+      if (!probe) return alignRendition(incoming, old.playlist);
+      const probeLane = this.lane(incoming, old.role, choice.codecs);
+      const media = await probeLane.prepare(probe.index);
+      const samples = fragmentSamples(
+        media.data,
+        fragmentMetadata(media.init),
+        media.resourceOffset ?? 0,
+      ).filter((sample) => sample.track.video);
+      if (!samples.length)
+        throw new Error('Target rendition has no video timestamp anchor');
+      const videoStart = samples.reduce(
+        (start, sample) => Math.min(start, sample.time),
+        Infinity,
+      );
+      const wrap = media.timestampWrap;
+      const rollover = wrap
+        ? Math.round(
+            (this.video.currentTime - old.offset - videoStart) / wrap,
+          ) * wrap
+        : 0;
+      nativeOffset = old.offset + rollover;
+      return shiftPlaylist(
+        incoming,
+        videoStart + nativeOffset - probe.segment.start,
+      );
+    };
+    p = await alignTarget(p);
+    lane.playlist = p;
     let prepared: PreparedSegment | undefined,
       boundary = 0;
     const switchDeadline =
@@ -2217,10 +2264,7 @@ export class HlsEngine extends EventTarget {
           ),
           this.abort.signal,
         );
-        p = alignRendition(
-          await this.playlistLoader.reload(p, 0),
-          old.playlist,
-        );
+        p = await alignTarget(await this.playlistLoader.reload(p, 0));
         lane.playlist = p;
         attempt--; // Publication waits have a time budget, not the media-race budget.
         continue;
@@ -2231,7 +2275,6 @@ export class HlsEngine extends EventTarget {
       const token = this.generation;
       while (
         old.next < old.playlist.segments.length &&
-        old.playlist.segments[old.next].start < boundary &&
         this.video.currentTime + old.ahead(this.video.currentTime) <
           boundary - 0.05
       ) {
@@ -2257,8 +2300,9 @@ export class HlsEngine extends EventTarget {
       throw new Error('Playback advanced beyond the switching boundary; retry');
     this.abort.signal.throwIfAborted();
     lane.inheritBuffer(old);
-    lane.offset = old.offset;
-    lane.discontinuity = kind !== 'audio' ? -1 : old.discontinuity;
+    lane.offset = nativeOffset ?? old.offset;
+    lane.discontinuity =
+      nativeOffset !== undefined || kind === 'audio' ? old.discontinuity : -1;
     // Let MSE replace overlapping samples in the switching segment. Removing at
     // the playlist boundary first can erase the last old frame before the new
     // rendition's first presentation timestamp (DTS and PTS may differ).
