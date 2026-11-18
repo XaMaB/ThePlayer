@@ -20,6 +20,7 @@ import {
   decodeTime,
   initialization,
   fragment,
+  concat,
   type Track,
 } from './mp4';
 
@@ -29,6 +30,7 @@ export interface LoadedResource {
   elapsed: number;
 }
 export interface PreparedSegment {
+  resourceOffset?: number;
   mime?: string;
   metadata: TimedMetadata[];
   metadataError?: string;
@@ -61,6 +63,7 @@ export class MediaLane {
   private captionMetaError?: string;
   private preparedDiscontinuity = -1;
   private ignoredCaptions: IgnoredCaptionTrack[] = [];
+  private rawInitCache?: { key: string; data: Uint8Array };
   private initCache?: { key: string; data: Uint8Array };
   private appendedInit?: Uint8Array;
   constructor(
@@ -100,6 +103,23 @@ export class MediaLane {
       this.packedClock = undefined;
       this.preparedDiscontinuity = segment.discontinuity;
     }
+    let mapBytes: Uint8Array | undefined;
+    if (segment.map) {
+      const mapKey = JSON.stringify(segment.map);
+      if (this.rawInitCache?.key !== mapKey) {
+        if (segment.map.key?.method === 'AES-128' && !segment.map.key.iv)
+          throw new Error('Encrypted initialization needs an explicit IV');
+        const loaded = await this.load(segment.map);
+        mapBytes = ['SAMPLE-AES', 'SAMPLE-AES-CTR'].includes(
+          segment.map.key?.method ?? '',
+        )
+          ? loaded.data
+          : await this.decrypt(loaded.data, segment.map.key, segment.sequence);
+        this.rawInitCache = { key: mapKey, data: mapBytes };
+      } else mapBytes = this.rawInitCache.data;
+    }
+    const tsInitialization = mapBytes?.[0] === 0x47 && data[0] === 0x47;
+    if (tsInitialization) data = concat(mapBytes!, data);
     let init: Uint8Array,
       tracks: Track[],
       rawStart: number,
@@ -109,17 +129,10 @@ export class MediaLane {
     let metadataError: string | undefined;
     let captionPackets: CaptionPacket[] = [],
       captionError: string | undefined = this.captionMetaError;
-    if (segment.map) {
+    if (segment.map && !tsInitialization) {
       const key = JSON.stringify(segment.map);
       if (this.initCache?.key !== key) {
-        if (segment.map.key?.method === 'AES-128' && !segment.map.key.iv)
-          throw new Error('Encrypted initialization needs an explicit IV');
-        const loaded = await this.load(segment.map);
-        const original = ['SAMPLE-AES', 'SAMPLE-AES-CTR'].includes(
-          segment.map.key?.method ?? '',
-        )
-          ? loaded.data
-          : await this.decrypt(loaded.data, segment.map.key, segment.sequence);
+        const original = mapBytes!;
         const filtered = filterCaptionInit(original);
         this.captionMeta = [];
         this.captionMetaError = undefined;
@@ -289,6 +302,8 @@ export class MediaLane {
     if (this.role === 'audio' && tracks.some((t) => t.kind !== 'audio'))
       throw new Error('Audio rendition contains a non-audio track');
     return {
+      resourceOffset:
+        segment.map && !tsInitialization ? (segment.range?.offset ?? 0) : 0,
       segment,
       mime,
       metadata,
@@ -353,5 +368,6 @@ export class MediaLane {
   inheritBuffer(previous: MediaLane) {
     this.buffer = previous.buffer;
     this.codec = previous.codec;
+    this.mime = previous.mime;
   }
 }

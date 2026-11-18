@@ -28,6 +28,7 @@ export function faultServer({
   const requests = new Map();
   const epochs = new Map();
   const starts = new Map();
+  let llAvInventory;
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
@@ -54,13 +55,17 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
-        if (scenario === 'images-live') {
+        if (scenario === 'images-live' || scenario === 'iframes-live') {
+          const iframes = scenario === 'iframes-live';
           const epochKey = match[1] + '-images';
           if (!epochs.has(epochKey)) epochs.set(epochKey, Date.now());
           const elapsed = (Date.now() - epochs.get(epochKey)) / 1000;
           if (resource === 'master.m3u8') {
             res.end(
-              '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=600000,CODECS="avc1.42c00c,mp4a.40.2"\nprimary.m3u8\n#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=2000,CODECS="jpeg",RESOLUTION=160x90,URI="preview.m3u8"\n',
+              '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=600000,CODECS="avc1.42c00c,mp4a.40.2"\nprimary.m3u8\n' +
+                (iframes
+                  ? '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=10000,CODECS="avc1.42c00c",RESOLUTION=320x180,URI="preview.m3u8"\n'
+                  : '#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=2000,CODECS="jpeg",RESOLUTION=160x90,URI="preview.m3u8"\n'),
             );
             return;
           }
@@ -74,10 +79,24 @@ export function faultServer({
           }
           if (resource === 'preview.m3u8') {
             const first = Math.floor(elapsed / 4);
-            let text = `#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-IMAGES-ONLY\n#EXT-X-MEDIA-SEQUENCE:${100 + first}\n#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 0, 2, 3, 4, first * 4)).toISOString()}\n`;
+            let text = `#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:4\n${iframes ? '#EXT-X-I-FRAMES-ONLY' : '#EXT-X-IMAGES-ONLY'}\n#EXT-X-MEDIA-SEQUENCE:${100 + first}\n#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 0, 2, 3, 4, first * 4)).toISOString()}\n`;
             for (let n = first; n < first + 3; n++)
-              text += `#EXT-X-TILES:RESOLUTION=160x90,LAYOUT=2x2,DURATION=1\n#EXTINF:4,\nsheet${n}.jpg\n`;
+              text += iframes
+                ? `#EXTINF:4,\nframe${n}.ts\n`
+                : `#EXT-X-TILES:RESOLUTION=160x90,LAYOUT=2x2,DURATION=1\n#EXTINF:4,\nsheet${n}.jpg\n`;
             res.end(text);
+            return;
+          }
+          if (iframes && /^frame\d+\.ts$/.test(resource)) {
+            res.end(
+              await readFile(
+                path.join(
+                  fixtures,
+                  'iframes',
+                  (Number(resource.slice(5, -3)) % 3) + '.ts',
+                ),
+              ),
+            );
             return;
           }
           if (/^sheet\d+\.jpg$/.test(resource)) {
@@ -328,10 +347,156 @@ export function faultServer({
               : 'ts/' + media[2];
           }
         }
-        if (scenario.startsWith('ll-parts')) {
-          relative = 'll-parts/' + resource;
+        if (scenario.startsWith('ll-av')) {
+          llAvInventory ??= JSON.parse(
+            await readFile(path.join(fixtures, 'll-av/inventory.json'), 'utf8'),
+          );
+          relative = 'll-av/' + resource;
           const key = match[1];
           if (!starts.has(key)) starts.set(key, Date.now());
+          const epoch = starts.get(key);
+          if (resource === 'index.m3u8') {
+            res.end(
+              '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="Tone",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="audio/index.m3u8"\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="Alternate",LANGUAGE="bg",DEFAULT=NO,AUTOSELECT=YES,URI="audio2/index.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=700000,CODECS="avc1.42c00c,mp4a.40.2",AUDIO="a"\nvideo/index.m3u8\n',
+            );
+            return;
+          }
+          const lane = resource.split('/')[0];
+          if (!['video', 'audio', 'audio2'].includes(lane)) {
+            res.writeHead(404);
+            res.end();
+            return;
+          }
+          const inventory = llAvInventory[lane];
+          const sequenceBase =
+            lane === 'audio' ? 1000 : lane === 'audio2' ? 5000 : 0;
+          const lag = scenario === 'll-av-lag' && lane === 'audio' ? 500 : 0;
+          const available = () =>
+            Math.max(0, (Date.now() - epoch + 1000 - lag) / 1000);
+          if (resource.endsWith('/index.m3u8')) {
+            const firstWait = Math.max(
+              0,
+              (inventory.parts[0].duration - available()) * 1000,
+            );
+            if (firstWait)
+              await new Promise((resolve) =>
+                setTimeout(resolve, firstWait + 1),
+              );
+            if (res.destroyed) return;
+            if (url.searchParams.has('_HLS_msn')) {
+              const wanted =
+                (Number(url.searchParams.get('_HLS_msn')) - sequenceBase) * 4 +
+                Number(url.searchParams.get('_HLS_part') ?? 3);
+              const target = inventory.parts[wanted];
+              if (target) {
+                const wait = Math.max(
+                  0,
+                  (target.start + target.duration - available()) * 1000,
+                );
+                if (wait)
+                  await new Promise((resolve) => {
+                    const timer = setTimeout(resolve, Math.min(wait, 6000));
+                    res.once('close', () => {
+                      clearTimeout(timer);
+                      resolve();
+                    });
+                  });
+              }
+              if (res.destroyed) return;
+              requests.set(
+                key + ':' + lane + ':blocking',
+                (requests.get(key + ':' + lane + ':blocking') ?? 0) + 1,
+              );
+            }
+            const count = inventory.parts.filter(
+              (p) => p.start + p.duration <= available() + 0.0001,
+            ).length;
+            const completed = Math.min(
+              inventory.parents.length,
+              Math.floor(count / 4),
+            );
+            const first = Math.max(0, completed - 4);
+            let text = `#EXTM3U\n#EXT-X-VERSION:9\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:${sequenceBase + first}\n#EXT-X-MAP:URI="init.mp4"\n#EXT-X-PART-INF:PART-TARGET=${lane !== 'video' ? 0.512 : 0.5}\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=1.6\n`;
+            for (let parent = first; parent <= completed; parent++) {
+              const partStart = parent * 4;
+              if (!inventory.parts[partStart] || partStart >= count) break;
+              text +=
+                '#EXT-X-PROGRAM-DATE-TIME:' +
+                new Date(
+                  Date.UTC(2026, 0, 2) +
+                    inventory.parts[partStart].start * 1000,
+                ).toISOString() +
+                '\n';
+              for (
+                let part = partStart;
+                part < Math.min(count, partStart + 4);
+                part++
+              ) {
+                const p = inventory.parts[part];
+                text += `#EXT-X-PART:DURATION=${p.duration},URI="${p.file}"${lane !== 'video' || part % 4 === 0 ? ',INDEPENDENT=YES' : ''}\n`;
+              }
+              if (parent < completed)
+                text += `#EXTINF:${inventory.parents[parent].duration},\n${inventory.parents[parent].file}\n`;
+            }
+            if (inventory.parts[count])
+              text += `#EXT-X-PRELOAD-HINT:TYPE=PART,URI="${inventory.parts[count].file}"\n`;
+            for (const peer of ['video', 'audio', 'audio2'].filter(
+              (p) => p !== lane,
+            )) {
+              const peerAvailable =
+                (Date.now() -
+                  epoch +
+                  1000 -
+                  (scenario === 'll-av-lag' && peer === 'audio' ? 500 : 0)) /
+                1000;
+              const peerParts = llAvInventory[peer].parts.filter(
+                (p) => p.start + p.duration <= peerAvailable,
+              ).length;
+              if (peerParts)
+                text += `#EXT-X-RENDITION-REPORT:URI="../${peer}/index.m3u8",LAST-MSN=${(peer === 'audio' ? 1000 : peer === 'audio2' ? 5000 : 0) + Math.floor((peerParts - 1) / 4)},LAST-PART=${(peerParts - 1) % 4}\n`;
+            }
+            res.end(text);
+            return;
+          }
+          const part = inventory.parts.find(
+            (p) => resource === lane + '/' + p.file,
+          );
+          if (part) {
+            const wait = Math.max(
+              0,
+              (part.start + part.duration - available()) * 1000,
+            );
+            if (wait)
+              await new Promise((resolve) => {
+                const timer = setTimeout(resolve, Math.min(wait, 6000));
+                res.once('close', () => {
+                  clearTimeout(timer);
+                  resolve();
+                });
+              });
+            if (res.destroyed) return;
+            if (
+              scenario === 'll-av-fault' &&
+              resource === 'audio/part008.m4s' &&
+              count < 3
+            ) {
+              res.writeHead(503);
+              res.end('temporary audio fault');
+              return;
+            }
+          }
+        }
+        if (scenario.startsWith('ll-parts')) {
+          relative = 'll-parts/' + resource;
+          const aged = scenario.startsWith('ll-parts-age');
+          const gcm = scenario === 'll-parts-gcm-range';
+          const encrypted = scenario.startsWith('ll-parts-encrypted') || gcm;
+          const rangeParts =
+            scenario === 'll-parts-open' ||
+            scenario === 'll-parts-encrypted-range' ||
+            gcm;
+          const key = match[1];
+          if (!starts.has(key)) starts.set(key, Date.now() - (aged ? 6000 : 0));
           const epoch = starts.get(key);
           const waitFor = async (index) => {
             const wait = Math.max(0, epoch + (index - 1) * 500 - Date.now());
@@ -345,6 +510,27 @@ export function faultServer({
               });
           };
           if (resource === 'index.m3u8') {
+            if (aged) {
+              res.setHeader('Access-Control-Expose-Headers', 'Age');
+              res.setHeader(
+                'Age',
+                scenario === 'll-parts-age-invalid'
+                  ? 'invalid'
+                  : !url.searchParams.has('_HLS_msn') && count === 1
+                    ? '6'
+                    : '0',
+              );
+              if (
+                scenario === 'll-parts-age-reject' &&
+                url.searchParams.has('_HLS_msn') &&
+                !requests.get(key + ':age-rejected')
+              ) {
+                requests.set(key + ':age-rejected', 1);
+                res.writeHead(400);
+                res.end('directive rejected');
+                return;
+              }
+            }
             if (url.searchParams.has('_HLS_msn')) {
               requests.set(
                 key + ':parts-blocking',
@@ -356,8 +542,12 @@ export function faultServer({
               );
               if (res.destroyed) return;
             }
-            const count = 2 + Math.floor((Date.now() - epoch) / 500);
-            const completed = Math.floor(count / 4),
+            const cached =
+              aged && count === 1 && !url.searchParams.has('_HLS_msn');
+            const countParts = cached
+              ? 2
+              : 2 + Math.floor((Date.now() - epoch) / 500);
+            const completed = Math.floor(countParts / 4),
               first = Math.max(0, completed - 4);
             let text =
               '#EXTM3U\n#EXT-X-VERSION:9\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:' +
@@ -370,14 +560,15 @@ export function faultServer({
             for (let parent = first; parent <= completed; parent++) {
               if (scenario === 'll-parts-map' && parent === 2)
                 text += '#EXT-X-MAP:URI="init2.mp4"\n';
-              if (scenario === 'll-parts-encrypted')
-                text +=
-                  '#EXT-X-KEY:METHOD=AES-128,URI="part.key",IV=0x' +
-                  parent.toString(16).padStart(32, '0') +
-                  '\n';
+              if (encrypted)
+                text += gcm
+                  ? '#EXT-X-KEY:METHOD=AES-256-GCM,URI="part.key"\n'
+                  : '#EXT-X-KEY:METHOD=AES-128,URI="part.key",IV=0x' +
+                    parent.toString(16).padStart(32, '0') +
+                    '\n';
               if (parent > first && parent % 6 === 0)
                 text += '#EXT-X-DISCONTINUITY\n';
-              const n = parent === completed ? count % 4 : 4;
+              const n = parent === completed ? countParts % 4 : 4;
               if (parent >= completed - 3)
                 for (let part = 0; part < n; part++) {
                   const index = parent * 4 + part;
@@ -387,19 +578,26 @@ export function faultServer({
                     '.m4s?index=' +
                     index +
                     '"' +
-                    (scenario === 'll-parts-open'
+                    (rangeParts
                       ? ',BYTERANGE="' +
-                        (
-                          await readFile(
-                            path.join(
-                              fixtures,
-                              'll-parts',
-                              'part' +
-                                String(index % 24).padStart(2, '0') +
-                                '.m4s',
-                            ),
-                          )
-                        ).length +
+                        (await (async () => {
+                          const size = (
+                            await readFile(
+                              path.join(
+                                fixtures,
+                                'll-parts',
+                                'part' +
+                                  String(index % 24).padStart(2, '0') +
+                                  '.m4s',
+                              ),
+                            )
+                          ).length;
+                          return gcm
+                            ? size + 32
+                            : encrypted
+                              ? (Math.floor(size / 16) + 1) * 16
+                              : size;
+                        })()) +
                         '@128"'
                       : '') +
                     (part === 0 ? ',INDEPENDENT=YES' : '') +
@@ -413,21 +611,21 @@ export function faultServer({
                   parent +
                   '\n';
             }
-            if (scenario === 'll-parts-cancel' && count % 5 === 0)
+            if (scenario === 'll-parts-cancel' && countParts % 5 === 0)
               text +=
                 '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="abandoned.m4s?index=' +
-                count +
+                countParts +
                 '"\n';
             else
               text +=
                 '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="part' +
-                String(count % 24).padStart(2, '0') +
+                String(countParts % 24).padStart(2, '0') +
                 '.m4s?index=' +
-                count +
+                countParts +
                 '"\n';
             if (scenario === 'll-parts-map' && completed < 2)
               text += '#EXT-X-PRELOAD-HINT:TYPE=MAP,URI="init2.mp4"\n';
-            if (scenario === 'll-parts-open')
+            if (rangeParts)
               text = text.replace(
                 /(#EXT-X-PRELOAD-HINT:TYPE=PART[^\n]*)/,
                 '$1,BYTERANGE-START=128',
@@ -443,7 +641,7 @@ export function faultServer({
             return;
           }
           if (resource === 'part.key') {
-            res.end(Buffer.alloc(16, 0x59));
+            res.end(Buffer.alloc(gcm ? 32 : 16, 0x59));
             return;
           }
           if (resource === 'abandoned.m4s') {
@@ -459,27 +657,35 @@ export function faultServer({
             requests.set(id, (requests.get(id) ?? 0) + 1);
             await waitFor(Number(url.searchParams.get('index')));
             if (res.destroyed) return;
-            if (scenario === 'll-parts-encrypted') {
-              const bytes = await readFile(
-                  path.join(fixtures, 'll-parts', resource),
-                ),
-                iv = Buffer.alloc(16);
+            let bytes = await readFile(
+              path.join(fixtures, 'll-parts', resource),
+            );
+            if (encrypted) {
+              const iv = Buffer.alloc(16);
               iv.writeUInt32BE(
-                Math.floor(Number(url.searchParams.get('index')) / 4),
+                gcm
+                  ? Number(url.searchParams.get('index'))
+                  : Math.floor(Number(url.searchParams.get('index')) / 4),
                 12,
               );
               const cipher = createCipheriv(
-                'aes-128-cbc',
-                Buffer.alloc(16, 0x59),
+                gcm ? 'aes-256-gcm' : 'aes-128-cbc',
+                Buffer.alloc(gcm ? 32 : 16, 0x59),
                 iv,
               );
-              res.end(Buffer.concat([cipher.update(bytes), cipher.final()]));
-              return;
+              const payload = Buffer.concat([
+                cipher.update(bytes),
+                cipher.final(),
+              ]);
+              bytes = gcm
+                ? Buffer.concat([iv, payload, cipher.getAuthTag()])
+                : payload;
+              if (!rangeParts) {
+                res.end(bytes);
+                return;
+              }
             }
-            if (scenario === 'll-parts-open') {
-              const bytes = await readFile(
-                path.join(fixtures, 'll-parts', resource),
-              );
+            if (rangeParts) {
               const open = req.headers.range === 'bytes=128-9007199254740991';
               if (!req.headers.range?.startsWith('bytes=128-'))
                 throw Error('Expected byte range');

@@ -142,6 +142,7 @@ export class PreloadCache {
           if (offset >= end) break;
         }
         result = {
+          receivedAt: performance.now(),
           data,
           url: e.url,
           elapsed: Math.max(

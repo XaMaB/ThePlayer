@@ -1,5 +1,47 @@
 # Release versions
 
+## 0.36.0-alpha.1
+
+- Retire temporary DRM sessions only after all their known KIDs leave buffered/prepared media; preserve unknown and pending key dependencies.
+- Release per-session listeners, abort outstanding license callbacks and allow reacquisition on rewind.
+- Bound dynamically acquired identity keys alongside session retirement.
+- Verify 80 distinct CENC KIDs over Fetch/XHR, backward reacquisition and cleanup; retain active/unknown-key sessions in unit tests.
+
+- Initialize Widevine from HLS KEYFORMAT PSSH data even when MP4 initialization contains no PSSH.
+- Validate bounded base64 input, PSSH v0/v1 framing, system IDs, KID tables and data lengths before handing initialization to the CDM.
+- Public single/multi-key CBCS tests pass Fetch/XHR with normal media and with MP4 PSSH boxes neutralized.
+
+- Ignore attributes undefined for I-frame declarations instead of failing primary playback.
+- Preserve opaque DRM identifiers such as FairPlay skd URIs with a KID:IV suffix.
+- Add opt-in public Widevine CBCS interoperability tests using Axinom media and license delivery.
+
+- Exercise AES-128 and AES-256-GCM LL-HLS parts inside growing byte-range responses.
+- Validate Fetch speculative-prefix reuse and XHR bounded-range fallback with actual decoded playback in Chromium, Firefox and WebKit.
+
+- Read HTTP Age for Fetch/XHR responses and perform bounded LL-HLS CDN tune-in before starting from a cached media playlist.
+- Request estimated current segment/part positions, reuse fresh responses and defer preload hints until tune-in finishes.
+- Fall back after rejected/timed-out directives; ignore malformed Age and cap repeated stale-cache responses.
+- Browser checks cover refreshed startup position, directive rejection and invalid headers; unit tests cover boundaries and non-refreshing caches.
+
+- Preserve the configured MIME type when inheriting a SourceBuffer for a same-codec rendition switch. This avoids requiring `changeType` in WebKit for an unchanged codec.
+- Independent LL-HLS video and alternate AAC audio fixtures with different part durations and sequence numbers.
+- Exercise blocking reloads, rendition reports, language switching, delayed audio and audio-only HTTP faults over Fetch/XHR.
+
+- TTML ruby base/annotation grouping, matched base/text containers and two-sided annotations.
+- Ruby half-size inheritance, before/after placement and native ruby alignment; fallback delimiters stay hidden during normal ruby presentation.
+- Browser geometry/timing tests and real stpp subtitle integration.
+- Outside-line placement, ruby reserves and exact cross-platform typography remain limited.
+
+- TTML discrete `set` style animations with media-relative timing, inheritance and overlapping changes.
+- Remove/freeze behavior, repeat counts, referenced animations, sequential region changes and bounded compilation.
+- Forward/backward seek tests with actual encrypted/clear stpp playback and computed style checks across browsers.
+- Continuous `animate` and broader typography remain separate work.
+
+- Original I-frame rendition parsing and on-demand WebCodecs seek previews, separate from ABR qualities.
+- TS/fMP4 initialization and byte ranges, including inferred initialization prefixes and widened AES-128 CBC ranges.
+- Bounded preview caching and decoder cleanup; synthetic decoded-color and independent CBC byte checks.
+- Validate AVC/HEVC/AV1 preview capabilities, live alignment and malformed-preview isolation in Chromium, Firefox and WebKit.
+
 ## 0.27.0-alpha.1
 
 - JPEG image playlists, tiled seek thumbnails and live program-date alignment.

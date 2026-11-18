@@ -60,9 +60,17 @@ jobs:
       - run: npm run test:hls:dolby
       - run: node tests/hls-parts-browser.mjs
         env:
-          HLS_PART_SCENARIOS: ll-parts-open,ll-parts-map,ll-parts-encrypted
+          HLS_PART_SCENARIOS: ll-parts-open,ll-parts-map,ll-parts-encrypted,ll-parts-encrypted-range,ll-parts-gcm-range
       - run: npm run test:hls:dateranges
       - run: npm run test:hls:interstitials
         timeout-minutes: 10
       - run: npm run test:hls:thumbnails
+        timeout-minutes: 8
+      - run: npm run test:hls:iframes
+        timeout-minutes: 8
+      - run: npm run test:hls:text
+        timeout-minutes: 8
+      - run: npm run test:hls:ll-av
+        timeout-minutes: 8
+      - run: npm run test:hls:cdn
         timeout-minutes: 8

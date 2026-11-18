@@ -20,6 +20,8 @@ try {
       'll-parts-cancel',
       'll-parts-open',
       'll-parts-encrypted',
+      'll-parts-encrypted-range',
+      'll-parts-gcm-range',
       'll-parts-map',
     ]) {
       const id = `parts-${transport}-${scenario}-${Date.now().toString(36)}`;
@@ -73,7 +75,14 @@ try {
         assert.ok(result.frames > 250);
         assert.equal(result.diagnostics.live.restarts, 0);
         assert.ok(result.diagnostics.playlistReload.blocking > 20);
-        if (scenario !== 'll-parts-open' || transport === 'fetch')
+        if (
+          ![
+            'll-parts-open',
+            'll-parts-encrypted-range',
+            'll-parts-gcm-range',
+          ].includes(scenario) ||
+          transport === 'fetch'
+        )
           assert.ok(result.diagnostics.preload.used > 20);
         if (scenario === 'll-parts-cancel')
           assert.ok(result.diagnostics.preload.cancelled > 0);
@@ -89,7 +98,14 @@ try {
           );
           assert.ok(parts.length > 25);
           for (const [key, count] of parts)
-            if (scenario !== 'll-parts-open' || transport === 'fetch')
+            if (
+              ![
+                'll-parts-open',
+                'll-parts-encrypted-range',
+                'll-parts-gcm-range',
+              ].includes(scenario) ||
+              transport === 'fetch'
+            )
               assert.equal(count, 1, 'No duplicate part request: ' + key);
           assert.equal(
             [...requests.keys()].some((key) =>

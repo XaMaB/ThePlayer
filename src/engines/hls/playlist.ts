@@ -87,6 +87,8 @@ export interface Playlist {
   segments: Segment[];
   variants: Variant[];
   images?: Variant[];
+  iframes?: Variant[];
+  iframesOnly?: boolean;
   imagesOnly?: boolean;
   renditions: Rendition[];
   independent: boolean;
@@ -211,6 +213,14 @@ export function parsePlaylist(
         throw new Error(`Undefined HLS variable: ${name}`);
       return variables[name];
     });
+    // DRM identifiers (for example skd://kid:iv) are opaque URIs, not
+    // network authorities with a numeric port. Preserve them for the CDM.
+    if (
+      opaque &&
+      /^[a-z][a-z0-9+.-]*:/i.test(replaced) &&
+      !/^https?:/i.test(replaced)
+    )
+      return replaced;
     const url = new URL(replaced, base);
     if (!opaque && !['https:', 'http:'].includes(url.protocol))
       throw new Error('HLS resources require HTTP(S)');
@@ -410,6 +420,22 @@ export function parsePlaylist(
         if (!['http:', 'https:', 'data:'].includes(url.protocol))
           throw new Error('Unsupported steering URI');
         p.steering = { url: url.href, pathway: a['PATHWAY-ID'] };
+        break;
+      }
+      case '#EXT-X-I-FRAME-STREAM-INF': {
+        const a = attributes(value);
+        if (!a.URI) throw new Error('Invalid I-frame rendition');
+        // Attributes not defined for this tag have no semantics here. Some
+        // packagers repeat STREAM-INF attributes such as FRAME-RATE; ignore
+        // them rather than rejecting otherwise usable primary variants.
+        (p.iframes ??= []).push({
+          url: uri(a.URI),
+          bandwidth: number(a.BANDWIDTH, 'I-frame BANDWIDTH', true),
+          codecs: a.CODECS,
+          resolution: a.RESOLUTION,
+          stableId: stableIdentity(a['STABLE-VARIANT-ID']),
+          pathway: a['PATHWAY-ID'],
+        });
         break;
       }
       case '#EXT-X-IMAGE-STREAM-INF': {
@@ -660,7 +686,7 @@ export function parsePlaylist(
         break;
       }
       case '#EXT-X-I-FRAMES-ONLY':
-        p.unsupported.push(tag);
+        p.iframesOnly = true;
         break;
       default:
         break;
@@ -668,11 +694,18 @@ export function parsePlaylist(
   }
   if (variant || duration !== undefined)
     throw new Error('Incomplete playlist entry');
+  if (p.iframesOnly && p.imagesOnly)
+    throw new Error('Conflicting image and I-frame playlist types');
+  if (p.iframesOnly && p.version < 4)
+    throw new Error('I-frame playlists require version 4');
   if (p.steering && !p.variants.length)
     throw new Error('Content steering requires a multivariant playlist');
   if (!p.imagesOnly && p.segments.some((s) => s.tiles))
     throw new Error('TILES requires IMAGES-ONLY');
-  if ((p.variants.length || p.images?.length) && p.segments.length)
+  if (
+    (p.variants.length || p.images?.length || p.iframes?.length) &&
+    p.segments.length
+  )
     throw new Error('Mixed multivariant and media playlist');
   if (p.parts.length && !p.partTarget)
     throw new Error('Partial segments require PART-INF');

@@ -623,6 +623,7 @@ await import('./prepare-protection-fixtures.mjs');
 await import('./prepare-sample-aes-fixtures.mjs');
 
 await import('./prepare-cenc-fixtures.mjs');
+await import('./prepare-key-rotation-fixtures.mjs');
 
 await import('./prepare-packed-audio-fixtures.mjs');
 await import('./prepare-metadata-fixtures.mjs');
@@ -632,3 +633,7 @@ await import('./prepare-mp3-fixtures.mjs');
 await import('./prepare-dolby-fixtures.mjs');
 
 await import('./prepare-image-fixtures.mjs');
+
+await import('./prepare-iframe-fixtures.mjs');
+
+await import('./prepare-ll-av-fixtures.mjs');

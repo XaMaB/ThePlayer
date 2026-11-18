@@ -1,3 +1,4 @@
+import { renderRuby } from './ttml-ruby';
 import type { TtmlDocument, TtmlStyle, TtmlParagraph } from './ttml';
 /** DOM text overlay; no markup, selectors or URLs from subtitle documents are executed. */
 export class TtmlRenderer {
@@ -238,11 +239,24 @@ export class TtmlRenderer {
       }
       const paragraph = document.createElement('div');
       this.style(paragraph, p.style, doc);
-      for (const run of runs) {
+      const makeSpan = (run: TtmlParagraph['runs'][number]) => {
         const span = document.createElement('span');
         this.style(span, run.style, doc);
         span.textContent = run.text;
-        paragraph.append(span);
+        return span;
+      };
+      const rubyGroups = new Set<number>();
+      for (const run of runs) {
+        if (!run.ruby) paragraph.append(makeSpan(run));
+        else if (!rubyGroups.has(run.ruby.group)) {
+          rubyGroups.add(run.ruby.group);
+          paragraph.append(
+            renderRuby(
+              runs.filter((r) => r.ruby?.group === run.ruby!.group),
+              makeSpan,
+            ),
+          );
+        }
       }
       box.append(paragraph);
       text += (text ? '\n' : '') + runs.map((r) => r.text).join('');

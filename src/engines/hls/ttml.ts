@@ -1,10 +1,20 @@
+import { compileTtmlSets } from './ttml-animation';
 /** Original TTML text parser, using the browser's XML parser and media timing. */
 const TT = 'http://www.w3.org/ns/ttml';
 const TTS = TT + '#styling';
 const TTP = TT + '#parameter';
 const XML = 'http://www.w3.org/XML/1998/namespace';
 export type TtmlStyle = Record<string, string>;
+export interface TtmlRuby {
+  group: number;
+  role: string;
+  index: number;
+  side: string;
+  align: string;
+  fontSize: string;
+}
 export interface TtmlRun {
+  ruby?: TtmlRuby;
   text: string;
   start: number;
   end: number;
@@ -71,16 +81,24 @@ const nonInherited = new Set([
   'overflow',
   'opacity',
   'zIndex',
+  'ruby',
 ]);
+const styleValue = (
+  local: TtmlStyle,
+  parent: TtmlStyle,
+  name: string,
+  fallback: string,
+) => local[name] ?? parent[name] ?? fallback;
 const inheritedStyle = (style: TtmlStyle) =>
   Object.fromEntries(
     Object.entries(style).filter(([name]) => !nonInherited.has(name)),
   );
-export function parseTtml(
+function parseTtmlDocument(
   xml: string,
   clipStart: number,
   clipEnd: number,
   offset = 0,
+  animations = true,
 ): TtmlDocument {
   if (xml.length > 2 * 1024 * 1024 || /<!DOCTYPE|<!ENTITY/i.test(xml))
     throw new Error('Unsupported TTML document declarations or size');
@@ -123,6 +141,21 @@ export function parseTtml(
   const rates = { frame: effective, subFrame, tick };
   const elements = [...doc.getElementsByTagName('*')];
   if (elements.length > 20000) throw new Error('TTML element limit exceeded');
+  if (
+    animations &&
+    elements.some(
+      (e) =>
+        e.namespaceURI === TT &&
+        (e.localName === 'set' || e.hasAttribute('animate')),
+    )
+  )
+    return compileTtmlSets(
+      root,
+      clipStart,
+      clipEnd,
+      (value) => ttmlTime(value, rates),
+      (text, start, end) => parseTtmlDocument(text, start, end, offset, false),
+    );
   const styles = new Map(
     elements
       .filter((e) => e.namespaceURI === TT && e.localName === 'style')
@@ -173,7 +206,7 @@ export function parseTtml(
     const start =
       base +
       (e.hasAttribute('begin') ? ttmlTime(e.getAttribute('begin')!, rates) : 0);
-    const end = Math.min(
+    let end = Math.min(
       parentEnd,
       e.hasAttribute('end')
         ? base + ttmlTime(e.getAttribute('end')!, rates)
@@ -182,8 +215,32 @@ export function parseTtml(
         ? start + ttmlTime(e.getAttribute('dur')!, rates)
         : Infinity,
     );
+    if (
+      e.localName === 'set' &&
+      e.hasAttribute('dur') &&
+      e.hasAttribute('repeatCount')
+    ) {
+      const repeat = e.getAttribute('repeatCount')!;
+      const count = repeat === 'indefinite' ? Infinity : Number(repeat);
+      const duration = ttmlTime(e.getAttribute('dur')!, rates);
+      if (duration > 0)
+        end = Math.min(
+          parentEnd,
+          e.hasAttribute('end')
+            ? base + ttmlTime(e.getAttribute('end')!, rates)
+            : Infinity,
+          start + duration * count,
+        );
+    }
     return { start, end };
   };
+  let rubyGroup = 0;
+  const rubyIndices = new WeakMap<Element, Record<string, number>>();
+  const halfFont = (value: string) =>
+    value
+      .split(/\s+/)
+      .map((v) => v.replace(/^(\d+(?:\.\d+)?)/, (n) => String(Number(n) / 2)))
+      .join(' ');
   const walk = (
     e: Element,
     base: number,
@@ -194,6 +251,7 @@ export function parseTtml(
     paragraph?: TtmlParagraph,
     depth = 0,
     paint: TtmlStyle = {},
+    ruby?: TtmlRuby,
   ): number => {
     if (depth > 128) throw new Error('TTML nesting limit exceeded');
     const { start, end } = interval(e, base, parentEnd);
@@ -206,7 +264,43 @@ export function parseTtml(
       ...inheritedStyle(inherited),
     };
     const declared = resolve(e);
+    const role = declared.ruby ?? 'none';
+    const parentRuby = ruby;
+    if (role === 'container') {
+      if (ruby) throw new Error('Nested TTML ruby containers are invalid');
+      ruby = {
+        group: ++rubyGroup,
+        role,
+        index: 0,
+        side: 'before',
+        align: styleValue(declared, parentStyle, 'rubyAlign', 'center'),
+        fontSize: declared.fontSize ?? parentStyle.fontSize ?? '1c',
+      };
+    } else if (
+      ['baseContainer', 'textContainer', 'base', 'text', 'delimiter'].includes(
+        role,
+      )
+    ) {
+      if (!ruby) throw new Error('TTML ruby component has no container');
+      const indices = rubyIndices.get(e.parentElement!) ?? {};
+      const index = parentRuby?.role === 'container' ? 0 : (indices[role] ?? 0);
+      indices[role] = index + 1;
+      rubyIndices.set(e.parentElement!, indices);
+      ruby = {
+        ...ruby,
+        role,
+        index,
+        side:
+          parentRuby?.role === 'textContainer'
+            ? parentRuby.side
+            : styleValue(declared, parentStyle, 'rubyPosition', 'before'),
+      };
+      if (role === 'text' && parentRuby?.role === 'container')
+        parentStyle.fontSize = halfFont(ruby.fontSize);
+    }
     const style = { ...parentStyle, ...declared };
+    if (role === 'textContainer' && !declared.fontSize)
+      style.fontSize = halfFont(ruby!.fontSize);
     if (declared.fontSize?.endsWith('%')) {
       const parent = /^(\d+(?:\.\d+)?)(c|px|em)$/.exec(
         parentStyle.fontSize ?? '1c',
@@ -216,6 +310,7 @@ export function parseTtml(
           String((+parent[1] * parseFloat(declared.fontSize)) / 100) +
           parent[2];
     }
+    if (role === 'container') ruby!.fontSize = style.fontSize ?? '1c';
     if (e.localName === 'p') paint = {};
     else {
       paint = { ...paint };
@@ -241,6 +336,7 @@ export function parseTtml(
     if (e.localName === 'br' && paragraph)
       paragraph.runs.push({
         text: '\n',
+        ...(ruby ? { ruby } : {}),
         start: Math.max(start, clipStart) + offset,
         end: Math.min(end, clipEnd) + offset,
         style: { ...inheritedStyle(style), ...paint },
@@ -255,8 +351,18 @@ export function parseTtml(
           if (!previous || /[ \n]$/.test(previous))
             text = text.replace(/^ /, '');
         }
+        if (
+          ruby &&
+          ['container', 'baseContainer', 'textContainer'].includes(ruby.role)
+        ) {
+          if (text.trim())
+            throw new Error('Text outside TTML ruby base/annotation');
+          continue;
+        }
+        if (ruby?.role === 'delimiter') continue;
         if (text)
           paragraph.runs.push({
+            ...(ruby ? { ruby } : {}),
             text,
             start: Math.max(start, clipStart) + offset,
             end: Math.min(end, clipEnd) + offset,
@@ -264,6 +370,11 @@ export function parseTtml(
           });
       } else if (node.nodeType === Node.ELEMENT_NODE) {
         const child = node as Element;
+        if (child.namespaceURI === TT && child.localName === 'set') {
+          if (e.getAttribute('timeContainer') === 'seq')
+            cursor = interval(child, cursor, end).end;
+          continue;
+        }
         if (
           child.namespaceURI !== TT ||
           !['body', 'div', 'p', 'span', 'br'].includes(child.localName)
@@ -279,6 +390,7 @@ export function parseTtml(
           paragraph,
           depth + 1,
           paint,
+          ruby,
         );
         if (e.getAttribute('timeContainer') === 'seq') cursor = childEnd;
       }
@@ -300,4 +412,13 @@ export function parseTtml(
       root.getAttributeNS(XML, 'space') === 'preserve',
     );
   return result;
+}
+
+export function parseTtml(
+  xml: string,
+  clipStart: number,
+  clipEnd: number,
+  offset = 0,
+): TtmlDocument {
+  return parseTtmlDocument(xml, clipStart, clipEnd, offset);
 }

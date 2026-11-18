@@ -85,3 +85,9 @@ Next: stale-playlist detection, live-window catch-up and encoder restart/timelin
 0.26.0-alpha.1 adds interstitial asset playback, primary restoration, navigation restrictions and skip UI. Continue with preload/timeline presentation and remaining profile gaps.
 
 0.27.0-alpha.1 adds JPEG image playlists and tiled seek previews with live alignment. Continue with coded I-frame previews, remaining subtitle/media profiles and stabilization.
+
+0.36.0-alpha.1 bundles development milestones 0.28–0.35: coded I-frame previews, TTML discrete animations/ruby, independent LL-HLS audio, CDN Age tune-in and encrypted growing ranges. Public Widevine CBCS playback with one/multiple keys is verified in Linux Chromium over Fetch/XHR, including audio/quality switching, seeks and cleanup. Firefox/WebKit CI for 0.27 passes. Continuous animation/trick-play, remaining steering/interstitial/media profiles, device-specific DRM and final soak validation remain active. Milestone versions 0.28–0.35 were not published separately.
+
+Widevine initialization from playlist PSSH data also passes single/multi-key Fetch/XHR playback with in-band PSSH neutralized.
+
+Temporary DRM sessions now retire when known keys leave buffered/prepared media. Tests exercise 80 KIDs and rewind reacquisition; unknown sample-group KIDs remain conservatively retained. The 64-simultaneous-session bound remains explicit.

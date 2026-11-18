@@ -64,7 +64,7 @@ MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer a
 | CEA-708 P16                | Implemented subset                 | Implemented                                               | Two-byte operands, Cyrillic/Latin Extended handling and configurable service encoding                                             |
 | CEA-608                    | Not exposed                        | Implemented subset: fMP4 `c608` and AVC/HEVC SEI, CC1–CC4 | Original decoder; pop-on, paint-on, 2–4-row roll-up, PAC position/indent, character sets, foreground colors, italic and underline |
 | WebVTT                     | Not exposed                        | Implemented subset                                        | External segmented WebVTT renditions, timestamp mapping and basic cue placement using browser TextTracks                          |
-| TTML / IMSC1               | Not implemented                    | Implemented text subset                                   | fMP4 stpp, positioned/styled regions and timed spans; see profile limits                                                          |
+| TTML / IMSC1               | Not implemented                    | Implemented text subset                                   | fMP4 stpp, positioned/styled regions, timed spans, discrete style animations and ruby; see profile limits                         |
 | WebVTT inside MP4 (`wvtt`) | Not implemented                    | Implemented subset                                        | fMP4 vttc/vtte samples, sample timing and cue settings                                                                            |
 
 **CEA-608:** parity checks and duplicate-control suppression are implemented. Caption history supports seeking and quality transitions. Field-2 CC3/CC4 and TS/fMP4 SEI carriage are implemented; field-2 XDS packets are skipped. Multiple `c608` tracks, background attributes, flashing and Text/XDS services remain unsupported. Native browser typography means placement is not a pixel-exact broadcast rendering. A live join or seek with insufficient history can wait for the next complete caption update.
@@ -90,10 +90,10 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 | AES-256-GCM                          | Whole-resource authenticated encryption; embedded IV/tag, including maps                                                 |
 | Session keys                         | Bounded identity-key preload, consumed by media/map decryption                                                           |
 | SAMPLE-AES TS                        | AVC/AAC/AC-3/E-AC-3 identity keys; rotation and explicit/sequence IV, byte-exact and browser tests                       |
-| DRM / EME                            | CENC/CBCS fMP4 through EME; ClearKey, identity keys and license callbacks tested                                         |
+| DRM / EME                            | CENC/CBCS fMP4; ClearKey and public Widevine CBCS playback tested; manifest PSSH and bounded key rotation                |
 | Content steering / interstitials     | Steering with matching inventories and interstitial playback implemented; see profile limits                             |
 | Timed metadata                       | ID3 from TS/packed AAC; emsg v0/v1 and CMAF ID3, with presentation-time event data                                       |
-| I-frame trick play / image playlists | JPEG image/tile seek previews implemented; coded I-frame previews pending                                                |
+| I-frame trick play / image playlists | JPEG image/tile and coded I-frame seek previews implemented; continuous trick-play pending                               |
 | Packed audio                         | ADTS AAC and MP3 with ID3 anchors, rollover and AES-128; AAC/AC-3/E-AC-3 SAMPLE-AES; single independent E-AC-3 substream |
 | Declared GAP segments                | Skipped without requests; playback resumes at buffered media after the declared interval                                 |
 | Live timeline resets                 | Bounded coordinated media restart; paused state and track selection retained                                             |
@@ -227,7 +227,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Extend the original HLS engine: broader LL-HLS interoperability, additional TTML/IMSC features, sample encryption, EME and protocol extensions.
+- Complete remaining HLS profiles and stabilization: steering inventory changes, interstitial presentation, advanced caption layout, codec/device interoperability and long-running validation.
 - Extend HLS caption attribute and typography coverage.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
@@ -244,4 +244,4 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current prerelease: **0.16.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current prerelease: **0.36.0-alpha.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.

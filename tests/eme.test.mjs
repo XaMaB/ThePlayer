@@ -191,3 +191,78 @@ test('EME bounds a stalled license callback and aborts its signal', async () => 
   assert.equal(signal.aborted, true);
   await drm.destroy();
 });
+
+test('EME retires known unbuffered keys across more than 64 rotations and reacquires on rewind', async () => {
+  const { sessions, video } = setup(),
+    errors = [];
+  const drm = new EmeController(
+    video,
+    {
+      keySystem: 'org.w3.clearkey',
+      license: async () => new TextEncoder().encode('{"keys":[]}'),
+    },
+    (e) => errors.push(e),
+  );
+  await drm.ensure(tracks);
+  for (let n = 1; n <= 80; n++) {
+    const id = new Uint8Array(16).fill(n);
+    await drm.retainKeys(
+      [{ ...tracks[0], encryption: { scheme: 'cenc', kid: id } }],
+      n + 1,
+      Math.max(0, n - 3),
+    );
+    await drm.requestInitData(Uint8Array.of(n));
+    sessions.at(-1).keyStatuses.set(id.buffer, 'usable');
+    await tick();
+    assert.ok(sessions.filter((s) => !s.closed).length <= 33);
+  }
+  assert.equal(sessions.length, 80);
+  assert.equal(sessions[0].closed, true);
+  assert.equal(sessions.at(-1).closed, false);
+  sessions[0].keyStatuses.set(new Uint8Array(16).fill(1).buffer, 'expired');
+  sessions[0].dispatchEvent(new Event('keystatuseschange'));
+  await drm.retainKeys(
+    [
+      {
+        ...tracks[0],
+        encryption: { scheme: 'cenc', kid: new Uint8Array(16).fill(1) },
+      },
+    ],
+    2,
+    0,
+  );
+  await drm.requestInitData(Uint8Array.of(1));
+  assert.equal(sessions.length, 81);
+  await tick();
+  assert.deepEqual(errors, []);
+  await drm.destroy();
+  assert.ok(sessions.every((s) => s.closed));
+});
+test('EME retains buffered keys and unknown sample-group keys', async () => {
+  const { sessions, video } = setup();
+  const drm = new EmeController(
+    video,
+    {
+      keySystem: 'org.w3.clearkey',
+      license: async () => new TextEncoder().encode('{"keys":[]}'),
+    },
+    () => {},
+  );
+  await drm.ensure(tracks);
+  for (let n = 1; n <= 64; n++) {
+    await drm.retainKeys(tracks, 100, 0);
+    await drm.requestInitData(Uint8Array.of(n));
+    sessions
+      .at(-1)
+      .keyStatuses.set(
+        new Uint8Array(16).fill(n % 2 ? 0 : 255).buffer,
+        'usable',
+      );
+    await tick();
+  }
+  await assert.rejects(drm.requestInitData(Uint8Array.of(65)), /Too many/);
+  assert.ok(sessions.every((s) => !s.closed));
+  await drm.retainKeys(tracks, 100, 110);
+  assert.ok(sessions.filter((s, i) => i % 2 === 1).every((s) => !s.closed));
+  await drm.destroy();
+});

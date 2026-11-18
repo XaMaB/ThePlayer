@@ -87,7 +87,7 @@ for (const format of ['stpp', 'wvtt']) {
     '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MAP:URI="init.mp4"\n';
   for (let i = 0; i < 9; i++) {
     const start = i * 2;
-    const xml = `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:profile="http://www.w3.org/ns/ttml/profile/imsc1/text"><head><styling><style xml:id="base" tts:color="white" tts:fontFamily="proportionalSansSerif" tts:textAlign="left"/></styling><layout><region xml:id="lower" tts:origin="10% 60%" tts:extent="80% 30%" tts:displayAlign="after"/></layout></head><body><div><p region="lower" style="base" begin="${start}s" end="${start + 1.9}s">TTML ${i} <span tts:color="yellow">left aligned</span><br/><span begin="0.5s" end="1.5s" tts:fontStyle="italic">Timed span</span></p></div></body></tt>`;
+    const xml = `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:profile="http://www.w3.org/ns/ttml/profile/imsc1/text"><head><styling><style xml:id="base" tts:color="white" tts:fontFamily="proportionalSansSerif" tts:textAlign="left"/></styling><layout><region xml:id="lower" tts:origin="10% 60%" tts:extent="80% 30%" tts:displayAlign="after"/></layout></head><body><div><p region="lower" style="base" begin="${start}s" end="${start + 1.9}s">TTML ${i} <span tts:color="yellow"><set begin="1s" dur="0.5s" tts:color="lime"/>left aligned</span><br/><span begin="0.5s" end="1.5s" tts:fontStyle="italic">Timed span</span><span tts:ruby="container"><span tts:ruby="base">Ruby</span><span tts:ruby="text">guide</span></span></p></div></body></tt>`;
     const data =
       format === 'stpp'
         ? utf8(xml)

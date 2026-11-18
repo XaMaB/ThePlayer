@@ -1,4 +1,5 @@
 import { ImageThumbnails } from './thumbnails';
+import { IFrameThumbnails } from './iframe-thumbnails';
 import { DateRangeTimeline, type TimedDateRange } from './date-ranges';
 import {
   parseInterstitial,
@@ -11,6 +12,7 @@ import { InterstitialSession } from './interstitial-session';
 import { retryable } from './recovery';
 import { ContentSteering } from './steering';
 import { EmeController, type DrmOptions } from './eme';
+import { playlistInitData } from './drm-init';
 import { decryptSamplePes } from './sample-aes';
 import { Cea708Timeline } from './cea708-timeline';
 import { Cea708Renderer } from './cea708-renderer';
@@ -162,7 +164,7 @@ export class HlsEngine extends EventTarget {
     return this.main?.playlist;
   }
   private master?: Playlist;
-  private thumbnails?: ImageThumbnails;
+  private thumbnails?: ImageThumbnails | IFrameThumbnails;
   private dateRanges = new DateRangeTimeline(
     (name, detail) => {
       this.emit(name, detail);
@@ -562,6 +564,8 @@ export class HlsEngine extends EventTarget {
           url: r.url,
         }));
     }
+    if (p.iframesOnly)
+      throw new Error('Use an I-frame rendition through seek previews');
     if (p.imagesOnly)
       throw new Error(
         'Image playlists are for seek previews, not primary playback',
@@ -811,22 +815,44 @@ export class HlsEngine extends EventTarget {
       const images = this.master?.images
         ?.filter((v) => v.codecs === 'jpeg')
         .sort((a, b) => a.bandwidth - b.bandwidth);
-      if (!images?.length) return;
-      this.thumbnails = new ImageThumbnails(
-        images[0],
-        this.client,
-        () => this.main!.playlist,
-        async (data, segment) => {
-          if (!segment.key) return data;
-          if (
-            !['AES-128', 'AES-256-GCM'].includes(segment.key.method) ||
-            segment.key.format !== 'identity'
-          )
-            throw new Error('Unsupported image encryption');
-          return this.decrypt(data, segment.key, segment.sequence);
-        },
-        () => this.master?.variables ?? {},
-      );
+      const iframe = this.master?.iframes
+        ?.slice()
+        .sort((a, b) => a.bandwidth - b.bandwidth)[0];
+      if (!images?.length && !iframe) return;
+      if (!images?.length) {
+        this.thumbnails = new IFrameThumbnails(
+          iframe!,
+          this.client,
+          () => this.main!.playlist,
+          () => this.master?.variables ?? {},
+          (data, key, sequence) => this.decrypt(data, key, sequence),
+          (key) => this.importKey({ ...key, method: 'SAMPLE-AES' }),
+          async (pes, key, sequence) => {
+            if (pes.some((p) => p.type === 0x24))
+              throw new Error('SAMPLE-AES TS supports AVC/AAC/AC-3 only');
+            const imported = await this.importKey(key);
+            const iv = key.iv ?? new Uint8Array(16);
+            if (!key.iv)
+              new DataView(iv.buffer).setBigUint64(8, BigInt(sequence));
+            return decryptSamplePes(pes, imported, iv);
+          },
+        );
+      } else
+        this.thumbnails = new ImageThumbnails(
+          images[0],
+          this.client,
+          () => this.main!.playlist,
+          async (data, segment) => {
+            if (!segment.key) return data;
+            if (
+              !['AES-128', 'AES-256-GCM'].includes(segment.key.method) ||
+              segment.key.format !== 'identity'
+            )
+              throw new Error('Unsupported image encryption');
+            return this.decrypt(data, segment.key, segment.sequence);
+          },
+          () => this.master?.variables ?? {},
+        );
     }
     return this.thumbnails.get(time);
   }
@@ -1042,8 +1068,24 @@ export class HlsEngine extends EventTarget {
   ) {
     const protectedTracks = prepared.tracks.filter((t) => t.encryption);
     if (!protectedTracks.length) return;
+    const retain = async () => {
+      const starts = this.lanes().map((lane) =>
+        lane.buffer?.buffered.length ? lane.buffer.buffered.start(0) : 0,
+      );
+      await this.eme!.retainKeys(
+        protectedTracks,
+        prepared.segment.start + prepared.segment.duration,
+        Math.min(...starts, prepared.segment.start),
+      );
+    };
     if (this.source.drm) {
+      await retain();
       await this.eme!.ensure(capabilities);
+      const init = playlistInitData(
+        prepared.segment.keys ?? [],
+        this.source.drm.keySystem,
+      );
+      if (init) await this.eme!.requestInitData(init);
       return;
     }
     const key = prepared.segment.key;
@@ -1085,6 +1127,7 @@ export class HlsEngine extends EventTarget {
         (error) => this.fail(error),
       );
     else this.eme.addClearKeys(clearKeys);
+    await retain();
     await this.eme.ensure(capabilities);
     await this.eme.requestKeyIds(protectedTracks);
   }

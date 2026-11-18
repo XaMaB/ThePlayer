@@ -1315,6 +1315,26 @@ test('HLS identity key alternatives survive unsupported KEYFORMAT declarations',
     /forbidden/,
   );
 });
+test('Opaque DRM key identifiers preserve nonnumeric colon suffixes', () => {
+  const id =
+    'skd://302f80dd-411e-4886-bca5-bb1f8018a024:77FD1889AAF4143B085548B3C0F95B9A';
+  const p = parsePlaylist(
+    vod(
+      '#EXT-X-KEY:METHOD=SAMPLE-AES,URI="data:text/plain;base64,AAAA",KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"\n' +
+        `#EXT-X-KEY:METHOD=SAMPLE-AES,URI="${id}",KEYFORMAT="com.apple.streamingkeydelivery"\n#EXTINF:2,\na.m4s`,
+    ),
+    base,
+  );
+  assert.equal(p.segments[0].keys[1].url, id);
+  assert.equal(p.segments[0].keys[0].url, 'data:text/plain;base64,AAAA');
+  assert.throws(() =>
+    parsePlaylist(
+      vod(`#EXT-X-KEY:METHOD=AES-128,URI="${id}"\n#EXTINF:2,\na.ts`),
+      base,
+    ),
+  );
+  assert.throws(() => parsePlaylist(vod(`#EXTINF:2,\n${id}`), base));
+});
 test('SESSION-KEY is distinct from media encryption and repeated key declarations have separate cache scopes', () => {
   const p = parsePlaylist(
     '#EXTM3U\n#EXT-X-SESSION-KEY:METHOD=AES-256-GCM,URI="key"\n#EXT-X-STREAM-INF:BANDWIDTH=100\nmedia.m3u8',

@@ -1,3 +1,4 @@
+import { tuneInUrl, advancedMedia } from './cdn-tune-in';
 import { PreloadCache } from './preload';
 import {
   MissingDeltaBase,
@@ -52,6 +53,9 @@ export class PlaylistLoader {
     fullReloads: 0,
     directiveFallbacks: 0,
     renditionReports: 0,
+    tuneInRequests: 0,
+    tuneInFallbacks: 0,
+    tuneInLimited: 0,
   };
   readonly preload: PreloadCache;
   private disabled = new Map<string, number>();
@@ -68,7 +72,12 @@ export class PlaylistLoader {
       (this.disabled.get(p.url) ?? 0) <= performance.now()
     );
   }
-  private parse(data: Uint8Array, url: string, previous?: Playlist) {
+  private parse(
+    data: Uint8Array,
+    url: string,
+    previous?: Playlist,
+    preload = true,
+  ) {
     if (data.length > 2 * 1024 * 1024)
       throw new Error('Playlist exceeds 2 MiB');
     const p = parsePlaylist(
@@ -79,12 +88,68 @@ export class PlaylistLoader {
     );
     if (p.unsupported.length)
       throw new Error('Unsupported HLS feature: ' + p.unsupported.join(', '));
-    this.preload.update(p);
+    if (preload) this.preload.update(p);
     return playablePlaylist(p);
   }
   async read(url: string, recoveryWindowMs?: number) {
-    const response = await this.client.get({ url }, { recoveryWindowMs });
-    return this.parse(response.data, response.url);
+    let response = await this.client.get({ url }, { recoveryWindowMs });
+    let current = this.parse(response.data, response.url, undefined, false);
+    const first = current,
+      age = response.age,
+      received = response.receivedAt;
+    if (age !== undefined && first.partTarget && this.blocking(first)) {
+      const goal = age + (first.partTarget < 1 ? 1 : 0);
+      let attempts = 0;
+      while (
+        response.age !== undefined &&
+        response.age >= Math.floor(first.partTarget)
+      ) {
+        // A directed response freshly revalidated by the cache needs no
+        // further round trip, including sub-second PART-TARGET values.
+        if (attempts && response.age === 0) break;
+        const additional = goal + (performance.now() - received) / 1000;
+        const advanced = advancedMedia(first, current);
+        if (advanced !== undefined && advanced >= additional) break;
+        if (++attempts > 3) {
+          this.diagnostics.tuneInLimited++;
+          break;
+        }
+        try {
+          this.diagnostics.tuneInRequests++;
+          response = await this.client.get(
+            { url: tuneInUrl(first, additional) },
+            {
+              recoveryWindowMs: 0,
+              retries: 0,
+              timeoutMs:
+                this.client.options.timeoutMs ??
+                Math.max(15000, first.targetDuration * 3000 + 1000),
+            },
+          );
+          current = this.parse(response.data, response.url, undefined, false);
+        } catch (error) {
+          this.client.signal.throwIfAborted();
+          if (
+            (error instanceof HttpError &&
+              [400, 412, 503].includes(error.status)) ||
+            (error instanceof Error && error.name === 'TimeoutError')
+          ) {
+            this.diagnostics.tuneInFallbacks++;
+            if (this.disabled.size >= 64) this.disabled.clear();
+            this.disabled.set(first.url, performance.now() + 30000);
+            response = await this.client.get(
+              { url: canonicalPlaylistUrl(first.url) },
+              { recoveryWindowMs },
+            );
+            current = this.parse(response.data, response.url, undefined, false);
+            break;
+          }
+          throw error;
+        }
+      }
+    }
+    this.preload.update(current);
+    return current;
   }
   async rendition(url: string, reference: Playlist, recoveryWindowMs?: number) {
     const report = reference.reports?.find(

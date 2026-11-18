@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -69,9 +69,12 @@ const server = createServer(async (req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base =
   process.env.HLS_RECOVERY_BASE ?? `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({
-  args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'],
-});
+const browserName = process.env.HLS_TEST_BROWSER ?? 'chromium';
+const browser = await { chromium, firefox, webkit }[browserName].launch(
+  browserName === 'chromium'
+    ? { args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] }
+    : {},
+);
 try {
   for (const transport of ['fetch', 'xhr']) {
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
@@ -161,7 +164,7 @@ try {
         '/vtt-parser.js'
       );
       const text =
-        'WEBVTT\n\nSTYLE\n::cue(.yellow) { color: yellow; font-weight: bold }\n\nREGION\nid:bottom\nwidth:80%\nlines:3\nregionanchor:0%,100%\nviewportanchor:10%,90%\nscroll:up\n\n00:00:01.000 --> 00:00:03.000 region:bottom line:80%,end position:10%,line-left align:start\n<c.yellow>Styled cue</c>\n';
+        'WEBVTT\n\nSTYLE\n::cue { color: yellow }\n::cue(.yellow) { color: yellow; font-weight: bold }\n\nREGION\nid:bottom\nwidth:80%\nlines:3\nregionanchor:0%,100%\nviewportanchor:10%,90%\nscroll:up\n\n00:00:01.000 --> 00:00:03.000 region:bottom line:80%,end position:10%,line-left align:start\n<c.yellow>Styled cue</c>\n';
       const headers = vttHeaders(text),
         cue = nativeCue(parseVtt(text)[0], headers.regions);
       const styles = new WebVttStyles(document.querySelector('video'));
@@ -255,6 +258,34 @@ try {
     assert.equal(info.height, 108);
     assert.equal(info.align, 'left');
     assert.equal(info.color, 'rgb(255, 255, 0)');
+    assert.equal(
+      await page.locator('.theplayer-ttml rt').textContent(),
+      'guide',
+    );
+    const rubySizes = await page.evaluate(() => {
+      const ruby = document.querySelector('.theplayer-ttml ruby');
+      return [
+        ruby.querySelector('[data-ruby-base] span'),
+        ruby.querySelector('rt span'),
+      ].map((e) => parseFloat(getComputedStyle(e).fontSize));
+    });
+    assert.equal(rubySizes[1], rubySizes[0] / 2);
+
+    for (const [time, color] of [
+      [1.25, 'rgb(0, 255, 0)'],
+      [1.75, 'rgb(255, 255, 0)'],
+      [1.25, 'rgb(0, 255, 0)'],
+      [0.75, 'rgb(255, 255, 0)'],
+    ]) {
+      await seek(time);
+      await page.waitForFunction((color) => {
+        const span = [
+          ...document.querySelectorAll('.theplayer-ttml span'),
+        ].find((e) => e.textContent === 'left aligned');
+        return span && getComputedStyle(span).color === color;
+      }, color);
+    }
+
     await mkdir(new URL('../test-results/', import.meta.url), {
       recursive: true,
     });

@@ -2,7 +2,7 @@
 
 The application supplies a source to `PlayerCore`. Its engine registry maps a protocol name to a factory. The core releases the previous engine before initializing a replacement, forwards events, and destroys subscriptions through the engine lifecycle. Only one engine owns the video element and MediaSource at a time.
 
-`ThePlayer` registers MoQ and a lazily imported original HLS baseline engine. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
+`ThePlayer` registers MoQ and a lazily imported original HLS engine. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
 
 ## Engine contract
 
@@ -58,13 +58,13 @@ Bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` con
 
 `engine.ts` schedules playlist refreshes and segment appends. `playlist.ts` parses manifests; `selection.ts` handles rendition preferences; `abr.ts` estimates bandwidth and selects compatible qualities. `network.ts` owns Fetch/XHR, timeouts and bounded retries. Each `MediaLane` manages the initialization, timing and SourceBuffer for its main or external-audio rendition.
 
-MPEG-TS samples pass through the original AVC/HEVC/AAC demux/remux path. fMP4 initialization is inspected for AVC, HEVC, AV1 and AAC configuration before MSE appends. Browser decoders perform the actual audio/video decoding. Quality transitions fill the previous rendition through the switching boundary; the engine's buffering policy is separate from MoQ's GOP/group policy.
+MPEG-TS samples pass through the original AVC/HEVC/AAC/AC-3/E-AC-3 demux/remux path. fMP4 initialization is inspected for supported video/audio configuration before MSE appends. Browser decoders perform the actual audio/video decoding. Quality transitions fill the previous rendition through the switching boundary; the engine's buffering policy is separate from MoQ's GOP/group policy.
 
 External WebVTT uses the subtitle rendition loader. For fMP4 CEA-608, `c608-mp4.ts` extracts timestamped `cdat` pairs, `cea608.ts` decodes channel memories/commands, and `cea608-timeline.ts` checkpoints history for seeking and quality changes. The engine maps rows and columns to native text cues. Caption descriptors are excluded from MSE without moving A/V payload offsets. `c708-mp4.ts` reads CDP from separate c708/ccdp tracks. `cea-sei.ts` also extracts ATSC caption data from clear AVC/HEVC SEI. Original CEA-708 packet, service, timeline and renderer modules decode and render services with media-clock window geometry and P16 handling.
 
 HLS WebVTT/CEA-608 uses browser TextTracks; TTML and CEA-708 use their own DOM renderers; MoQ bitmap/CEA-708 captions use `SubtitleRenderer`. They share selection and metric conventions but have different rendering paths. See the [HLS support matrix](hls-support.md) for exact carriage, codec and caption limitations.
 
-Packed audio uses the same AAC transmuxer after `id3.ts`/`packed-audio.ts` recover its clock anchor. TS timed ID3 and fMP4 emsg are exposed through `metadata` events. These are append-time notifications carrying presentation timestamps; applications decide when and how to display or act on them. Malformed optional tags emit `metadatawarning`.
+Packed AAC, MP3, AC-3 and E-AC-3 have independent framing modules and share ID3 clock recovery. TS timed ID3 and fMP4 emsg are exposed through `metadata` events. These are append-time notifications carrying presentation timestamps; applications decide when and how to display or act on them. Malformed optional tags emit `metadatawarning`.
 
 ## HLS protection
 
@@ -81,3 +81,13 @@ Before exposing the engine, normalize its audio/subtitle tracks and diagnostics,
 Directory discovery, reconnecting to a changed channel namespace, source inputs and integration examples belong to the demo. Library playback requires only an explicit source, with no administration API calls. The present controls retain a DOM contract with the demo; extracting a fully self-contained UI component is a separate step.
 
 Content steering is isolated in `src/engines/hls/steering.ts`: it validates manifests and clones and owns pathway priorities/penalties. The engine applies selections through the same rendition-switching pipeline used by quality/audio changes. Speculative LL-HLS bytes remain isolated in `preload.ts` until authoritative playlist references allow their use.
+
+## HLS optional presentation modules
+
+`interstitials.ts` resolves asset lists and timing rules. `interstitial-session.ts` owns the inserted VOD presentation; the outer engine pauses its primary scheduler and restores the primary playlist, decoder and timeline when insertion ends. Both never append to the shared video element simultaneously. Interstitial events remain separate from ordinary timed metadata.
+
+`thumbnails.ts` owns JPEG image-playlist previews. `iframe-thumbnails.ts` prepares independent coded pictures through `MediaLane`, and `preview-frame.ts` decodes them with a temporary WebCodecs decoder. Both expose the protocol-neutral `getThumbnail()` result, hold bounded object-URL caches and release resources on destruction. Preview failure is isolated from primary playback.
+
+`ttml.ts` resolves XML timing and styles. `ttml-animation.ts` compiles discrete changes into bounded time intervals, preserving inherited style resolution during seeking. `ttml-renderer.ts` owns the overlay; `ttml-ruby.ts` maps paired ruby bases/annotations to browser layout. No subtitle markup is injected as HTML.
+
+`playlist-reload.ts` owns normal/blocking/delta updates and initial CDN freshness checks. `cdn-tune-in.ts` computes newer segment/part targets from HTTP Age and actual playlist progress. The network client retains response metadata consistently across Fetch and XHR. Initial preload hints are activated only after tune-in selects a usable playlist.

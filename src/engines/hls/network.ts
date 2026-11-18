@@ -1,5 +1,10 @@
 import { HttpError, NetworkError, retryable, retryDelay } from './recovery';
 import type { Resource } from './playlist';
+export function httpAge(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value.trim())) return;
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
 function openRangeLength(header: string | null, offset: number) {
   const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(header ?? '');
   if (!match) throw new Error('Invalid HLS open range response');
@@ -71,7 +76,13 @@ export class ResourceClient {
   async get(
     resource: Resource,
     request: RequestOptions = {},
-  ): Promise<{ data: Uint8Array; url: string; elapsed: number }> {
+  ): Promise<{
+    data: Uint8Array;
+    url: string;
+    elapsed: number;
+    age?: number;
+    receivedAt: number;
+  }> {
     const linked = request.signal ? new AbortController() : undefined;
     const stop = () => linked?.abort(this.signal.reason);
     const cancel = () => linked?.abort(request.signal!.reason);
@@ -172,7 +183,8 @@ export class ResourceClient {
       let data: Uint8Array,
         url: string,
         status: number,
-        contentRange: string | null;
+        contentRange: string | null,
+        age: number | undefined;
       if (this.options.transport === 'xhr') {
         const result = await new Promise<{
           data: Uint8Array;
@@ -180,6 +192,7 @@ export class ResourceClient {
           status: number;
           range: string | null;
           retryAfter: string | null;
+          age?: number;
         }>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           const cancel = () => {
@@ -199,6 +212,7 @@ export class ResourceClient {
               status: xhr.status,
               range: xhr.getResponseHeader('Content-Range'),
               retryAfter: xhr.getResponseHeader('Retry-After'),
+              age: httpAge(xhr.getResponseHeader('Age')),
             });
           xhr.onprogress = (event) => {
             loaded = event.loaded;
@@ -216,6 +230,7 @@ export class ResourceClient {
         });
         ({ data, url, status } = result);
         contentRange = result.range;
+        age = result.age;
         if (status < 200 || status >= 300)
           throw new HttpError(status, result.retryAfter);
       } else {
@@ -227,6 +242,7 @@ export class ResourceClient {
         status = response.status;
         url = response.url;
         contentRange = response.headers.get('Content-Range');
+        age = httpAge(response.headers.get('Age'));
         const length = Number(response.headers.get('Content-Length'));
         total =
           length > 0 && !response.headers.get('Content-Encoding')
@@ -306,7 +322,13 @@ export class ResourceClient {
           throw new Error('Invalid HLS byte range response');
       }
       this.bytes += data.length;
-      return { data, url, elapsed: performance.now() - start };
+      return {
+        data,
+        url,
+        elapsed: performance.now() - start,
+        age,
+        receivedAt: performance.now(),
+      };
     } catch (error) {
       if (controller.signal.aborted) throw controller.signal.reason;
       if (error instanceof TypeError) throw new NetworkError(error.message);
