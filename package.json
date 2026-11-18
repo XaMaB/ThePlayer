@@ -1,14 +1,15 @@
 {
   "name": "theplayer",
-  "version": "1.0.0-alpha.6",
+  "version": "1.0.0-alpha.7",
   "private": true,
-  "description": "Modular MoQ player with an original HLS engine",
+  "description": "Modular MoQ and HLS player with an original DASH engine preview",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
     ".": "./dist/player.js",
     "./core": "./dist/core.js",
-    "./hls": "./dist/hls.js"
+    "./hls": "./dist/hls.js",
+    "./dash": "./dist/dash.js"
   },
   "scripts": {
     "bootstrap": "node scripts/bootstrap.mjs",
@@ -53,7 +54,10 @@
     "test:hls:he-aac": "node scripts/prepare-he-aac-fixtures.mjs && node tests/hls-he-aac-browser.mjs",
     "test:hls:live-range": "node tests/hls-live-range-browser.mjs",
     "test:hls:switch-wait": "node tests/hls-switch-wait-browser.mjs",
-    "test:hls:native-clock": "node tests/hls-native-clock-browser.mjs"
+    "test:hls:native-clock": "node tests/hls-native-clock-browser.mjs",
+    "fixtures:dash": "node scripts/prepare-dash-fixtures.mjs",
+    "test:dash": "node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs",
+    "test:dash:public": "node tests/dash-public.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

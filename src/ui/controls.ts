@@ -647,7 +647,9 @@ export function mountControls(
     if (!p || !video.readyState) return;
     if (!p.isLive && Number.isFinite(video.duration))
       return { start: 0, end: video.duration };
-    const ranges = p.protocol === 'hls' ? video.seekable : video.buffered;
+    const ranges = ['hls', 'dash'].includes(p.protocol)
+      ? video.seekable
+      : video.buffered;
     if (!ranges.length) return;
     const start = ranges.start(0),
       end = ranges.end(ranges.length - 1) - 0.1;

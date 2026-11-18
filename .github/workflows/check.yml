@@ -98,3 +98,27 @@ jobs:
         timeout-minutes: 3
       - run: npm run test:hls:native-clock
         timeout-minutes: 3
+
+  dash-browsers:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      DASH_TEST_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio
+      - run: npx playwright install --with-deps chromium ${{ matrix.browser }}
+      - run: npm run bootstrap
+      - run: npm run build
+      - run: npm run fixtures:dash
+      - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
+      - run: npm run test:dash

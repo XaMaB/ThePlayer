@@ -12,7 +12,7 @@
 
 **Live television deserves a player that understands broadcast.**
 
-ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, an original HLS engine, multilingual audio, broadcast captions and shared playback controls.
+ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, original HLS and DASH engines, multilingual audio, broadcast captions and shared playback controls.
 
 [Protocols](#protocols) · [Codecs](#audio-and-video) · [Subtitles](#subtitles) · [HLS features](#hls-features) · [Quick start](#development) · [Integration](#library) · [Architecture](docs/architecture.md)
 
@@ -26,13 +26,13 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 
 ## Protocols
 
-| Protocol              | Status                    | Implemented scope                                                                                      |
-| --------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------ |
-| MoQ over WebTransport | Implemented               | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                      |
-| HLS over HTTP(S)      | Implemented               | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                  |
-| LL-HLS                | Implemented fMP4 delivery | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache |
-| MPEG-DASH             | Planned                   | No DASH engine ships yet                                                                               |
-| UDP/RTP multicast     | Origin input only         | The browser does not join multicast groups; use an Origin to ingest and publish media                  |
+| Protocol              | Status                    | Implemented scope                                                                                                  |
+| --------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| MoQ over WebTransport | Implemented               | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                                  |
+| HLS over HTTP(S)      | Implemented               | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                              |
+| LL-HLS                | Implemented fMP4 delivery | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache             |
+| MPEG-DASH             | Preview                   | fMP4 VOD/live, templates/Timeline/List/SIDX, quality and audio selection; [scope and limits](docs/dash-support.md) |
+| UDP/RTP multicast     | Origin input only         | The browser does not join multicast groups; use an Origin to ingest and publish media                              |
 
 MoQ transport compatibility alone does not guarantee interoperability: the publisher and player must also agree on the catalog and media profile. HLS is a tested subset, not a claim of full support for every protocol version. See the [HLS support matrix](docs/hls-support.md).
 
@@ -74,6 +74,10 @@ MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer a
 **WebVTT:** scoped safe STYLE rules and cue/region placement are supported. Browsers without native VTTRegion use placement fallback; region scrolling/clipping is not emulated. DVB and teletext decoding belongs to the Origin; their availability here does not mean browser-side raw broadcast subtitle decoding.
 
 The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. MediaInfo separates received events, including clears and refreshes, from displayed subtitles. See the [caption support details](docs/hls-support.md).
+
+## DASH preview
+
+DASH is available in the demo protocol selector and through `protocol: "dash"`. The first release covers MPD addressing, fMP4 video/audio, VOD/live, quality and audio selection, seeking and basic Period transitions. DASH subtitles, validated DRM, low latency and advanced extensions are still in development. See [DASH support](docs/dash-support.md) and the [staged implementation plan](docs/dash-implementation-plan.md).
 
 ## HLS features
 

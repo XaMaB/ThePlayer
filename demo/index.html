@@ -46,8 +46,8 @@
           <div class="eyebrow">Player playground</div>
           <h1>Your stream. Your player.</h1>
           <p>
-            Connect a MoQ broadcast or an HLS playlist. Watch, inspect,
-            integrate.
+            Connect a MoQ broadcast, HLS playlist or DASH manifest. Watch,
+            inspect, integrate.
           </p>
         </div>
         <span class="badge" id="playback-state">IDLE</span>
@@ -83,8 +83,8 @@
             </div>
             <pre id="snippet">Choose a source…</pre>
             <p class="notice">
-              ThePlayer accepts an HLS URL or a MoQ relay URL and namespace. No
-              management API is required for playback.
+              ThePlayer accepts an HLS/DASH URL or a MoQ relay URL and
+              namespace. No management API is required for playback.
             </p>
           </div>
         </section>
@@ -99,6 +99,7 @@
                 >Protocol<select id="source-protocol">
                   <option value="moq">MoQ</option>
                   <option value="hls">HLS</option>
+                  <option value="dash">DASH (preview)</option>
                 </select></label
               >
               <div id="hls-fields" hidden>
@@ -108,7 +109,7 @@
                   </select></label
                 >
                 <label
-                  >Playlist URL<input
+                  >Manifest URL<input
                     id="hls-url"
                     type="url"
                     placeholder="https://media.example.com/master.m3u8"
@@ -120,9 +121,10 @@
                   </select></label
                 >
                 <p class="notice">
-                  Original HLS engine preview: AVC/AAC, TS/fMP4, live/VOD,
-                  AES-128, WebVTT, separate AAC audio and manual quality
-                  selection. LL-HLS parts and TTML are not implemented yet.
+                  HLS and DASH use separate playback engines. DASH preview
+                  supports fMP4 live/VOD, quality and audio selection. DASH
+                  subtitles, low latency and advanced extensions are still in
+                  development.
                 </p>
               </div>
               <div id="moq-fields">
@@ -170,7 +172,8 @@
         </section>
       </div>
       <footer>
-        <span>THEPLAYER · MoQ + HLS</span><span>WebTransport · HTTP · MSE</span>
+        <span>THEPLAYER · MoQ + HLS + DASH</span
+        ><span>WebTransport · HTTP · MSE</span>
       </footer>
     </main>
     <script type="module" src="/app.js"></script>

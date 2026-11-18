@@ -39,6 +39,7 @@ await build({
     player: 'src/player.ts',
     core: 'src/core/player.ts',
     hls: 'src/engines/hls/engine.ts',
+    dash: 'src/engines/dash/engine.ts',
   },
   outdir: output,
   bundle: true,

@@ -1,3 +1,4 @@
+import { dashExamples } from './dash-examples.mjs';
 import { hlsExamples } from './hls-examples.mjs';
 import { SubtitleRenderer } from '../src/subtitles/renderer';
 import { mountControls } from '../src/ui/controls';
@@ -88,12 +89,12 @@ async function openChannel(next: any) {
     $('retry').hidden = true;
     text(
       'player-message',
-      next.protocol === 'hls'
-        ? 'Loading HLS playlist…'
+      ['hls', 'dash'].includes(next.protocol)
+        ? `Loading ${next.protocol.toUpperCase()} manifest…`
         : 'Connecting over WebTransport…',
     );
     if (
-      next.protocol !== 'hls' &&
+      !['hls', 'dash'].includes(next.protocol) &&
       (!('WebTransport' in window) || !window.isSecureContext)
     )
       throw new Error(
@@ -101,9 +102,9 @@ async function openChannel(next: any) {
       );
     player = new ThePlayer(
       video,
-      next.protocol === 'hls'
+      ['hls', 'dash'].includes(next.protocol)
         ? {
-            protocol: 'hls',
+            protocol: next.protocol,
             url: next.url,
             network: { transport: next.transport ?? 'fetch' },
             quality: next.quality ?? 'auto',
@@ -164,7 +165,7 @@ async function openChannel(next: any) {
       text('cue-count', e.detail.received);
       text('subtitle-displayed', e.detail.displayed);
     });
-    if (next.protocol !== 'hls') renderer.attach(player);
+    if (!['hls', 'dash'].includes(next.protocol)) renderer.attach(player);
     await player.init();
     if (token !== operation) return;
     if (
@@ -199,10 +200,10 @@ $('live-button').addEventListener('click', () => player?.seekToLive());
 function sourceForm(next: any) {
   ($('source-protocol') as HTMLSelectElement).value = next.protocol ?? 'moq';
   updateSourceFields();
-  if (next.protocol === 'hls') {
+  if (['hls', 'dash'].includes(next.protocol)) {
     ($('hls-url') as HTMLInputElement).value = next.url;
     connectedSource = {
-      protocol: 'hls',
+      protocol: next.protocol,
       url: next.url,
       network: { transport: next.transport ?? 'fetch' },
       quality: next.quality ?? 'auto',
@@ -212,7 +213,7 @@ function sourceForm(next: any) {
       'snippet',
       `import {ThePlayer} from './player.js';\nconst player = new ThePlayer(video);\nawait player.load(${JSON.stringify(connectedSource, null, 2)});`,
     );
-    text('channel-title', next.name ?? 'HLS source');
+    text('channel-title', next.name ?? `${next.protocol.toUpperCase()} source`);
     return;
   }
 
@@ -239,13 +240,14 @@ $('source-form').addEventListener('submit', (e) => {
   manual = true;
   selectedChannelId = '';
   const value = (id: string) => ($(id) as HTMLInputElement).value.trim();
-  if (($('source-protocol') as HTMLSelectElement).value === 'hls') {
+  const protocol = value('source-protocol');
+  if (['hls', 'dash'].includes(protocol)) {
     try {
       const url = new URL(value('hls-url'));
       if (!['http:', 'https:'].includes(url.protocol))
-        throw new Error('HLS requires HTTP(S)');
+        throw new Error('HTTP streaming requires HTTP(S)');
       const next = {
-        protocol: 'hls',
+        protocol,
         url: url.href,
         transport: value('hls-transport'),
         source: true,
@@ -355,7 +357,12 @@ setInterval(() => {
   diagnostics.frames = video.getVideoPlaybackQuality().totalVideoFrames;
 }, 500);
 function updateSourceFields() {
-  const hls = ($('source-protocol') as HTMLSelectElement).value === 'hls';
+  const protocol = ($('source-protocol') as HTMLSelectElement).value;
+  const hls = ['hls', 'dash'].includes(protocol);
+  const examples = $('hls-example') as HTMLSelectElement;
+  examples.replaceChildren(new Option('Custom URL', ''));
+  for (const example of protocol === 'dash' ? dashExamples : hlsExamples)
+    examples.add(new Option(example.name, example.id));
   $('hls-fields').hidden = !hls;
   $('moq-fields').hidden = hls;
   ($('hls-url') as HTMLInputElement).required = hls;
@@ -368,7 +375,11 @@ const query = new URLSearchParams(location.search);
 if (query.has('src')) {
   manual = true;
   const next = {
-    protocol: 'hls',
+    protocol:
+      query.get('protocol') === 'dash' ||
+      /\.mpd(?:[?#]|$)/i.test(query.get('src') ?? '')
+        ? 'dash'
+        : 'hls',
     url: query.get('src'),
     transport: query.get('transport') ?? 'fetch',
     media: query.get('media') ?? undefined,
@@ -403,14 +414,12 @@ if (!document.body.hasAttribute('data-embed')) {
 Object.defineProperty(window, 'player', { get: () => player });
 
 const examples = document.getElementById('hls-example') as HTMLSelectElement;
-for (const example of hlsExamples) {
-  const option = document.createElement('option');
-  option.value = example.id;
-  option.textContent = example.name;
-  examples.append(option);
-}
 examples.addEventListener('change', () => {
-  const example = hlsExamples.find((item) => item.id === examples.value);
+  const entries =
+    ($('source-protocol') as HTMLSelectElement).value === 'dash'
+      ? dashExamples
+      : hlsExamples;
+  const example = entries.find((item) => item.id === examples.value);
   if (example)
     (document.getElementById('hls-url') as HTMLInputElement).value =
       example.url;

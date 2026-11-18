@@ -2,7 +2,7 @@
 
 The application supplies a source to `PlayerCore`. Its engine registry maps a protocol name to a factory. The core releases the previous engine before initializing a replacement, forwards events, and destroys subscriptions through the engine lifecycle. Only one engine owns the video element and MediaSource at a time.
 
-`ThePlayer` registers MoQ and a lazily imported original HLS engine. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
+`ThePlayer` registers MoQ and lazily imported original HLS and DASH engines. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source.
 
 ## Engine contract
 
@@ -70,7 +70,13 @@ Packed AAC, MP3, AC-3 and E-AC-3 have independent framing modules and share ID3 
 
 Whole-resource AES-128 and AES-256-GCM decryption happens before demux/inspection. TS SAMPLE-AES decrypts AVC/AAC elementary samples before transmuxing. fMP4 cenc/cbcs stays encrypted through SourceBuffer append; the browser CDM performs decryption through `eme.ts`. Identity playlist keys use ClearKey automatically; explicit DRM configurations provide keys or an application-owned license callback. MediaSource and temporary key sessions share one engine lifetime, with bounded license requests and teardown cancellation. ClearKey tests do not certify commercial CDMs.
 
-## Extending HLS or adding DASH
+## DASH media pipeline
+
+`src/engines/dash/mpd.ts` parses namespaced MPDs and inherited addressing. `segments.ts` produces bounded segment windows using integer media clocks; `sidx.ts` resolves flat byte-range indexes. `engine.ts` owns MPD refresh, Period selection, MSE lanes, quality/audio switching and teardown. It reuses ThePlayer HTTP, MP4 inspection, throughput estimation and EME primitives; HLS manifest/scheduling logic remains separate.
+
+DASH is a preview: see [DASH support](dash-support.md) for verified scope and remaining caption, protection, low-latency and resilience work.
+
+## Extending engines
 
 Implement a separate engine, then register its factory with `PlayerCore` or the third constructor argument to `ThePlayer`. Keep manifest/network libraries inside that engine. Prefer optional entry points or dynamic imports so MoQ-only users do not download HLS/DASH dependencies.
 

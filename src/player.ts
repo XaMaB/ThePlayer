@@ -1,5 +1,6 @@
 export { VERSION } from './version';
 import { PlayerCore, type EngineRegistry } from './core/player';
+import type { DashSource } from './engines/dash/engine';
 import type { HlsSource } from './engines/hls/engine';
 import { MoqEngine, type PlayerSource } from './engines/moq/engine';
 
@@ -21,8 +22,12 @@ export type { ControlsOptions } from './ui/controls';
 export class ThePlayer extends PlayerCore {
   constructor(
     video: HTMLVideoElement,
-    private readonly initialSource?: PlayerSource | HlsSource,
+    private readonly initialSource?: PlayerSource | HlsSource | DashSource,
     engines: EngineRegistry = {
+      dash: async (video, source) => {
+        const { DashEngine } = await import('./engines/dash/engine');
+        return new DashEngine(video, source);
+      },
       moq: (video, source) => new MoqEngine(video, source),
       hls: async (video, source) => {
         const { HlsEngine } = await import('./engines/hls/engine');
@@ -48,3 +53,5 @@ export { MoqEngine as MoqPlayer } from './engines/moq/engine';
 export type { HlsSource } from './engines/hls/engine';
 
 export type { Thumbnail } from './core/thumbnail';
+
+export type { DashSource } from './engines/dash/engine';
