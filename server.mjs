@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { json, serveFile, tlsServer, remoteJson } from './demo/http.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
+const dist = process.env.THEPLAYER_DIST ?? path.join(here, 'dist');
 let config;
 try {
   config = JSON.parse(
@@ -15,7 +16,7 @@ try {
   if (error.code !== 'ENOENT' || process.env.MOQ_PLAYER_CONFIG) throw error;
   config = { webHost: '127.0.0.1', webPort: 5173 };
 }
-const server = await tlsServer(config, async (req, res) => {
+export const server = await tlsServer(config, async (req, res) => {
   const u = new URL(req.url, 'https://localhost');
   if (req.method !== 'GET')
     return json(res, { error: 'Method not allowed' }, 405);
@@ -40,10 +41,10 @@ const server = await tlsServer(config, async (req, res) => {
     '/style.css': 'style.css',
     '/version.json': 'version.json',
   };
-  if (/^\/(?:chunks\/[a-zA-Z0-9_-]+|hls)\.js$/.test(u.pathname))
-    return serveFile(res, path.join(here, 'dist', u.pathname.slice(1)));
+  if (/^\/(?:chunks\/[a-zA-Z0-9_-]+|hls|dash)\.js$/.test(u.pathname))
+    return serveFile(res, path.join(dist, u.pathname.slice(1)));
   if (files[u.pathname])
-    return serveFile(res, path.join(here, 'dist', files[u.pathname]));
+    return serveFile(res, path.join(dist, files[u.pathname]));
   if (u.pathname === '/healthz')
     return json(res, { role: 'demo-player', state: 'ready' });
   return json(res, { error: 'Not found' }, 404);

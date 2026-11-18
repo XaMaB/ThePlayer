@@ -44,6 +44,6 @@ The following MPDs returned HTTP 200 on 18 November 2026. HTTP availability is n
 
 `tests/dash-public.mjs` probes decoded playback, quality changes, continued progress and VOD seeking. Add profiles such as low latency, MPD Patch and multi-period simulation as their corresponding implementation stages land.
 
-## First delivery: 1.0.0-alpha.7
+## First delivery: 1.0.0-alpha.8
 
 The manifest/addressing foundation and basic fMP4 playback are implemented. All five public sources above passed decoded playback and continued progress; the three VOD sources also passed quality changes and seeking. Remaining stage-specific limitations are explicit in [DASH support](dash-support.md). This does not mark all ten stages complete.

@@ -1,6 +1,6 @@
 # DASH support
 
-The DASH engine is available as a **preview in 1.0.0-alpha.7**. This release establishes manifest addressing and fMP4 playback; it is not complete MPEG-DASH conformance. The [implementation plan](dash-implementation-plan.md) tracks the remaining stages and research sources.
+The DASH engine is available as a **preview in 1.0.0-alpha.8**. This release establishes manifest addressing and fMP4 playback; it is not complete MPEG-DASH conformance. The [implementation plan](dash-implementation-plan.md) tracks the remaining stages and research sources.
 
 ## Implemented foundation
 
