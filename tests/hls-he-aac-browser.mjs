@@ -22,6 +22,8 @@ try {
   for (const kind of ['ts', 'mp4', 'packed'])
     for (const transport of ['fetch', 'xhr']) {
       const page = await browser.newPage({ ignoreHTTPSErrors: true });
+      const pageErrors = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
       try {
         await page.goto(base + '/harness.html');
         await page.evaluate(
@@ -54,7 +56,10 @@ try {
             start.id = 'start-audio';
             start.addEventListener('click', () => {
               void window.audio.resume();
-              void video.play();
+              if (video.readyState >= 2)
+                void video
+                  .play()
+                  .catch((error) => window.errors.push(String(error)));
             });
             document.body.append(start);
             void window.audio.resume();
@@ -120,6 +125,7 @@ try {
             document.querySelector('video').readyState >= 2,
         );
         assert.deepEqual(await page.evaluate(() => window.errors), []);
+        assert.deepEqual(pageErrors, []);
         await page.evaluate(async () => {
           await window.player.destroy();
           await window.audio.close();

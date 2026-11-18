@@ -1,8 +1,8 @@
 # Release versions
 
-## 0.45.0-rc.1
+## 0.45.0
 
-- Mark HLS delivery as implemented with an explicit support matrix; this release candidate is undergoing final stabilization.
+- Mark HLS delivery as implemented with an explicit support matrix. Promotes the tested 0.45.0-rc.1 media implementation after full regression, cross-browser CI and a 30-minute live soak.
 - Support declared HE-AAC v2 / Parametric Stereo in TS, fMP4 and packed audio.
 - Preserve mono core configuration while signaling stereo output and the SBR sample clock.
 - Add an original synthetic two-channel fixture, independent PCM equality checks and actual browser frequency/seek tests.

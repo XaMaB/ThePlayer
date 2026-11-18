@@ -1,17 +1,17 @@
 # HLS implementation plan
 
-Status: the original engine implements the delivery, media, selection, subtitle and extension stages below. Final release validation is active. The entries under **Delivery history** record what was pending at each historical milestone; they are not the current support matrix. See [tested profiles and explicit limits](hls-support.md).
+Status: the original engine implements the delivery, media, selection, subtitle and extension stages below. The 0.45.0 release acceptance checks are complete; see the [validation record](hls-validation.md). The entries under **Delivery history** record what was pending at each historical milestone; they are not the current support matrix. See [tested profiles and explicit limits](hls-support.md).
 
-| Stage                   | Implemented behavior                                                                                      | Validation                                                      |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Fault infrastructure    | Local and Amsterdam HTTP/TLS fixtures, Fetch/XHR, cancellation and CI                                     | Actual injected faults and request assertions                   |
-| Recovery / timeline     | Retry, gaps, publisher stalls, independent-audio restarts, seek/DVR and pause preservation                | Browser recovery matrix                                         |
-| TS/fMP4 hardening       | PSI/PES/access units, AVC/HEVC/AV1, AAC including PS, packed MP3/Dolby, captions                          | Independent decode/PCM/frame checks and MSE playback            |
-| ABR / buffer policy     | Throughput estimation, emergency cancellation/downshift, quarantine, Auto/manual selection                | Throttled bodies/TTFB, failures and continued playback          |
-| LL-HLS                  | Parts, dependent-part startup, blocking/delta updates, growing-range/MAP preloads and encrypted parts     | Observed requests plus independent audio/video playback         |
-| Subtitles               | WebVTT/wvtt, TTML text profile, CEA-608 and CEA-708 via SEI/CDP/sample tracks                             | Timing, geometry, rendered pixels, selection, seek and teardown |
-| Protection / extensions | AES-128/GCM, SAMPLE-AES, CENC/CBCS/EME, key rotation, metadata, steering, interstitials and seek previews | Generated vectors, public Widevine and browser/remote scenarios |
-| Stabilization           | Isolated builds, release snapshots, CI matrix and continuous live soak                                    | Final regression/soak results pending                           |
+| Stage                   | Implemented behavior                                                                                      | Validation                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Fault infrastructure    | Local and Amsterdam HTTP/TLS fixtures, Fetch/XHR, cancellation and CI                                     | Actual injected faults and request assertions                         |
+| Recovery / timeline     | Retry, gaps, publisher stalls, independent-audio restarts, seek/DVR and pause preservation                | Browser recovery matrix                                               |
+| TS/fMP4 hardening       | PSI/PES/access units, AVC/HEVC/AV1, AAC including PS, packed MP3/Dolby, captions                          | Independent decode/PCM/frame checks and MSE playback                  |
+| ABR / buffer policy     | Throughput estimation, emergency cancellation/downshift, quarantine, Auto/manual selection                | Throttled bodies/TTFB, failures and continued playback                |
+| LL-HLS                  | Parts, dependent-part startup, blocking/delta updates, growing-range/MAP preloads and encrypted parts     | Observed requests plus independent audio/video playback               |
+| Subtitles               | WebVTT/wvtt, TTML text profile, CEA-608 and CEA-708 via SEI/CDP/sample tracks                             | Timing, geometry, rendered pixels, selection, seek and teardown       |
+| Protection / extensions | AES-128/GCM, SAMPLE-AES, CENC/CBCS/EME, key rotation, metadata, steering, interstitials and seek previews | Generated vectors, public Widevine and browser/remote scenarios       |
+| Stabilization           | Isolated builds, release snapshots, CI matrix and continuous live soak                                    | Full regression, cross-browser CI and 30-minute candidate soak passed |
 
 ## Release acceptance
 
@@ -113,4 +113,6 @@ Temporary DRM sessions now retire when known keys leave buffered/prepared media.
 
 0.44.0-alpha.1 bundles milestone 0.43 and implements CEA-608 background attributes with feature-detected native/DOM presentation. Browser checks verify real rendered pixels and HLS caption carriage, selection, seeking and cleanup. Remaining media profiles and final stabilization gates are still active.
 
-0.45.0-rc.1 extends the audio profile to declared HE-AAC v2 / PS, including mono-core/stereo-output configuration and independent sample-accurate decoding checks. Advanced audio-setup metadata and final stabilization remain active.
+0.45.0-rc.1 extends the audio profile to declared HE-AAC v2 / PS, including mono-core/stereo-output configuration and independent sample-accurate decoding checks. Advanced audio-setup metadata remains an explicit profile limit. Final stabilization results are recorded in [release validation](hls-validation.md).
+
+0.45.0 promotes the validated release candidate. Formatting/type/build checks and 170 unit tests pass, as do the full deterministic regression, Chromium/Firefox/WebKit CI, Amsterdam playback checks and a 30-minute candidate live soak. HLS is classified as implemented for the documented delivery/media profiles. Optional device, CDM and presentation limits remain explicit; this is not blanket protocol-version certification.

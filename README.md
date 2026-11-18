@@ -217,7 +217,7 @@ npm run export -- /path/to/ThePlayer
 
 The destination must not exist. This copies an explicit source/documentation allowlist and includes the CI workflow. It does not publish or create a remote repository.
 
-Do not commit local configuration, TLS keys, `.cache`, `node_modules`, generated bundles, test recordings or operational channel lists. Build artifacts are generated from source.
+Do not commit local configuration, TLS keys, `.cache`, `node_modules`, generated bundles, private/captured recordings or operational channel lists. Redistributable synthetic test fixtures must include their generator and provenance. Build artifacts are generated from source.
 
 ## Contributing
 
@@ -227,7 +227,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 ## Roadmap
 
-- Complete remaining HLS profiles and stabilization: additional media/text profiles, advanced caption layout, codec/device interoperability and long-running validation.
+- Extend optional HLS media/text profiles, codec/device interoperability and continuous validation.
 - Extend HLS caption attribute and typography coverage.
 - Add a DASH engine behind the common lifecycle.
 - Normalize track/diagnostic models across engines.
@@ -244,6 +244,6 @@ Space or K toggles play/pause; Left/Right seeks by ten seconds within the availa
 
 ## Release identification
 
-Current release candidate: **0.45.0-rc.1**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations.
+Current release: **0.45.0**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations. The [release validation record](docs/hls-validation.md) distinguishes completed checks from ongoing tests.
 
 HLS alternate video angles are available through `player.videoTracks` and `player.selectVideoTrack(name)`, and in the shared Quality menu. Angle identity survives quality changes; audio language remains independent.
