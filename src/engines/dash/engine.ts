@@ -1,6 +1,7 @@
 import type { PlaybackEngine } from '../../core/player';
 import { VERSION } from '../../version';
 import { ResourceClient, delay, type NetworkOptions } from '../hls/network';
+import { HttpError, retryable } from '../hls/recovery';
 import { AbrController } from '../hls/abr';
 import { bufferedAhead, nextGapPosition } from '../hls/buffer';
 import { inspectInit, type Track } from '../hls/mp4';
@@ -28,6 +29,7 @@ export interface DashSource {
   targetBuffer?: number;
   quality?: 'auto' | number;
   audioLanguage?: string;
+  liveRecoveryWindowMs?: number;
 }
 interface Lane {
   adaptation: Adaptation;
@@ -40,6 +42,8 @@ interface Lane {
   cursor: number;
   done: boolean;
   needsPreroll: boolean;
+  retryAt?: number;
+  failureSince?: number;
   index?: SegmentReference[];
 }
 export class DashEngine extends EventTarget implements PlaybackEngine {
@@ -54,6 +58,12 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     manifestUpdates: 0,
     clockOffset: 0,
     clockWarning: '',
+    recovery: {
+      manifestFailures: 0,
+      segmentFailures: 0,
+      dvrJumps: 0,
+      expiredSegments: 0,
+    },
     buffer: { ahead: 0, target: 12, live: false, mode: 'dash-segment' },
     quality: { mode: 'auto', current: 0, bandwidthEstimate: 0 },
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
@@ -78,6 +88,8 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private eme?: EmeController;
   private abr = new AbrController();
   private refreshedAt = 0;
+  private manifestFailureSince?: number;
+  private dvrJumpAt = -Infinity;
   private generation = 0;
   private seekPosition?: number;
   private initial = true;
@@ -112,6 +124,13 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       (!Number.isFinite(source.startTime) || source.startTime < 0)
     )
       throw new Error('Invalid DASH start time');
+    if (
+      source.liveRecoveryWindowMs !== undefined &&
+      (!Number.isFinite(source.liveRecoveryWindowMs) ||
+        source.liveRecoveryWindowMs < 1000 ||
+        source.liveRecoveryWindowMs > 120000)
+    )
+      throw new Error('Invalid DASH live recovery window');
     this.client = new ResourceClient(source.network ?? {}, this.abort.signal);
     this.autoQuality = typeof source.quality !== 'number';
     if (source.drm)
@@ -126,6 +145,8 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         for (const lane of this.lanes) {
           lane.cursor = this.prerollPosition(lane, video.currentTime);
           lane.needsPreroll = true;
+          lane.failureSince = undefined;
+          lane.retryAt = undefined;
           lane.done = false;
         }
       },
@@ -170,6 +191,8 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   }
   private fail(error: unknown) {
     if (this.failed || this.abort.signal.aborted) return;
+    if (error instanceof HttpError)
+      error = new Error(`DASH HTTP ${error.status}`, { cause: error });
     this.failed = true;
     this.state('error');
     this.emit(
@@ -178,13 +201,48 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     );
     for (const command of this.commands.splice(0)) command.reject(error);
   }
-  private async readManifest(url: string) {
-    const result = await this.client.get({ url });
+  private async readManifest(url: string, refresh = false) {
+    const result = await this.client.get(
+      { url },
+      refresh ? this.liveRequestOptions(true) : {},
+    );
     if (result.data.length > 4 * 1024 * 1024)
       throw new Error('DASH MPD exceeds 4 MiB');
     return parseMpd(
       new TextDecoder('utf-8', { fatal: true }).decode(result.data),
       result.url,
+    );
+  }
+  private liveRequestOptions(manifest = false) {
+    return {
+      retries: 0,
+      recoveryWindowMs: 0,
+      timeoutMs: Math.min(
+        this.source.network?.timeoutMs ?? (manifest ? 2000 : 15000),
+        this.recoveryWindow,
+      ),
+    };
+  }
+  private get recoveryWindow() {
+    return this.source.liveRecoveryWindowMs ?? 30000;
+  }
+  private windowStart() {
+    return Math.min(
+      this.edge(),
+      Math.max(
+        this.manifest.periods[0].start,
+        this.edge() - (this.manifest.timeShiftBufferDepth ?? 300),
+      ),
+    );
+  }
+  private livePosition() {
+    const start = this.windowStart();
+    // Leave decode headroom inside short DVR windows instead of chasing
+    // their moving lower boundary with repeated seeks.
+    const floor = start + Math.min(2, (this.edge() - start) / 2);
+    return Math.max(
+      floor,
+      this.edge() - (this.manifest.suggestedPresentationDelay ?? 12),
     );
   }
   private now() {
@@ -323,7 +381,11 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         0,
       ) ||
       Number(a.duration ?? BigInt(a.timescale * 2)) / a.timescale;
-    return Math.max(lane.period.start, time - duration);
+    return Math.max(
+      lane.period.start,
+      this.isLive ? this.windowStart() : 0,
+      time - duration,
+    );
   }
   private async protect(lanes: Lane[]) {
     const tracks = lanes.flatMap((l) => l.tracks);
@@ -466,7 +528,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.startPosition =
       this.source.startTime ??
       (this.isLive
-        ? Math.max(this.manifest.periods[0].start, edge - delay)
+        ? Math.max(this.windowStart(), edge - delay)
         : this.manifest.periods[0].start);
     if (!this.isLive)
       this.startPosition = Math.min(
@@ -508,9 +570,25 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     if (!this.isLive || this.manifest.minimumUpdatePeriod === undefined) return;
     const interval = Math.max(500, this.manifest.minimumUpdatePeriod * 1000);
     if (performance.now() - this.refreshedAt < interval) return;
-    const next = await this.readManifest(
-      this.manifest.locations[0] ?? this.manifest.url,
-    );
+    let next: Manifest;
+    try {
+      next = await this.readManifest(
+        this.manifest.locations[0] ?? this.manifest.url,
+        true,
+      );
+      this.manifestFailureSince = undefined;
+    } catch (error) {
+      this.abort.signal.throwIfAborted();
+      if (!retryable(error)) throw error;
+      this.manifestFailureSince ??= performance.now();
+      this.diagnostics.recovery.manifestFailures++;
+      this.refreshedAt = performance.now();
+      if (performance.now() - this.manifestFailureSince >= this.recoveryWindow)
+        throw new Error('DASH live manifest recovery window exhausted', {
+          cause: error,
+        });
+      return;
+    }
     if (
       next.availabilityStartTime !== undefined &&
       next.availabilityStartTime !== this.manifest.availabilityStartTime
@@ -564,7 +642,44 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     data?: Uint8Array,
   ) {
     const generation = this.generation;
-    const response = data ? undefined : await this.client.get(segment);
+    let response;
+    try {
+      response = data
+        ? undefined
+        : await this.client.get(
+            segment,
+            this.isLive ? this.liveRequestOptions() : {},
+          );
+    } catch (error) {
+      this.abort.signal.throwIfAborted();
+      if (generation !== this.generation) return;
+      if (
+        !this.isLive ||
+        (!retryable(error) &&
+          !(
+            error instanceof HttpError &&
+            error.status === 410 &&
+            segment.end <= this.windowStart()
+          ))
+      )
+        throw error;
+      this.diagnostics.recovery.segmentFailures++;
+      if (segment.end <= this.windowStart()) {
+        lane.cursor = this.windowStart();
+        lane.failureSince = undefined;
+        this.diagnostics.recovery.expiredSegments++;
+        return;
+      }
+      lane.failureSince ??= performance.now();
+      if (performance.now() - lane.failureSince >= this.recoveryWindow)
+        throw new Error('DASH live segment recovery window exhausted', {
+          cause: error,
+        });
+      lane.retryAt = performance.now() + 500;
+      return;
+    }
+    lane.failureSince = undefined;
+    lane.retryAt = undefined;
     if (generation !== this.generation) return;
     if (response) this.abr.observe(response.data.length, response.elapsed);
     await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
@@ -596,6 +711,18 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private async run() {
     while (!this.abort.signal.aborted && !this.failed) {
       await this.refresh();
+      if (
+        this.isLive &&
+        !this.initial &&
+        !this.video.paused &&
+        (!this.video.seeking || performance.now() - this.dvrJumpAt >= 2000) &&
+        this.video.currentTime < this.windowStart() - 0.5
+      ) {
+        this.dvrJumpAt = performance.now();
+        this.diagnostics.recovery.dvrJumps++;
+        this.video.currentTime = this.livePosition();
+        await delay(0, this.abort.signal);
+      }
       if (this.commands.length) {
         const command = this.commands.shift()!;
         try {
@@ -660,6 +787,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       for (const lane of this.lanes) {
         if (
           lane.done ||
+          (lane.retryAt !== undefined && performance.now() < lane.retryAt) ||
           (!lane.needsPreroll &&
             bufferedAhead(lane.buffer!.buffered, this.video.currentTime) >=
               this.targetBuffer)
@@ -792,10 +920,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   }
   seekToLive() {
     if (this.isLive) {
-      this.video.currentTime = Math.max(
-        this.manifest.periods[0].start,
-        this.edge() - (this.manifest.suggestedPresentationDelay ?? 12),
-      );
+      this.video.currentTime = this.livePosition();
       void this.play();
     }
   }

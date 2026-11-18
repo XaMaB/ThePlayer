@@ -47,3 +47,7 @@ The following MPDs returned HTTP 200 on 18 November 2026. HTTP availability is n
 ## First delivery: 1.0.0-alpha.8
 
 The manifest/addressing foundation and basic fMP4 playback are implemented. All five public sources above passed decoded playback and continued progress; the three VOD sources also passed quality changes and seeking. Remaining stage-specific limitations are explicit in [DASH support](dash-support.md). This does not mark all ten stages complete.
+
+## Live recovery increment: 1.0.0-alpha.9
+
+Stage 3 now includes bounded MPD and segment recovery, per-lane retry scheduling, expired-segment recovery, pause/resume beyond the DVR window and live-to-static completion. Deterministic fault tests cover Fetch/XHR in Chromium, Firefox and WebKit. Sliding Period removal, changed active representations, clock resets, topology changes and long-running soaks remain open; stage 3 is not marked fully complete.

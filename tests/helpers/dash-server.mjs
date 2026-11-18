@@ -11,6 +11,15 @@ export function dashServer() {
     process.env.THEPLAYER_DIST ??
     fileURLToPath(new URL('../../dist/', import.meta.url));
   const requests = [];
+  const controls = {
+    manifestFailures: 0,
+    mediaFailures: 0,
+    mediaDelayMs: 0,
+    mediaFailureResponses: 0,
+    status: 503,
+    finish: false,
+    depth: 12,
+  };
   const epochs = new Map();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -29,6 +38,12 @@ export function dashServer() {
         return;
       }
       if (url.pathname.startsWith('/dash/') && url.pathname.endsWith('.mpd')) {
+        if (controls.manifestFailures > 0) {
+          controls.manifestFailures--;
+          res.writeHead(controls.status);
+          res.end();
+          return;
+        }
         let body = await readFile(path.join(root, 'timeline.mpd'), 'utf8');
         const mode = path.basename(url.pathname);
         if (mode === 'number.mpd')
@@ -68,14 +83,14 @@ export function dashServer() {
               `<SegmentTemplate presentationTimeOffset="${Number(scale) * 4}" timescale="${scale}"`,
           );
         }
-        if (mode === 'live.mpd') {
+        if (mode === 'live.mpd' && !controls.finish) {
           const session = url.searchParams.get('session') ?? '';
           if (!epochs.has(session)) epochs.set(session, Date.now() - 8000);
           const epoch = epochs.get(session);
           body = body
             .replace(
               'type="static"',
-              `type="dynamic" availabilityStartTime="${new Date(epoch).toISOString()}" publishTime="${new Date().toISOString()}" minimumUpdatePeriod="PT0.5S" suggestedPresentationDelay="PT4S" timeShiftBufferDepth="PT12S"`,
+              `type="dynamic" availabilityStartTime="${new Date(epoch).toISOString()}" publishTime="${new Date().toISOString()}" minimumUpdatePeriod="PT0.5S" suggestedPresentationDelay="PT4S" timeShiftBufferDepth="PT${controls.depth}S"`,
             )
             .replace(/mediaPresentationDuration="[^"]+"/, '');
         }
@@ -90,6 +105,15 @@ export function dashServer() {
       const file = path.resolve(directory, relative);
       if (!file.startsWith(path.resolve(directory) + path.sep)) {
         res.writeHead(400);
+        res.end();
+        return;
+      }
+      if (file.endsWith('.m4s') && controls.mediaFailures > 0) {
+        controls.mediaFailures--;
+        if (controls.mediaDelayMs)
+          await new Promise((r) => setTimeout(r, controls.mediaDelayMs));
+        controls.mediaFailureResponses++;
+        res.writeHead(controls.status);
         res.end();
         return;
       }
@@ -124,5 +148,5 @@ export function dashServer() {
       res.end();
     }
   });
-  return { server, requests };
+  return { server, requests, controls };
 }
