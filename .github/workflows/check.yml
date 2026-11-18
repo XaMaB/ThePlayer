@@ -94,3 +94,5 @@ jobs:
         timeout-minutes: 8
       - run: npm run test:hls:live-range
         timeout-minutes: 3
+      - run: npm run test:hls:switch-wait
+        timeout-minutes: 3

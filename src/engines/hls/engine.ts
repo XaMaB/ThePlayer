@@ -2158,6 +2158,9 @@ export class HlsEngine extends EventTarget {
     );
     let prepared: PreparedSegment | undefined,
       boundary = 0;
+    const switchDeadline =
+      performance.now() +
+      Math.min(30000, Math.max(10000, p.targetDuration * 3000));
     for (let attempt = 0; attempt < 3; attempt++) {
       const lead =
         !this.video.paused && this.abr.estimate && choice.bandwidth
@@ -2180,11 +2183,38 @@ export class HlsEngine extends EventTarget {
           ),
         );
       } catch (error) {
-        if (!(error instanceof NoSwitchBoundary) || !p.live || attempt === 2)
-          throw error;
+        if (!(error instanceof NoSwitchBoundary) || !p.live) throw error;
+        if (performance.now() >= switchDeadline)
+          throw new Error(
+            'Target live rendition did not publish a switching boundary in time; current rendition retained',
+          );
         this.diagnostics.renditionSwitchWaits++;
+        // Switching runs inside the scheduler. Keep both active lanes fed while
+        // waiting for a slower rendition, rather than draining their buffers.
+        for (const active of this.lanes()) {
+          await this.refresh(active);
+          if (old !== (kind === 'audio' ? this.audio : this.main))
+            throw new Error(
+              'Presentation changed while waiting for a rendition',
+            );
+          this.skipDeclaredGaps(active);
+          if (
+            active.next < active.playlist.segments.length &&
+            active.ahead(this.video.currentTime) < this.targetBuffer
+          ) {
+            const generation = this.generation;
+            const bridge = await active.prepare();
+            if (generation !== this.generation) continue;
+            await this.appendPrepared(active, bridge);
+            active.next++;
+          }
+        }
+        this.updateDiagnostics();
         await delay(
-          Math.min(250, (p.partTarget ?? p.targetDuration) * 500),
+          Math.min(
+            1000,
+            Math.max(100, (p.partTarget ?? p.targetDuration) * 500),
+          ),
           this.abort.signal,
         );
         p = alignRendition(
@@ -2192,6 +2222,7 @@ export class HlsEngine extends EventTarget {
           old.playlist,
         );
         lane.playlist = p;
+        attempt--; // Publication waits have a time budget, not the media-race budget.
         continue;
       }
       // Segment starts are rounded in playlists while AAC ends fall on frame

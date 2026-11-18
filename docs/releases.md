@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.0.0-alpha.5
+
+- Wait for a delayed live rendition to publish a future switching boundary using a segment-duration-based time budget, replacing the previous two 250 ms retries.
+- Continue refreshing and feeding the active media lanes while waiting. A target publication timeout rejects the switch while retaining the active rendition; destroying the player cancels the wait.
+- Add browser coverage for seven-second publication delays over Fetch/XHR, timeout without playback interruption and teardown during a pending switch.
+
 ## 1.0.0-alpha.4
 
 - Make detailed HLS live reset history opt-in through the source option `debug: true`. Default playback retains restart counts and reasons without collecting timeline comparisons.
