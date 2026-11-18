@@ -93,3 +93,9 @@ Widevine initialization from playlist PSSH data also passes single/multi-key Fet
 Temporary DRM sessions now retire when known keys leave buffered/prepared media. Tests exercise 80 KIDs and rewind reacquisition; unknown sample-group KIDs remain conservatively retained. The 64-simultaneous-session bound remains explicit.
 
 0.39.0-alpha.1 adds interstitial timeline annotations, application-localized Skip labels, bounded date-range preloads and active-asset audio/CC/quality controls. Milestones 0.37–0.38 are bundled. Standalone subtitle controls no longer depend on demo code. Remaining work includes differing steering inventories, alternate video, further text/media profiles and device/stability gates.
+
+0.40.0-alpha.1 replaces steering inventories rather than requiring identical ladders/languages. Stable identities and conservative bitrate fallback preserve playback across missing qualities, language replacement, initial failure and pathway recovery. Alternate video and muxed/separate-audio topology changes remain distinct work.
+
+0.41.0-alpha.1 bundles milestone 0.40 and adds alternate VIDEO groups with shared controls and cross-quality angle selection. A delayed live target at an audio switch has bounded reload recovery and an injected stale-response regression. Remaining work includes audio topology changes, advanced text/media profiles and final stabilization/device gates.
+
+0.42.0-alpha.1 bundles milestones 0.40–0.41 and extends CEA-708 presentation with horizontal full justification, media-clock fade/wipe and word preservation in four print directions. Unit and browser checks cover interrupted visibility, pause and backward seek. Remaining typography/reflow limits stay explicit.

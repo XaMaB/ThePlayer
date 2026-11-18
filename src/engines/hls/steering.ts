@@ -40,7 +40,12 @@ export function pathways(master: Playlist) {
   }
   for (const p of result.values()) {
     const groups = new Set(
-      p.variants.flatMap((v) => [v.audio, v.subtitles, v.closedCaptions]),
+      p.variants.flatMap((v) => [
+        v.audio,
+        v.video,
+        v.subtitles,
+        v.closedCaptions,
+      ]),
     );
     p.renditions = master.renditions.filter((r) => groups.has(r.group));
   }
@@ -147,6 +152,7 @@ export function parseSteering(
           ...v,
           pathway: id,
           audio: group(v.audio),
+          video: group(v.video),
           subtitles: group(v.subtitles),
           closedCaptions: group(v.closedCaptions),
           url:

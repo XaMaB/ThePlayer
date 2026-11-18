@@ -58,6 +58,7 @@ export interface Variant {
   codecs?: string;
   resolution?: string;
   audio?: string;
+  video?: string;
   subtitles?: string;
   closedCaptions?: string;
 }
@@ -262,6 +263,7 @@ export function parsePlaylist(
           codecs: variant.CODECS,
           resolution: variant.RESOLUTION,
           audio: variant.AUDIO,
+          video: variant.VIDEO,
           subtitles: variant.SUBTITLES,
           closedCaptions: variant['CLOSED-CAPTIONS'],
         });

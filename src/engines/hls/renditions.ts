@@ -89,13 +89,17 @@ export function segmentAt(p: Playlist, time: number): number {
   );
   return index < 0 ? p.segments.length : index;
 }
+export class NoSwitchBoundary extends Error {
+  constructor() {
+    super('No future segment boundary available for switching');
+  }
+}
 /** Switch at a future segment boundary, preserving the content currently being decoded. */
 export function switchBoundary(p: Playlist, time: number): number {
   const segment = p.segments.find(
     (s) => s.start >= time + 0.15 && (s.part === undefined || s.independent),
   );
-  if (!segment)
-    throw new Error('No future segment boundary available for switching');
+  if (!segment) throw new NoSwitchBoundary();
   return segment.start;
 }
 

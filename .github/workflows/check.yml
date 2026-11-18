@@ -78,3 +78,9 @@ jobs:
         timeout-minutes: 8
         env:
           HLS_DATE_PRELOAD_SCENARIOS: direct,list
+      - run: npm run test:hls:video
+        timeout-minutes: 8
+      - run: node tests/hls-steering-inventory-browser.mjs
+        timeout-minutes: 8
+      - run: node tests/hls-708-effects-browser.mjs
+        timeout-minutes: 8

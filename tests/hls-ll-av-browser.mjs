@@ -19,6 +19,7 @@ try {
       'll-av',
       'll-av-lag',
       'll-av-fault',
+      'll-av-switch-stale',
     ]) {
       const id = `parts-${transport}-${scenario}-${Date.now().toString(36)}`;
       const page = await browser.newPage({ ignoreHTTPSErrors: true });
@@ -92,6 +93,11 @@ try {
         assert.deepEqual(result.failures, []);
         assert.deepEqual(errors, []);
         assert.equal(result.width, 320);
+        if (scenario === 'll-av-switch-stale')
+          assert.ok(
+            result.diagnostics.renditionSwitchWaits > 0,
+            'Reload a stale target before switching',
+          );
         assert.ok(result.frames > 220);
         assert.equal(result.diagnostics.live.restarts, 0);
         assert.ok(result.diagnostics.playlistReload.blocking > 20);

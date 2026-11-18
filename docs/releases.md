@@ -1,5 +1,25 @@
 # Release versions
 
+## 0.42.0-alpha.1
+
+- Render CEA-708 FULL horizontal justification using word spacing, preserving glyph width and nonbreaking spaces.
+- Apply media-clock fade and directional wipe visibility effects, including interrupted transitions, pause and backward seek.
+- Preserve words and pen attributes when wrapping in all four print directions; retain hyphens at legal breaks.
+- Add decoded-command unit tests and cross-browser geometry/timing checks alongside TS/fMP4/CDP caption playback.
+- Includes development milestones 0.40–0.41, which were not published separately.
+
+- Add HLS VIDEO rendition groups, default/explicit angle selection and a Video angle section in the shared Quality menu.
+- Preserve angle names across differently ordered quality groups and steering clones; expose videoTracks, selectedVideoTrack and selectVideoTrack.
+- Verify decoded color changes, paused switches, URI-less defaults and explicit startup without downloading the other angle.
+- Do not estimate playback advance while paused when choosing a rendition-switch boundary.
+- Reload a temporarily stale live target playlist when no future independent switching boundary is available, with bounded attempts and cancellation.
+- Add deterministic LL-HLS stale-audio-target regression coverage for a WebKit CI failure.
+
+- Rebuild the quality ladder when a steering pathway adds or removes variants; preserve stable identity or select a conservative bitrate fallback.
+- Update alternate audio/subtitle inventories, preserve matching language identity and fall back according to DEFAULT/AUTOSELECT rules when audio disappears.
+- Preserve manual/Auto mode, remap quality history, clear obsolete pathway quarantine and reject queued selections against stale inventories.
+- Exercise shrinking/growing ladders, language replacement, initial failure and return to a working pathway through actual playback.
+
 ## 0.39.0-alpha.1
 
 - Route audio, subtitle and quality controls to the active interstitial asset and preserve primary selections on return.

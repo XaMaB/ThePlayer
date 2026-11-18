@@ -14,6 +14,12 @@ import { DateRangePreloads } from './date-range-preloads';
 import type { ResourceResponse } from './network';
 import { retryable } from './recovery';
 import { ContentSteering } from './steering';
+import { videoRenditions } from './video-renditions';
+import {
+  pathwayLadder,
+  pathwayQuality,
+  matchingRendition,
+} from './steering-selection';
 import { EmeController, type DrmOptions } from './eme';
 import { playlistInitData } from './drm-init';
 import { decryptSamplePes } from './sample-aes';
@@ -50,6 +56,7 @@ import {
   alignRendition,
   segmentAt,
   switchBoundary,
+  NoSwitchBoundary,
 } from './renditions';
 import {
   nativeCue,
@@ -72,6 +79,7 @@ export interface HlsSource {
   media?: 'video' | 'audio';
   startTime?: number;
   audioLanguage?: string;
+  videoRendition?: string;
   subtitleLanguage?: string;
   preferredLanguages?: string[];
   captionEncodings?: Record<number, P16Encoding>;
@@ -95,6 +103,7 @@ export class HlsEngine extends EventTarget {
     retries: 0,
     declaredGaps: 0,
     audioClockRebases: 0,
+    renditionSwitchWaits: 0,
     live: {
       stale: false,
       unchangedMs: 0,
@@ -124,6 +133,9 @@ export class HlsEngine extends EventTarget {
   isLive = false;
   mediaMode: 'video' | 'audio' = 'video';
   availableMediaModes: ('video' | 'audio')[] = [];
+  videoTracks: any[] = [];
+  selectedVideoTrack = '';
+  private videoName?: string;
   audioTracks: any[] = [];
   subtitleTracks: any[] = [];
   selectedAudioTrack = '';
@@ -258,8 +270,9 @@ export class HlsEngine extends EventTarget {
   private loadTime = 0;
   private offsets = new Map<number, number>();
   private switches: {
-    kind: 'audio' | 'quality';
+    kind: 'audio' | 'quality' | 'video';
     index: number;
+    videoName?: string;
     resolve: () => void;
     reject: (error: unknown) => void;
   }[] = [];
@@ -471,6 +484,7 @@ export class HlsEngine extends EventTarget {
   async init() {
     this.state('connecting');
     this.loadTime = performance.now();
+    this.videoName = this.source.videoRendition;
     if (typeof MediaSource === 'undefined')
       throw new Error('Media Source Extensions required');
     let p = await this.readPlaylist(this.source.url);
@@ -544,7 +558,7 @@ export class HlsEngine extends EventTarget {
       for (;;) {
         try {
           p = await this.readPlaylist(
-            variant.url,
+            videoRenditions(this.master, variant, this.videoName).url,
             this.steering ? 0 : undefined,
           );
           break;
@@ -554,23 +568,22 @@ export class HlsEngine extends EventTarget {
           this.steering.penalize();
           if (before === this.steering.diagnostics.pathway) throw error;
           const catalog = this.steering.catalog();
-          this.qualityLevels = this.qualityLevels.map((old) => {
-            const next = catalog.variants.find((v) =>
-              old.stableId
-                ? v.stableId === old.stableId
-                : v.bandwidth === old.bandwidth &&
-                  v.codecs === old.codecs &&
-                  v.resolution === old.resolution,
-            );
-            if (!next || next.codecs !== old.codecs) throw error;
-            return { ...old, ...next };
-          });
+          const replacement = pathwayLadder(
+            catalog.variants,
+            variant,
+            this.mediaMode,
+            (mime) => MediaSource.isTypeSupported(mime),
+          );
+          this.qualityLevels = replacement.levels;
+          this.selectedQuality = replacement.index;
+          this.qualityTimeline = [{ at: 0, id: replacement.index }];
           variant = this.qualityLevels[this.selectedQuality];
           this.master = catalog;
           this.appliedPathway = this.steering.diagnostics.pathway;
           this.emit('pathwaychange', { pathway: this.appliedPathway });
         }
       }
+      this.publishVideo(variant);
       this.audioTracks = this.master.renditions
         .filter((r) => r.type === 'AUDIO' && r.group === variant.audio && r.url)
         .map((r, index) => ({
@@ -990,6 +1003,8 @@ export class HlsEngine extends EventTarget {
           for (const type of [
             'catalog',
             'audiochange',
+            'videochange',
+            'videotracks',
             'qualitylevels',
             'qualitychange',
             'subtitletracks',
@@ -1416,7 +1431,13 @@ export class HlsEngine extends EventTarget {
       if (this.switches.length) {
         const request = this.switches.shift()!;
         try {
-          await this.switchRendition(request.kind, request.index);
+          const index =
+            request.kind === 'video'
+              ? this.videoTracks.findIndex(
+                  (track) => track.name === request.videoName,
+                )
+              : request.index;
+          await this.switchRendition(request.kind, index);
           request.resolve();
         } catch (error) {
           request.reject(error);
@@ -1655,46 +1676,100 @@ export class HlsEngine extends EventTarget {
       subtitles: this.subtitleTracks,
       main: this.main,
       audioLane: this.audio,
+      selectedQuality: this.selectedQuality,
+      videoTracks: this.videoTracks,
+      selectedVideo: this.selectedVideoTrack,
+      videoName: this.videoName,
+      selectedAudio: this.selectedAudioTrack,
+      selectedSubtitle: this.selectedSubtitle,
+      qualityTimeline: this.qualityTimeline,
     };
     try {
-      const quality = this.qualityLevels.map((old) => {
-        const v = catalog.variants.find((v) =>
-          old.stableId
-            ? v.stableId === old.stableId
-            : v.bandwidth === old.bandwidth &&
-              v.codecs === old.codecs &&
-              v.resolution === old.resolution,
-        );
-        if (!v || v.codecs !== old.codecs)
-          throw new Error('Steering pathway lacks a compatible quality');
-        return { ...old, ...v };
-      });
-      const selected = quality[this.selectedQuality];
-      const move = (old: any, type: string, group?: string) => {
-        const r = catalog.renditions.find(
-          (r) =>
-            r.type === type &&
-            r.group === group &&
-            (old.stableId
-              ? r.stableId === old.stableId
-              : r.language === old.language && r.name === old.label),
-        );
-        if (!r || !r.url)
-          throw new Error('Steering pathway lacks selected language rendition');
-        return { ...old, ...r, name: old.name, label: r.name };
-      };
-      this.qualityLevels = quality;
-      this.audioTracks = this.audioTracks.map((t) =>
-        move(t, 'AUDIO', selected.audio),
+      const replacement = pathwayLadder(
+        catalog.variants,
+        this.qualityLevels[this.selectedQuality],
+        this.mediaMode,
+        (mime) => MediaSource.isTypeSupported(mime),
       );
-      this.subtitleTracks = this.subtitleTracks.map((t) =>
-        t.url ? move(t, 'SUBTITLES', selected.subtitles) : t,
+      const selected = replacement.levels[replacement.index];
+      const oldAudio = this.audioTracks.find(
+        (t) => t.name === this.selectedAudioTrack,
       );
+      const oldSubtitle = this.subtitleTracks.find(
+        (t) => t.name === this.selectedSubtitle,
+      );
+      const audio = catalog.renditions.filter(
+        (r) => r.type === 'AUDIO' && r.group === selected.audio && r.url,
+      );
+      const subtitles = catalog.renditions.filter(
+        (r) =>
+          r.type === 'SUBTITLES' && r.group === selected.subtitles && r.url,
+      );
+      const nextAudio =
+        matchingRendition(audio, oldAudio) ??
+        selectRendition(audio, 'audio', {
+          language: oldAudio?.language ?? this.source.audioLanguage,
+          systemLanguages:
+            this.source.preferredLanguages ?? navigator.languages,
+        });
+      if (!!this.audio !== !!nextAudio)
+        throw new Error('Steering pathway changes the external audio layout');
+      const nextSubtitle =
+        matchingRendition(subtitles, oldSubtitle) ??
+        (!this.subtitleManual
+          ? selectRendition(subtitles, 'subtitles', {
+              language: this.source.subtitleLanguage,
+              systemLanguages:
+                this.source.preferredLanguages ??
+                (nextAudio?.language
+                  ? [nextAudio.language]
+                  : navigator.languages),
+            })
+          : undefined);
+      this.qualityLevels = replacement.levels;
+      this.audioTracks = audio.map((r, i) => ({
+        ...r,
+        name: 'hls-audio-' + i,
+        label: r.name,
+      }));
+      this.subtitleTracks = [
+        ...subtitles.map((r, i) => ({
+          ...r,
+          name: 'hls-sub-' + i,
+          label: r.name,
+          format: 'webvtt',
+        })),
+        ...this.subtitleTracks.filter((t) => !t.url),
+      ];
+      const audioIndex = nextAudio ? audio.indexOf(nextAudio) : -1;
+      const subtitleName = nextSubtitle
+        ? 'hls-sub-' + subtitles.indexOf(nextSubtitle)
+        : oldSubtitle && !oldSubtitle.url
+          ? oldSubtitle.name
+          : '';
+      this.selectedQuality = replacement.index;
+      this.qualityTimeline = this.qualityTimeline.map((item) => ({
+        ...item,
+        id: pathwayQuality(
+          this.qualityLevels,
+          previous.quality[item.id] ??
+            previous.quality[previous.selectedQuality],
+        ),
+      }));
+      for (const item of this.switches.splice(0))
+        item.reject(
+          new Error(
+            'Rendition inventory changed; choose from the updated tracks',
+          ),
+        );
       this.master = catalog;
       if (!this.main?.buffer) {
         const old = this.main!;
         const playlist = alignRendition(
-          await this.readPlaylist(selected.url, 0),
+          await this.readPlaylist(
+            videoRenditions(this.master, selected, this.videoName).url,
+            0,
+          ),
           old.playlist,
         );
         this.main = this.lane(playlist, 'main', selected.codecs);
@@ -1703,9 +1778,8 @@ export class HlsEngine extends EventTarget {
           segmentAt(playlist, old.playlist.segments[old.next]?.start ?? 0),
         );
         if (this.audio) {
-          const track = this.audioTracks.find(
-            (t) => t.name === this.selectedAudioTrack,
-          );
+          const track = this.audioTracks[audioIndex];
+          this.selectedAudioTrack = track.name;
           const audio = alignRendition(
             await this.readPlaylist(track.url, 0),
             playlist,
@@ -1716,20 +1790,24 @@ export class HlsEngine extends EventTarget {
             segmentAt(audio, playlist.segments[this.main.next].start),
           );
         }
+        this.publishVideo(selected);
         this.appliedPathway = steering.diagnostics.pathway;
+        this.selectSubtitleTrack(subtitleName, true);
+        for (const level of this.qualityLevels) this.abr.clear(level.id);
+        this.emit('qualitylevels', this.qualityLevels);
+        this.emit('audiotracks', this.audioTracks);
+        this.emit('subtitletracks', this.subtitleTracks);
         this.emit('pathwaychange', { pathway: this.appliedPathway });
         return true;
       }
       await this.switchRendition('quality', this.selectedQuality, true);
       if (this.audio) {
-        const index = this.audioTracks.findIndex(
-          (t) => t.name === this.selectedAudioTrack,
-        );
-        if (index >= 0) await this.switchRendition('audio', index, true);
+        await this.switchRendition('audio', audioIndex, true);
       }
       this.appliedPathway = steering.diagnostics.pathway;
-      if (this.selectedSubtitle)
-        this.selectSubtitleTrack(this.selectedSubtitle, true);
+      this.selectSubtitleTrack(subtitleName, true);
+      for (const level of this.qualityLevels) this.abr.clear(level.id);
+      this.emit('qualitylevels', this.qualityLevels);
       this.emit('audiotracks', this.audioTracks);
       this.emit('subtitletracks', this.subtitleTracks);
       this.emit('pathwaychange', { pathway: this.appliedPathway });
@@ -1749,6 +1827,13 @@ export class HlsEngine extends EventTarget {
       this.qualityLevels = previous.quality;
       this.audioTracks = previous.audio;
       this.subtitleTracks = previous.subtitles;
+      this.selectedQuality = previous.selectedQuality;
+      this.videoTracks = previous.videoTracks;
+      this.selectedVideoTrack = previous.selectedVideo;
+      this.videoName = previous.videoName;
+      this.selectedAudioTrack = previous.selectedAudio;
+      this.selectedSubtitle = previous.selectedSubtitle;
+      this.qualityTimeline = previous.qualityTimeline;
       steering.diagnostics.warning =
         error instanceof Error ? error.message : String(error);
       steering.penalize();
@@ -1772,7 +1857,7 @@ export class HlsEngine extends EventTarget {
         try {
           const choice = this.qualityLevels[index];
           const parsed = await this.playlistLoader.rendition(
-            choice.url,
+            videoRenditions(this.master, choice, this.videoName).url,
             this.main!.playlist,
             0,
           );
@@ -1807,6 +1892,7 @@ export class HlsEngine extends EventTarget {
           lane.next++;
           this.main = lane;
           this.selectedQuality = index;
+          this.publishVideo(choice);
           this.qualityTimeline.push({ at: prepared.segment.start, id: index });
           this.abr.switched(performance.now());
           this.diagnostics.abrRecovery.failovers++;
@@ -1837,6 +1923,20 @@ export class HlsEngine extends EventTarget {
       this.abrRecovering = false;
     }
   }
+  private publishVideo(variant: any, preferred = this.videoName) {
+    const video = videoRenditions(this.master, variant, preferred);
+    this.videoTracks = video.tracks;
+    this.selectedVideoTrack = video.selected?.name ?? '';
+    this.videoName = video.selected?.label;
+    this.emit('videotracks', this.videoTracks);
+    this.emit('videochange', video.selected ?? null);
+  }
+  async selectVideoTrack(name: string) {
+    const index = this.videoTracks.findIndex((t) => t.name === name);
+    if (index < 0) throw new Error('Unknown HLS video rendition');
+    if (name === this.selectedVideoTrack) return;
+    await this.enqueueSwitch('video', index);
+  }
   private publishCatalog() {
     this.catalog = {
       profile: 'hls',
@@ -1856,15 +1956,21 @@ export class HlsEngine extends EventTarget {
         });
     }
   }
-  private enqueueSwitch(kind: 'audio' | 'quality', index: number) {
+  private enqueueSwitch(kind: 'audio' | 'quality' | 'video', index: number) {
     if (this.abort.signal.aborted || this.failed)
       return Promise.reject(new Error('HLS engine is not active'));
     return new Promise<void>((resolve, reject) => {
-      this.switches.push({ kind, index, resolve, reject });
+      this.switches.push({
+        kind,
+        index,
+        resolve,
+        reject,
+        videoName: kind === 'video' ? this.videoTracks[index]?.name : undefined,
+      });
     });
   }
   private async switchRendition(
-    kind: 'audio' | 'quality',
+    kind: 'audio' | 'quality' | 'video',
     index: number,
     force = false,
   ) {
@@ -1878,15 +1984,30 @@ export class HlsEngine extends EventTarget {
     )
       return;
     const choice =
-      kind === 'audio' ? this.audioTracks[index] : this.qualityLevels[index];
-    const p = alignRendition(
-      await this.playlistLoader.rendition(choice.url, old.playlist),
+      kind === 'audio'
+        ? this.audioTracks[index]
+        : this.qualityLevels[kind === 'video' ? this.selectedQuality : index];
+    const nextVideo =
+      kind !== 'audio'
+        ? videoRenditions(
+            this.master,
+            choice,
+            kind === 'video' ? this.videoTracks[index]?.label : this.videoName,
+          )
+        : undefined;
+    if (kind === 'video' && !this.videoTracks[index])
+      throw new Error('Unknown video rendition');
+    let p = alignRendition(
+      await this.playlistLoader.rendition(
+        nextVideo?.url ?? choice.url,
+        old.playlist,
+      ),
       old.playlist,
     );
     const lane = this.lane(
       p,
       old.role,
-      kind === 'quality'
+      kind !== 'audio'
         ? choice.codecs
         : this.qualityLevels[this.selectedQuality]?.codecs,
     );
@@ -1894,7 +2015,7 @@ export class HlsEngine extends EventTarget {
       boundary = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       const lead =
-        this.abr.estimate && choice.bandwidth
+        !this.video.paused && this.abr.estimate && choice.bandwidth
           ? Math.min(
               10,
               ((choice.bandwidth * p.targetDuration) / this.abr.estimate) *
@@ -1905,13 +2026,29 @@ export class HlsEngine extends EventTarget {
         this.video.currentTime + old.ahead(this.video.currentTime);
       // Do not schedule beyond the media we can play while prefetching. A long
       // lead at low bandwidth would otherwise leave an unfilled segment hole.
-      boundary = switchBoundary(
-        p,
-        Math.max(
-          this.video.currentTime,
-          Math.min(this.video.currentTime + lead, bufferedEnd - 0.26),
-        ),
-      );
+      try {
+        boundary = switchBoundary(
+          p,
+          Math.max(
+            this.video.currentTime,
+            Math.min(this.video.currentTime + lead, bufferedEnd - 0.26),
+          ),
+        );
+      } catch (error) {
+        if (!(error instanceof NoSwitchBoundary) || !p.live || attempt === 2)
+          throw error;
+        this.diagnostics.renditionSwitchWaits++;
+        await delay(
+          Math.min(250, (p.partTarget ?? p.targetDuration) * 500),
+          this.abort.signal,
+        );
+        p = alignRendition(
+          await this.playlistLoader.reload(p, 0),
+          old.playlist,
+        );
+        lane.playlist = p;
+        continue;
+      }
       // Segment starts are rounded in playlists while AAC ends fall on frame
       // boundaries. Never drop the old lane with an unfilled interval before
       // the chosen switch, including switches across differently sized segments.
@@ -1945,7 +2082,7 @@ export class HlsEngine extends EventTarget {
     this.abort.signal.throwIfAborted();
     lane.inheritBuffer(old);
     lane.offset = old.offset;
-    lane.discontinuity = kind === 'quality' ? -1 : old.discontinuity;
+    lane.discontinuity = kind !== 'audio' ? -1 : old.discontinuity;
     // Let MSE replace overlapping samples in the switching segment. Removing at
     // the playlist boundary first can erase the last old frame before the new
     // rendition's first presentation timestamp (DTS and PTS may differ).
@@ -1965,11 +2102,12 @@ export class HlsEngine extends EventTarget {
       this.dateRanges.update(lane.playlist);
       if (this.source.interstitials !== false)
         this.dateRangePreloads.update(lane.playlist, this.video.currentTime);
-      this.selectedQuality = index;
+      if (kind === 'quality') this.selectedQuality = index;
+      this.publishVideo(choice, nextVideo?.selected?.label);
       this.qualityTimeline = this.qualityTimeline.filter(
         (item) => item.at < boundary,
       );
-      this.qualityTimeline.push({ at: boundary, id: index });
+      this.qualityTimeline.push({ at: boundary, id: this.selectedQuality });
       this.abr.switched(performance.now());
       this.emit('qualitychange', { ...choice, effectiveAt: boundary });
     }

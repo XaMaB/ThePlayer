@@ -1,3 +1,4 @@
+import { visibility708, type Visibility708 } from './cea708-layout';
 import {
   commandLength708,
   graphic708,
@@ -22,6 +23,7 @@ export interface Cell708 {
 export interface Window708 {
   id: number;
   visible: boolean;
+  visibility?: Visibility708;
   priority: number;
   relative: boolean;
   vertical: number;
@@ -122,7 +124,9 @@ export class Cea708Service {
       time,
       service: this.service,
       windows: structuredClone(
-        [...this.windows.values()].filter((w) => w.visible),
+        [...this.windows.values()].filter(
+          (w) => w.visible || visibility708(w, time) > 0,
+        ),
       ),
     };
   }
@@ -175,7 +179,23 @@ export class Cea708Service {
       this.execute(command, time);
     }
   }
-  private define(id: number, p: number[]) {
+  private setVisible(window: Window708, visible: boolean, time: number) {
+    if (window.visible === visible) return;
+    const from = visibility708(window, time);
+    window.visible = visible;
+    window.visibility =
+      (window.effect === 1 || window.effect === 2) && window.effectSpeed > 0
+        ? {
+            start: time,
+            duration: window.effectSpeed * 0.5,
+            from,
+            to: visible ? 1 : 0,
+            effect: window.effect,
+            direction: window.effectDirection,
+          }
+        : undefined;
+  }
+  private define(id: number, p: number[], time: number) {
     const previous = this.windows.get(id);
     if (previous?.definition.every((v, i) => v === p[i])) {
       this.current = id;
@@ -187,7 +207,7 @@ export class Cea708Service {
     }
     const rows = (p[3] & 15) + 1,
       columns = (p[4] & 63) + 1;
-    const window = previous ?? {
+    const window: Window708 = previous ?? {
       id,
       row: 0,
       column: 0,
@@ -216,7 +236,6 @@ export class Cea708Service {
       definition: [],
     };
     Object.assign(window, {
-      visible: !!(p[0] & 32),
       priority: p[0] & 7,
       rowLock: !!(p[0] & 16),
       columnLock: !!(p[0] & 8),
@@ -231,6 +250,7 @@ export class Cea708Service {
     if (!previous || (p[5] >>> 3) & 7)
       windowStyle(window, (p[5] >>> 3) & 7 || 1);
     if (!previous || p[5] & 7) window.pen = penStyle(p[5] & 7 || 1);
+    this.setVisible(window, !!(p[0] & 32), time);
     window.cells = Array.from({ length: rows }, (_, row) =>
       Array.from(
         { length: columns },
@@ -289,23 +309,37 @@ export class Cea708Service {
       window.column >= window.columns
     ) {
       if (!window.wrap) return;
-      // Preserve a whole trailing word when wrapping a left-to-right row.
-      const row =
-        window.cells[Math.min(window.rows - 1, Math.max(0, window.row))];
-      const space =
-        window.print === 0
-          ? row.findLastIndex((cell) => cell?.text === ' ')
-          : -1;
-      const carried =
-        space >= 0 && space < row.length - 1 ? row.splice(space + 1) : [];
-      while (row.length < window.columns) row.push(null);
-      if (space >= 0) row[space] = null;
+      // Work in print order so wrapping preserves whole words in all four directions.
+      const horizontal = window.print < 2;
+      const fixed = horizontal
+        ? Math.min(window.rows - 1, Math.max(0, window.row))
+        : Math.min(window.columns - 1, Math.max(0, window.column));
+      const length = horizontal ? window.columns : window.rows;
+      const positions = Array.from({ length }, (_, index) => {
+        const position = window.print % 2 ? length - index - 1 : index;
+        return horizontal ? [fixed, position] : [position, fixed];
+      });
+      const line = positions.map(([row, column]) => window.cells[row][column]);
+      const boundary = line.findLastIndex(
+        (cell) => cell?.text === ' ' || cell?.text === '-',
+      );
+      const carried = boundary >= 0 ? line.slice(boundary + 1) : [];
+      if (boundary >= 0) {
+        for (let i = boundary + 1; i < positions.length; i++) {
+          const [row, column] = positions[i];
+          window.cells[row][column] = null;
+        }
+        if (line[boundary]?.text === ' ') {
+          const [row, column] = positions[boundary];
+          window.cells[row][column] = null;
+        }
+      }
       this.carriage(window);
       for (const cell of carried) {
-        if (window.column >= window.columns) break;
-        window.cells[window.row][window.column++] = cell;
+        window.cells[window.row][window.column] = cell;
+        this.step(window);
       }
-      if (text === ' ' && window.column === 0) return;
+      if (text === ' ' && !carried.length) return;
     }
     window.cells[window.row][window.column] = { text, pen: { ...window.pen } };
     this.step(window);
@@ -313,7 +347,7 @@ export class Cea708Service {
   private execute(c: number[], time: number) {
     const code = c[0];
     if (code >= 0x98 && code <= 0x9f) {
-      this.define(code - 0x98, c.slice(1));
+      this.define(code - 0x98, c.slice(1), time);
       return;
     }
     if (code >= 0x80 && code <= 0x87) {
@@ -328,9 +362,9 @@ export class Cea708Service {
       for (const [id, window] of this.windows)
         if (c[1] & (1 << id)) {
           if (code === 0x88) clear(window);
-          if (code === 0x89) window.visible = true;
-          if (code === 0x8a) window.visible = false;
-          if (code === 0x8b) window.visible = !window.visible;
+          if (code === 0x89) this.setVisible(window, true, time);
+          if (code === 0x8a) this.setVisible(window, false, time);
+          if (code === 0x8b) this.setVisible(window, !window.visible, time);
           if (code === 0x8c) {
             this.windows.delete(id);
             if (this.current === id) this.current = -1;

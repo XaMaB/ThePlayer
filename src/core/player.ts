@@ -15,6 +15,9 @@ export interface PlaybackEngine extends EventTarget {
   readonly catalog: any;
   readonly targetBuffer: number;
   readonly audioTracks: any[];
+  readonly videoTracks?: any[];
+  readonly selectedVideoTrack?: string;
+  selectVideoTrack?(name: string): Promise<void>;
   readonly subtitleTracks: any[];
   readonly selectedAudioTrack: string;
   readonly selectedSubtitleTrack?: string;
@@ -53,6 +56,8 @@ const events = [
   'error',
   'autoplayblocked',
   'audiochange',
+  'videochange',
+  'videotracks',
   'qualitylevels',
   'qualitychange',
   'subtitletracks',
@@ -202,6 +207,18 @@ export class PlayerCore extends EventTarget {
   }
   get targetBuffer() {
     return this.activePresentation?.targetBuffer ?? 4;
+  }
+  get videoTracks() {
+    return this.activePresentation?.videoTracks ?? [];
+  }
+  get selectedVideoTrack() {
+    return this.activePresentation?.selectedVideoTrack ?? '';
+  }
+  async selectVideoTrack(name: string) {
+    const engine = this.activePresentation;
+    if (!engine?.selectVideoTrack)
+      throw new Error('Video rendition selection is unavailable');
+    await engine.selectVideoTrack(name);
   }
   get audioTracks() {
     return this.activePresentation?.audioTracks ?? [];

@@ -1,3 +1,4 @@
+import { columns708, visibility708, wipe708 } from './cea708-layout';
 import type { Screen708, Window708, Pen708 } from './cea708-service';
 /** Broadcast window coordinates and cell positions are independent of native cue layout. */
 export class Cea708Renderer {
@@ -127,21 +128,15 @@ export class Cea708Renderer {
       overflow: 'hidden',
       zIndex: String(8 - window.priority),
     });
+    const amount = visibility708(window, this.video.currentTime);
+    if (window.visibility?.effect === 1) element.style.opacity = String(amount);
+    element.style.clipPath = wipe708(window, amount);
     if (window.border)
       element.style.border = `1px ${window.border === 1 ? 'inset' : window.border === 2 ? 'outset' : 'solid'} ${this.color(window.borderColor)}`;
     for (const [rowIndex, row] of window.cells.entries()) {
       const last = row.findLastIndex((cell) => cell !== null);
       if (last < 0) continue;
-      const first = Math.max(
-        0,
-        row.findIndex((cell) => cell !== null),
-      );
-      const shift =
-        window.justify === 1
-          ? window.columns - last - 1
-          : window.justify === 2
-            ? (window.columns - (last - first + 1)) / 2 - first
-            : 0;
+      const positions = columns708(row, window.columns, window.justify);
       for (let column = 0; column <= last; column++) {
         const cell = row[column];
         if (!cell) continue;
@@ -149,7 +144,7 @@ export class Cea708Renderer {
         span.textContent = cell.text;
         Object.assign(span.style, {
           position: 'absolute',
-          left: `${(column + shift) * cellWidth}px`,
+          left: `${positions[column] * cellWidth}px`,
           top: `${rowIndex * cellHeight}px`,
           width: `${cellWidth}px`,
           height: `${cellHeight}px`,
@@ -167,8 +162,17 @@ export class Cea708Renderer {
     const event = this.events.findLast(
       (e) => e.time <= this.video.currentTime + 0.001,
     );
+    const windows = (event?.windows ?? []).filter(
+      (w) => visibility708(w, this.video.currentTime) > 0,
+    );
+    const animating = windows.some(
+      (w) =>
+        w.visibility &&
+        this.video.currentTime < w.visibility.start + w.visibility.duration,
+    );
     const signature = JSON.stringify([
-      event?.windows,
+      windows,
+      animating ? Math.floor(this.video.currentTime * 60) : 0,
       Math.floor(this.video.currentTime * 2) % 2,
       this.width,
       this.height,
@@ -176,9 +180,9 @@ export class Cea708Renderer {
     if (signature === this.signature) return;
     this.signature = signature;
     this.element.replaceChildren(
-      ...(event?.windows ?? []).map((window) => this.window(window)),
+      ...windows.map((window) => this.window(window)),
     );
-    const text = (event?.windows ?? [])
+    const text = windows
       .map((w) =>
         w.cells
           .map((row) =>

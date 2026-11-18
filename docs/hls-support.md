@@ -127,7 +127,7 @@ await player.load({ protocol: 'hls', url: masterUrl, media: 'audio' });
 await player.selectMediaMode('video');
 ```
 
-The embed also accepts `&media=audio`. MP3, AC-3/E-AC-3 and packed ADTS/ID3 audio are not implemented in this release.
+The embed also accepts `&media=audio`. Later milestones below add MP3, AC-3/E-AC-3 and packed ADTS/ID3 audio.
 
 ## Apple AV1 sample audit
 
@@ -229,7 +229,7 @@ Original DTVCC packet assembly handles sequence loss, standard/extended services
 
 P16 with a zero high byte uses G0/G1 characters. Nonzero P16 defaults to Unicode BMP, replacing surrogate/noncharacter values. Broadcasters using legacy regional encodings can set `captionEncodings: { 1: 'euc-kr' }` on the HLS source; `unicode`, `gbk` and `big5` are also accepted. Encoding is an explicit per-service choice rather than inferred from language. G3 graphics use underscore substitution.
 
-Fetch/XHR browser fixtures verify AVC TS/fMP4 text, two services, left alignment/column geometry, P16, seeking and Off. HEVC SEI parsing has unit coverage, not full HEVC-caption playback validation. Since 0.16.0-alpha.1, separate fMP4 c708/ccdp tracks are also extracted and validated in the browser. Full justification falls back to left; display effects use snap (fade/wipe and smooth scroll are not implemented). Row/column locking is retained in the model but receiver font-size reflow/unwrapping is not implemented. Native font metrics and basic CSS edges do not promise pixel-identical broadcast rendering.
+Fetch/XHR browser fixtures verify AVC TS/fMP4 text, two services, left alignment/column geometry, P16, seeking and Off. HEVC SEI parsing has unit coverage, not full HEVC-caption playback validation. Since 0.16.0-alpha.1, separate fMP4 c708/ccdp tracks are also extracted and validated in the browser. Full horizontal justification, fade and wipe are covered by the later caption-presentation implementation below; smooth scrolling remains unimplemented. Row/column locking is retained in the model but receiver font-size reflow/unwrapping is not implemented. Native font metrics and basic CSS edges do not promise pixel-identical broadcast rendering.
 
 The AVC TS writer uses `avc3` with SPS/PPS in-band, preserving multiple parameter-set IDs instead of rejecting every within-segment PPS change. Existing independent frame hashes and PTS/DTS tests cover this output path.
 
@@ -245,7 +245,7 @@ Fetch/XHR fixtures exercise an independently encrypted map, rotating media keys,
 
 Identity SAMPLE-AES supports AVC and ADTS AAC with per-sample CBC reset, AVC skip encryption and outer emulation-prevention removal. Keys rotate by declaration; IVs can be explicit or derived from media sequence. The tests compare every elementary payload and timestamp and the resulting fMP4 against clear originals, then exercise playback and seeking through Fetch/XHR.
 
-This is the MPEG-TS AVC/AAC path only. fMP4 cbcs/CENC is covered separately below; encrypted AC-3/E-AC-3 and Apple audio-setup priming metadata remain pending. The original algorithm follows [Apple's sample encryption specification](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/HLS_Sample_Encryption/Encryption/Encryption.html).
+This is the MPEG-TS AVC/AAC path only. fMP4 cbcs/CENC is covered separately below; encrypted AC-3/E-AC-3 is covered by the later Dolby implementation below; Apple audio-setup priming metadata remains pending. The original algorithm follows [Apple's sample encryption specification](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/HLS_Sample_Encryption/Encryption/Encryption.html).
 
 ## fMP4 protection and EME (0.18)
 
@@ -274,7 +274,7 @@ References: [W3C EME](https://www.w3.org/TR/encrypted-media/), [CENC initializat
 
 ## Packed AAC and timed metadata (0.19)
 
-Packed ADTS AAC requires a leading ID3 PRIV transport timestamp. ID3 v2.3/v2.4, interleaved tags, 33-bit clock rollover, whole-resource AES-128 and AAC SAMPLE-AES are supported. Fifty generated segments are checked against the original ADTS bytes and timestamps. Packed MP3 is covered below; packed AC-3/E-AC-3 remain pending.
+Packed ADTS AAC requires a leading ID3 PRIV transport timestamp. ID3 v2.3/v2.4, interleaved tags, 33-bit clock rollover, whole-resource AES-128 and AAC SAMPLE-AES are supported. Fifty generated segments are checked against the original ADTS bytes and timestamps. Packed MP3 and AC-3/E-AC-3 are covered by the later implementations below.
 
 `metadata` events are emitted after a segment is appended. Their `time` is in the presentation timeline; arrival does not mean playback has reached that time. Events may be delivered again after a seek/reload. They contain `type` (`id3` or `emsg`), `frames` and `lane`; emsg also exposes scheme/value/id/duration and raw message bytes. ID3 exposes parsed private/text fields and original frame bytes. Applications own presentation-time scheduling and deduplication appropriate to their metadata semantics.
 
@@ -314,7 +314,7 @@ The engine reads EXT-X-CONTENT-STEERING and stable variant/rendition identities,
 
 Pathway transitions preserve matching quality and language selections, using stable IDs when available. Media switches use the existing rendition boundary machinery; initialization/first-media failures can select a backup before playback. The `pathwaychange` event and `diagnostics.steering` expose state. Deterministic tests cover priority updates, clones, initial/media failure, ABR, separate audio/subtitles, malformed manifests and 410 over Fetch/XHR.
 
-The validated transition profile uses corresponding codecs/qualities and language sets on each pathway. A candidate missing a currently exposed matching quality/language is rejected and penalized. Differing pathway inventories and external alternate video groups need further integration. Manifest fetches have a three-second timeout, a 1 MiB body limit, bounded clones/parameters and a minimum 250 ms reload interval. HLS references steering draft 04; URI and client behavior were also checked against draft 05: https://datatracker.ietf.org/doc/html/draft-pantos-content-steering-05.
+Pathways may expose different quality and language inventories. The ladder is rebuilt from browser-compatible variants; stable variant identity is preferred, otherwise the highest bitrate no greater than the previous selection is used (or the lowest available). Audio/subtitle identities are matched independently of array positions. A missing audio language falls back through DEFAULT/AUTOSELECT policy; missing manually selected subtitles turn off. Added choices become selectable. Manual/Auto mode is retained, stale queued choices are rejected and pathway-specific quality quarantine is cleared. Initial playlist failure and later return to a working pathway are covered. External audio lane layout changes (muxed versus separate audio) still need integration. VIDEO groups are supported as described below. Manifest fetches have a three-second timeout, a 1 MiB body limit, bounded clones/parameters and a minimum 250 ms reload interval. HLS references steering draft 04; URI and client behavior were also checked against draft 05: https://datatracker.ietf.org/doc/html/draft-pantos-content-steering-05.
 
 ## Playlist date ranges (0.25)
 
@@ -413,3 +413,21 @@ The cache holds at most 16 entries, two concurrent requests and 1 MiB per resour
 `npm run test:hls:date-preload` checks requests before insertion, direct/list reuse, target mismatch, hint removal, ENDLIST, HTTP faults and slow-request cancellation over Fetch/XHR. Ordinary cue scheduling no longer adds `_HLS_start_offset` for a few milliseconds of callback delay; initial live joins/seeks within an insertion retain the offset.
 
 Shared controls populate subtitle choices directly from the player rather than relying on demo glue. `selectedSubtitleTrack` exposes the active selection; catalogue and selection events update the menu immediately. Asset diagnostics are shown while an insertion plays, with primary interstitial progress retained. Source identity, live status and timeline markers continue to describe the primary presentation.
+
+## Alternate video renditions
+
+VIDEO groups use DEFAULT/AUTOSELECT for startup, with `videoRendition: 'Alternate'` selecting a rendition by its declared NAME. A missing rendition URI resolves to the associated variant media playlist. `player.videoTracks`, `selectedVideoTrack` and `selectVideoTrack(name)` provide protocol-neutral access; `videotracks` and `videochange` report updates. The shared Quality menu includes a Video angle section when multiple angles exist.
+
+Angle identity is matched by NAME across quality groups, independently of their array order. Selection preserves Auto/manual quality mode and the current audio lane. Separate-video/separate-audio layouts are validated with original colored fixtures, checking actual decoded pixels across quality/angle changes in Chromium, Firefox and WebKit over Fetch/XHR. Steering clones retain and rewrite VIDEO groups. A switch must retain the current SourceBuffer track layout; transitions between muxed audio/video and video-only sources still require topology integration.
+
+`npm run test:hls:video` generates redistributable angle fixtures and checks defaults, explicit startup, URI omission, paused selection, group reordering and the shared UI. Colors are classified by dominant channels to allow browser color-matrix differences, not used as HDR/colorimetry certification.
+
+Rendition switching no longer predicts playback advance while paused. For live targets without a future independent boundary, the engine performs up to two additional playlist reloads and recomputes the boundary before giving up. `diagnostics.renditionSwitchWaits` records these waits. A deterministic LL-HLS fixture serves one stale alternate-audio playlist to reproduce and test the intermittent WebKit CI failure; this is bounded recovery rather than unbounded retries.
+
+## CEA-708 presentation extensions
+
+FULL horizontal justification distributes spare width across breakable spaces, retaining individual pen styling and glyph widths. A single unbreakable word uses centered placement. Word wrapping carries cells and pen attributes in all four print directions; spaces and hyphens are break opportunities, while nonbreaking spaces are retained inside words.
+
+Visibility transitions use the media clock rather than wall-clock CSS animation. Fade adjusts window opacity and wipe clips the declared direction, with reversed clipping edges on hide. Effects use the transmitted half-second speed units; snap and zero-speed effects remain immediate. Hidden content survives until its effect ends, deletion removes it immediately, and interrupted effects continue from their current visibility. Seeking reconstructs the corresponding effect phase from caption snapshots.
+
+Original command fixtures verify decoded transitions, layout, pause, backward seek and cleanup in Chromium, Firefox and WebKit. `npm run test:hls:708` also retains actual HLS TS/fMP4/CDP caption playback checks. This does not certify full CTA-708 typography, receiver font reflow, smooth scrolling or every broadcast profile. The mapping of FULL justification and display attributes is described by [SMPTE RP 2052-11](https://pub.smpte.org/pub/rp2052-11/rp2052-11-2013.pdf).

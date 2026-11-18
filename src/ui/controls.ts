@@ -415,6 +415,30 @@ export function mountControls(
           quality.focus();
         },
       );
+    if (p?.videoTracks?.length > 1) {
+      const heading = document.createElement('div');
+      heading.className = 'track-section-label';
+      heading.textContent = 'Video angle';
+      list.append(heading);
+      for (const track of p.videoTracks)
+        option(
+          list,
+          track.name,
+          track.label,
+          p.selectedVideoTrack === track.name,
+          async () => {
+            for (const button of list.querySelectorAll('button'))
+              button.disabled = true;
+            try {
+              await p.selectVideoTrack(track.name);
+            } catch (error: any) {
+              if (p === getPlayer()) report(error.message);
+            }
+            closeMenus();
+            quality.focus();
+          },
+        );
+    }
     for (const mode of p?.availableMediaModes ?? []) {
       if (mode === p.mediaMode) continue;
       option(
@@ -778,7 +802,8 @@ export function mountControls(
   const statsTimer = setInterval(() => {
     (quality as HTMLButtonElement).disabled =
       (getPlayer()?.qualityLevels?.length ?? 0) < 2 &&
-      (getPlayer()?.availableMediaModes?.length ?? 0) < 2;
+      (getPlayer()?.availableMediaModes?.length ?? 0) < 2 &&
+      (getPlayer()?.videoTracks?.length ?? 0) < 2;
     (audio as HTMLButtonElement).disabled = !getPlayer()?.audioTracks?.length;
     const p = getPlayer(),
       q = video.getVideoPlaybackQuality(),

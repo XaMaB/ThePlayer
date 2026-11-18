@@ -283,6 +283,30 @@ export function faultServer({
             req.headers.host;
           const prefix = `${origin}/scenario/${match[1]}/${scenario}/`;
           if (resource === 'master.m3u8') {
+            if (scenario.startsWith('steering-inventory-')) {
+              const mode = scenario.slice('steering-inventory-'.length);
+              let master =
+                '#EXTM3U\n#EXT-X-CONTENT-STEERING:SERVER-URI="steering.json",PATHWAY-ID="a"\n';
+              for (const id of ['a', 'b']) {
+                if (mode === 'tracks') {
+                  const langs = id === 'a' ? ['en', 'es'] : ['fr', 'en'];
+                  for (const lang of langs)
+                    master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-${id}",NAME="${lang}",LANGUAGE="${lang}",DEFAULT=${lang === 'en' ? 'YES' : 'NO'},AUTOSELECT=YES,STABLE-RENDITION-ID="audio-${lang}",URI="${id}/audio-${lang === 'en' ? 'en' : 'es'}/index.m3u8"\n`;
+                  if (id === 'a')
+                    master +=
+                      '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs-a",NAME="English",LANGUAGE="en",AUTOSELECT=YES,URI="a/subtitles.m3u8"\n';
+                }
+                const high = ['shrink', 'initial', 'recover'].includes(mode)
+                  ? id === 'a'
+                  : mode === 'grow'
+                    ? id === 'b'
+                    : false;
+                for (const level of high ? ['low', 'high'] : ['low'])
+                  master += `#EXT-X-STREAM-INF:BANDWIDTH=${level === 'low' ? 500000 : 1500000},CODECS="${level === 'low' ? 'avc1.42c00c' : 'avc1.42c01e'}${mode === 'tracks' ? ',mp4a.40.2' : ''}",RESOLUTION=${level === 'low' ? '320x180' : '640x360'},STABLE-VARIANT-ID="${level}",PATHWAY-ID="${id}"${mode === 'tracks' ? `,AUDIO="audio-${id}"${id === 'a' ? ',SUBTITLES="subs-a"' : ''}` : ''}\n${id}/video-${level}/index.m3u8\n`;
+              }
+              res.end(master);
+              return;
+            }
             if (scenario === 'steering-abr') {
               const variants = ['a', 'b']
                 .flatMap((id) =>
@@ -382,9 +406,21 @@ export function faultServer({
           if (media) {
             if (
               media[1] === 'a' &&
-              ((scenario === 'steering-initial' && media[2] === 'index.m3u8') ||
+              ((scenario === 'steering-inventory-initial' &&
+                media[2].endsWith('/index.m3u8')) ||
+                (scenario === 'steering-initial' &&
+                  media[2] === 'index.m3u8') ||
                 (scenario === 'steering-first-media' &&
                   media[2] === 'segment00.ts'))
+            ) {
+              res.writeHead(503);
+              res.end();
+              return;
+            }
+            if (
+              scenario === 'steering-inventory-recover' &&
+              media[1] === 'b' &&
+              media[2].endsWith('segment03.m4s')
             ) {
               res.writeHead(503);
               res.end();
@@ -403,9 +439,11 @@ export function faultServer({
               res.end();
               return;
             }
-            relative = ['steering-audio', 'steering-abr'].includes(scenario)
-              ? media[2]
-              : 'ts/' + media[2];
+            relative =
+              ['steering-audio', 'steering-abr'].includes(scenario) ||
+              scenario.startsWith('steering-inventory-')
+                ? media[2]
+                : 'ts/' + media[2];
           }
         }
         if (scenario.startsWith('ll-av')) {
@@ -431,7 +469,18 @@ export function faultServer({
           const inventory = llAvInventory[lane];
           const sequenceBase =
             lane === 'audio' ? 1000 : lane === 'audio2' ? 5000 : 0;
-          const lag = scenario === 'll-av-lag' && lane === 'audio' ? 500 : 0;
+          const staleSwitch =
+            scenario === 'll-av-switch-stale' &&
+            lane === 'audio' &&
+            resource.endsWith('/index.m3u8') &&
+            Date.now() - epoch > 9000 &&
+            !requests.get(key + ':stale-switch');
+          if (staleSwitch) requests.set(key + ':stale-switch', 1);
+          const lag = staleSwitch
+            ? 2500
+            : scenario === 'll-av-lag' && lane === 'audio'
+              ? 500
+              : 0;
           const available = () =>
             Math.max(0, (Date.now() - epoch + 1000 - lag) / 1000);
           if (resource.endsWith('/index.m3u8')) {
@@ -444,7 +493,7 @@ export function faultServer({
                 setTimeout(resolve, firstWait + 1),
               );
             if (res.destroyed) return;
-            if (url.searchParams.has('_HLS_msn')) {
+            if (url.searchParams.has('_HLS_msn') && !staleSwitch) {
               const wanted =
                 (Number(url.searchParams.get('_HLS_msn')) - sequenceBase) * 4 +
                 Number(url.searchParams.get('_HLS_part') ?? 3);

@@ -106,10 +106,18 @@ test('Inserted presentations own track controls while primary source and selecti
   await player.selectAudioTrack('other');
   player.selectSubtitleTrack('');
   await player.selectQuality(2);
+  parent.presentation.videoTracks = [{ name: 'side' }];
+  parent.presentation.selectedVideoTrack = 'side';
+  parent.presentation.selectVideoTrack = async (name) =>
+    calls.push(['video', name]);
+  assert.equal(player.selectedVideoTrack, 'side');
+  assert.equal(player.videoTracks[0].name, 'side');
+  await player.selectVideoTrack('side');
   assert.deepEqual(calls, [
     ['audio', 'other'],
     ['subtitle', ''],
     ['quality', 2],
+    ['video', 'side'],
   ]);
   parent.presentation = null;
   assert.deepEqual(player.audioTracks, []);
