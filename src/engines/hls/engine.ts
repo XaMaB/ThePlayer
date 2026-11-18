@@ -72,6 +72,8 @@ export interface HlsSource {
   protocol: 'hls';
   url: string;
   network?: NetworkOptions;
+  /** Opt in to bounded, URL-redacted live reset history. Default: false. */
+  debug?: boolean;
   targetBuffer?: number;
   liveStallTimeoutMs?: number;
   liveRecoveryTimeoutMs?: number;
@@ -111,12 +113,14 @@ export class HlsEngine extends EventTarget {
       unchangedMs: 0,
       restarts: 0,
       reason: '',
-      resetHistory: [] as {
-        reason: string;
-        role: string;
-        quality: number;
-        difference: ReturnType<typeof timelineDifference>;
-      }[],
+      resetHistory: undefined as
+        | undefined
+        | {
+            reason: string;
+            role: string;
+            quality: number;
+            difference: ReturnType<typeof timelineDifference>;
+          }[],
       lanes: {} as Record<string, { unchangedMs: number; stale: boolean }>,
     },
     recovery: {} as Record<string, unknown>,
@@ -296,6 +300,7 @@ export class HlsEngine extends EventTarget {
     prefetched?: (resource: Resource) => ResourceResponse | undefined,
   ) {
     super();
+    if (source.debug === true) this.diagnostics.live.resetHistory = [];
     for (const [service, encoding] of Object.entries(
       source.captionEncodings ?? {},
     ))
@@ -772,14 +777,16 @@ export class HlsEngine extends EventTarget {
       );
     const result = reconcileLive(incoming, p, nextSequence);
     if (result.restart) {
-      this.diagnostics.live.resetHistory.push({
-        reason: result.reason,
-        role: lane.role,
-        quality: this.selectedQuality,
-        difference: timelineDifference(incoming, p),
-      });
-      this.diagnostics.live.resetHistory =
-        this.diagnostics.live.resetHistory.slice(-4);
+      const history = this.diagnostics.live.resetHistory;
+      if (history) {
+        history.push({
+          reason: result.reason,
+          role: lane.role,
+          quality: this.selectedQuality,
+          difference: timelineDifference(incoming, p),
+        });
+        if (history.length > 4) history.shift();
+      }
       await this.restartLive(
         lane === this.main ? incoming : undefined,
         result.reason,

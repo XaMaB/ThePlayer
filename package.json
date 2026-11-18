@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.0.0-alpha.3",
+  "version": "1.0.0-alpha.4",
   "private": true,
   "description": "Modular MoQ player with an original HLS engine",
   "type": "module",

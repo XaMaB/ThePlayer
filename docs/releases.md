@@ -1,5 +1,9 @@
 # Release versions
 
+## 1.0.0-alpha.4
+
+- Make detailed HLS live reset history opt-in through the source option `debug: true`. Default playback retains restart counts and reasons without collecting timeline comparisons.
+
 ## 1.0.0-alpha.3
 
 - Fix false HLS timeline resets when an overlapping segment retains its sequence, discontinuity, origin/path, range and timing but receives renewed URL query parameters. Segment requests and caches still use the complete, newly advertised URL.

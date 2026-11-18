@@ -63,6 +63,7 @@ try {
           );
           await window.player.load({
             protocol: 'hls',
+            debug: direction === 'up' ? true : undefined,
             url: location.origin + '/range-master.m3u8',
             quality: direction === 'up' ? 0 : 1,
             targetBuffer: 4,
@@ -88,12 +89,17 @@ try {
       const result = await page.evaluate(() => ({
         failures: window.failures,
         restarts: window.player.diagnostics.live.restarts,
+        resetHistory: window.player.diagnostics.live.resetHistory,
         ranges: window.ranges,
         time: document.querySelector('video').currentTime,
         frames: document.querySelector('video').getVideoPlaybackQuality()
           .totalVideoFrames,
       }));
       assert.deepEqual(result.failures, []);
+      assert.deepEqual(
+        result.resetHistory,
+        direction === 'up' ? [] : undefined,
+      );
       assert.equal(
         result.restarts,
         0,

@@ -451,3 +451,18 @@ When the browser supports cue-class selectors, native positioned WebVTT cues app
 Declared `mp4a.40.29` variants are admitted subject to browser MSE capability. TS and packed ADTS retain the mono AAC core in AudioSpecificConfig while explicitly signaling PS/SBR, a doubled output sample rate and two output channels. fMP4 accepts audio object type 29 in the decoder configuration. Stereo-core declarations for this profile fail explicitly; undeclared PS detection is not inferred from the ADTS header.
 
 `npm run test:hls:he-aac` creates TS/fMP4/packed variants from an original 440 Hz left / 880 Hz right fixture. FFmpeg independently decodes the source and remuxed MP4 to byte-identical stereo PCM. Browser tests measure distinct output-channel frequencies and seek in both directions through Fetch/XHR. The checked-in synthetic recording includes its original generator and provenance; the external encoder is needed only to regenerate that recording, never for player runtime or ordinary CI.
+
+## Optional live debug history
+
+Detailed live reset history is disabled by default. Enable it per source when investigating a stream:
+
+```js
+await player.load({
+  protocol: 'hls',
+  url: 'https://media.example.com/live.m3u8',
+  debug: true,
+});
+console.log(player.diagnostics.live.resetHistory);
+```
+
+The history retains at most four reset decisions and omits resource URLs and tokens. Without `debug: true`, `resetHistory` is undefined and detailed comparisons are not collected. Restart counts and reasons remain available in `diagnostics.live` in both modes. This option does not change playback or recovery behavior.
