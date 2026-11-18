@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.0.0-alpha.3
+
+- Fix false HLS timeline resets when an overlapping segment retains its sequence, discontinuity, origin/path, range and timing but receives renewed URL query parameters. Segment requests and caches still use the complete, newly advertised URL.
+- Query renewal alone no longer counts as live media advancement, preserving stalled-publisher detection. Initialization metadata changes and changes to media path, duration or byte range remain subject to timeline checks.
+- Exercise changing segment query parameters during upward/downward quality switches over Fetch/XHR, including continued playback, zero resets and use of refreshed URLs.
+
 ## 1.0.0-alpha.2
 
 - Add a bounded, URL-redacted live reset history to distinguish sequence, resource, duration, date-time and initialization changes. Record the triggering comparison even when the restart limit stops playback. This is diagnostic instrumentation, not a change to recovery policy.

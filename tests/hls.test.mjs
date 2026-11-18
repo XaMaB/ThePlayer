@@ -1409,3 +1409,37 @@ test('Live reset diagnostics identify changes without exposing signed URLs', asy
   const reset = parsePlaylist(vod('#EXTINF:2,\nnew.ts', 0), base);
   assert.equal(timelineDifference(reset, before).overlap, null);
 });
+
+test('Live segment query renewal preserves the timeline and does not disguise a stalled publisher', async () => {
+  const { reconcileLive, LiveProgress } = await module('live');
+  const playlist = (query, duration = 4, resource = 'segment.ts') =>
+    parsePlaylist(
+      vod(`#EXTINF:${duration},\n${resource}?${query}`, 13978404),
+      base,
+    );
+  const before = playlist('session=old&signature=old');
+  const after = playlist('session=new&signature=new');
+  const result = reconcileLive(after, before, 13978405);
+  assert.equal(result.restart, false);
+  assert.equal(result.playlist.segments[0].start, before.segments[0].start);
+  assert.equal(result.playlist.segments[0].url, after.segments[0].url);
+  assert.ok(result.playlist.segments[0].url.includes('signature=new'));
+  const progress = new LiveProgress();
+  assert.equal(progress.observe(before, 1000), 0);
+  assert.equal(progress.observe(after, 5000), 4000);
+  assert.equal(
+    reconcileLive(playlist('session=new', 4.2), before, 13978405).restart,
+    true,
+  );
+  assert.equal(
+    reconcileLive(
+      playlist('session=new', 4, 'replacement.ts'),
+      before,
+      13978405,
+    ).restart,
+    true,
+  );
+  const ranged = playlist('session=new');
+  ranged.segments[0].range = { offset: 100, length: 500 };
+  assert.equal(reconcileLive(ranged, before, 13978405).restart, true);
+});

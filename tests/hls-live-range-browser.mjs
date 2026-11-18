@@ -19,6 +19,12 @@ try {
     for (const transport of ['fetch', 'xhr']) {
       const page = await browser.newPage();
       const errors = [];
+      const sessions = [];
+      page.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.pathname.endsWith('.ts'))
+          sessions.push(Number(url.searchParams.get('session')));
+      });
       let reloads = 0;
       page.on('pageerror', (error) => errors.push(error.message));
       await page.route('**/negative-window.m3u8*', (route) => {
@@ -28,7 +34,7 @@ try {
         const end = first ? 6 : 11;
         let body = `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${start}\n`;
         for (let i = start; i <= end; i++)
-          body += `#EXTINF:2,\n/fixture/ts/segment${String(i).padStart(2, '0')}.ts\n`;
+          body += `#EXTINF:2,\n/fixture/ts/segment${String(i).padStart(2, '0')}.ts?session=${reloads}\n`;
         return route.fulfill({
           contentType: 'application/vnd.apple.mpegurl',
           body,
@@ -95,6 +101,10 @@ try {
       );
       assert.deepEqual(errors, []);
       assert.ok(reloads >= 3, 'Live playlist must keep refreshing');
+      assert.ok(
+        sessions.some((session) => session >= 3),
+        'Downloads must retain refreshed query parameters',
+      );
       assert.ok(
         result.time > 8 && result.frames > 100,
         'Playback must cross the initial three-segment window',

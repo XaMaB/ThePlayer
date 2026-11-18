@@ -1,4 +1,4 @@
-import { alignPlaylist, type Playlist } from './playlist';
+import { alignPlaylist, timelineUrl, type Playlist } from './playlist';
 
 const tailKey = (p: Playlist) => {
   const tail = p.segments.at(-1)!;
@@ -7,7 +7,7 @@ const tailKey = (p: Playlist) => {
     tail.sequence,
     tail.part,
     tail.discontinuity,
-    tail.url,
+    timelineUrl(tail.url),
     tail.range,
     tail.duration,
     tail.programDateTime,

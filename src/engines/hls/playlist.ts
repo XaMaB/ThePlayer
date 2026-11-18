@@ -731,6 +731,16 @@ export function parsePlaylist(
   return p;
 }
 /** Preserve media-time positions while a live window slides. Reject unsynchronized resets. */
+/** Only for timeline comparisons; requests and caches retain the complete URL.
+ * Renewed query credentials do not change a segment's presentation timestamp.
+ * Sequence/discontinuity, path, byte range and timing are checked separately.
+ */
+export function timelineUrl(value: string): string {
+  const url = new URL(value);
+  url.search = '';
+  url.hash = '';
+  return url.href;
+}
 export function alignPlaylist(next: Playlist, previous: Playlist): Playlist {
   const overlap = next.segments.find((s) =>
     previous.segments.some(
@@ -747,7 +757,7 @@ export function alignPlaylist(next: Playlist, previous: Playlist): Playlist {
     )!;
     if (
       old.part === overlap.part &&
-      (old.url !== overlap.url ||
+      (timelineUrl(old.url) !== timelineUrl(overlap.url) ||
         JSON.stringify(old.range) !== JSON.stringify(overlap.range) ||
         JSON.stringify(old.map) !== JSON.stringify(overlap.map) ||
         (old.programDateTime &&
