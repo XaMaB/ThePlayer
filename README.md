@@ -98,7 +98,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 | Declared GAP segments                | Skipped without requests; playback resumes at buffered media after the declared interval                                                         |
 | Live timeline resets                 | Bounded coordinated media restart; paused state and track selection retained                                                                     |
 
-The HLS engine is original code: it does not bundle or copy hls.js, Video.js/VHS or Shaka implementations. This does not mean the entire player has no dependencies: MoQ uses moq-dev, and the MoQ caption path includes a locally patched mux.js decoder with provenance and licensing. See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [detailed limits](docs/hls-support.md).
+See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [detailed limits](docs/hls-support.md).
 
 ## Development
 
@@ -186,23 +186,6 @@ The application provides the video and overlay canvas; position the canvas absol
 
 See [architecture](docs/architecture.md) for extension boundaries and events.
 
-## Validation
-
-The 0.7.0-alpha.1 release passed formatting, TypeScript/build checks, 64 unit tests, 21 deterministic HLS browser scenarios and controlled-throughput ABR/UI checks. Independent FFmpeg decoding verifies HEVC remuxing; the test host's Chromium lacks an HEVC decoder, so those browser cases verify explicit capability rejection.
-
-The 0.8.0-alpha.1 update adds three unit tests (67 total) and 16 deterministic recovery browser cases across Fetch/XHR. The recovery suite also passed against a separate HTTP server in Amsterdam. It checks temporary errors, interrupted responses, timeouts, playlist failures, bounded permanent failures, cancellation and declared gaps.
-
-Public-source checks include Apple's AV1 sample and real CEA-608 English CC1 captions from Apple's Dolby demo through compatible AVC/AAC renditions. A working fallback from a Dolby demo does not establish Dolby Vision/Atmos support. Public tests are optional and network-dependent; CI uses generated fixtures.
-
-```sh
-npm run fixtures:hls
-npm run test:hls
-# Optional public-source checks:
-npm run test:hls:public
-```
-
-Browser autoplay policy may require muted startup or a user gesture. Codec availability, rendering and device performance still need validation on your target browsers. See [release notes](docs/releases.md) for version-specific coverage.
-
 ## Optional deployment configuration
 
 `settings.json` is local and ignored by Git. The server defaults to localhost HTTP port 5173 when it is absent. For HTTPS deployment, configure `webHost`, `webPort`, `cert` and `key`. An optional `relayDirectoryUrl` and `relayTrustPem` enable the demo channel list. `MOQ_PLAYER_CONFIG` selects another configuration file.
@@ -241,9 +224,3 @@ Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE`, the included ups
 ### Playback shortcuts
 
 Space or K toggles play/pause; Left/Right seeks by ten seconds within the available timeline. The center controls offer the same actions. Live streams can seek only within their available DVR/buffer window. Shortcuts apply to the active player and leave text fields and menu selection keys alone. Unavailable audio/CC controls use an ordinary cursor, not a loading indicator.
-
-## Release identification
-
-Current release: **0.45.0**. MediaInfo shows the same version exported as `VERSION` from `player.js`; builds also expose `version.json`. Published snapshots have matching annotated Git tags. See [release notes and versioning](docs/releases.md) and the [HLS support matrix](docs/hls-support.md) for verified capabilities and limitations. The [release validation record](docs/hls-validation.md) distinguishes completed checks from ongoing tests.
-
-HLS alternate video angles are available through `player.videoTracks` and `player.selectVideoTrack(name)`, and in the shared Quality menu. Angle identity survives quality changes; audio language remains independent.
