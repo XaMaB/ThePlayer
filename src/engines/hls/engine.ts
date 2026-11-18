@@ -1,4 +1,12 @@
-import { DateRangeTimeline } from './date-ranges';
+import { DateRangeTimeline, type TimedDateRange } from './date-ranges';
+import {
+  parseInterstitial,
+  resolveInterstitial,
+  interstitialResume,
+  snapInterstitial,
+  type Interstitial,
+} from './interstitials';
+import { InterstitialSession } from './interstitial-session';
 import { retryable } from './recovery';
 import { ContentSteering } from './steering';
 import { EmeController, type DrmOptions } from './eme';
@@ -62,6 +70,9 @@ export interface HlsSource {
   preferredLanguages?: string[];
   captionEncodings?: Record<number, P16Encoding>;
   drm?: DrmOptions;
+  interstitials?: boolean;
+  /** Internal asset validation: interstitial media must be VOD. */
+  interstitialAsset?: boolean;
 }
 /** Original baseline HLS engine; no hls.js, VHS or Shaka code/dependency. */
 export class HlsEngine extends EventTarget {
@@ -69,6 +80,7 @@ export class HlsEngine extends EventTarget {
   readonly stack = 'ThePlayer HLS';
   readonly diagnostics = {
     steering: {} as Record<string, unknown>,
+    interstitial: {} as Record<string, unknown>,
     state: 'idle',
     version: 'baseline',
     objects: 0,
@@ -126,6 +138,21 @@ export class HlsEngine extends EventTarget {
   private liveProgress = new LiveProgress();
   private restartTimes: number[] = [];
   private resumeAfterReset?: boolean;
+  private resumePosition?: number;
+  private resumeSeekDeadline = 0;
+  private interstitialActive = false;
+  private interstitialQueue: Interstitial[] = [];
+  private interstitialSession?: InterstitialSession;
+  private interstitialPlayer?: HlsEngine;
+  private primarySession = crypto.randomUUID();
+  private preRollDone = false;
+  private postRollEnded = false;
+  private interstitialAutoplay = true;
+  private interstitialResumeBatch?: { start: number; resume: number };
+  private interstitialRanges = new Map<string, Interstitial>();
+  private primaryPosition = 0;
+  private pendingJump?: number;
+  private interstitialEnd?: Record<string, unknown>;
   private gaps: { start: number; end: number }[] = [];
   private abort = new AbortController();
   private client: ResourceClient;
@@ -134,8 +161,52 @@ export class HlsEngine extends EventTarget {
     return this.main?.playlist;
   }
   private master?: Playlist;
-  private dateRanges = new DateRangeTimeline((name, detail) =>
-    this.emit(name, detail),
+  private dateRanges = new DateRangeTimeline(
+    (name, detail) => {
+      this.emit(name, detail);
+      if (name === 'daterangeremove')
+        this.interstitialRanges.delete((detail as { id: string }).id);
+      if (
+        (name === 'daterange' || name === 'daterangecue') &&
+        this.source.interstitials !== false
+      ) {
+        const range = detail as TimedDateRange;
+        if (range.class === 'com.apple.hls.interstitial') {
+          try {
+            const event = parseInterstitial(
+              range,
+              this.main?.playlist.url ?? this.source.url,
+            );
+            this.interstitialRanges.set(range.id, event);
+            if (
+              name === 'daterangecue' &&
+              !this.interstitialQueue.some((e) => e.range.id === range.id)
+            ) {
+              if (!this.interstitialQueue.length)
+                this.interstitialAutoplay = range.cue.includes('PRE')
+                  ? this.source.autoplay !== false
+                  : range.cue.includes('POST') || !this.video.paused;
+              this.interstitialQueue.push(event);
+              this.video.pause();
+            }
+          } catch (error) {
+            this.emit('interstitialwarning', {
+              id: range.id,
+              message: String(error),
+            });
+          }
+        }
+      }
+    },
+    (range) =>
+      range.class === 'com.apple.hls.interstitial' &&
+      range.attributes['X-SNAP']?.split(',').includes('OUT')
+        ? snapInterstitial(
+            range.start,
+            this.lanes().map((l) => l.playlist),
+            'OUT',
+          )
+        : range.start,
   );
   private steering?: ContentSteering;
   private appliedPathway = '';
@@ -245,17 +316,26 @@ export class HlsEngine extends EventTarget {
     );
     video.addEventListener(
       'timeupdate',
-      () => this.dateRanges.tick(video.currentTime, video.seeking),
+      () => {
+        if (!this.interstitialActive && !this.initial && !this.interstitialEnd)
+          this.dateRanges.tick(video.currentTime, video.seeking);
+        if (!this.interstitialActive && !this.initial && !video.seeking)
+          this.primaryPosition = video.currentTime;
+      },
       { signal: this.abort.signal },
     );
     video.addEventListener(
       'seeked',
-      () => this.dateRanges.tick(video.currentTime, true),
+      () => {
+        if (!this.interstitialActive && !this.initial && !this.interstitialEnd)
+          this.dateRanges.tick(video.currentTime, true);
+      },
       { signal: this.abort.signal },
     );
     video.addEventListener(
       'ended',
       () => {
+        if (this.interstitialActive || this.initial) return;
         this.dateRanges.phase('POST');
         this.state('ended');
       },
@@ -268,7 +348,10 @@ export class HlsEngine extends EventTarget {
     });
     video.addEventListener(
       'error',
-      () => this.fail(new Error(video.error?.message ?? 'HLS decoder error')),
+      () => {
+        if (!this.interstitialActive)
+          this.fail(new Error(video.error?.message ?? 'HLS decoder error'));
+      },
       { signal: this.abort.signal },
     );
   }
@@ -477,6 +560,8 @@ export class HlsEngine extends EventTarget {
           url: r.url,
         }));
     }
+    if (this.source.interstitialAsset && p.live)
+      throw new Error('Interstitial assets must be VOD');
     this.main = this.lane(
       p,
       'main',
@@ -531,7 +616,22 @@ export class HlsEngine extends EventTarget {
     return [this.main, this.audio].filter((lane): lane is MediaLane => !!lane);
   }
   private onSeek() {
-    if (this.initial || !this.main) return;
+    if (this.interstitialActive || this.initial || !this.main) return;
+    if (!this.interstitialQueue.length) {
+      const crossing = [...this.interstitialRanges.values()].find(
+        (e) =>
+          e.restrict.includes('JUMP') &&
+          this.primaryPosition < e.range.start &&
+          this.video.currentTime > e.range.start,
+      );
+      if (crossing) {
+        this.pendingJump = this.video.currentTime;
+        this.interstitialAutoplay = !this.video.paused;
+        this.interstitialQueue.push(crossing);
+        this.video.pause();
+        return;
+      }
+    }
     if (
       this.lanes().every((lane) => lane.ahead(this.video.currentTime) >= 0.1)
     ) {
@@ -698,6 +798,183 @@ export class HlsEngine extends EventTarget {
     this.state('buffering');
     this.emit('streamchange', { live: this.isLive });
     await this.prime();
+  }
+  skipInterstitial() {
+    return this.interstitialSession?.skipNow() ?? false;
+  }
+  private async playInterstitial(event: Interstitial) {
+    const primary = this.main!.playlist;
+    const oldAudio = this.audio?.playlist;
+    const rate = this.video.playbackRate;
+    const post = event.range.cue.includes('POST');
+    let scheduled = event.range.cue.includes('PRE')
+      ? this.video.currentTime
+      : event.range.start;
+    if (post) scheduled = this.video.duration;
+    if (this.interstitialResumeBatch?.start === event.range.start)
+      scheduled = this.interstitialResumeBatch.resume;
+    if (event.snap.includes('OUT'))
+      scheduled = snapInterstitial(
+        scheduled,
+        this.lanes().map((l) => l.playlist),
+        'OUT',
+      );
+    this.interstitialActive = true;
+    this.generation++;
+    this.subtitleAbort?.abort();
+    this.renderer708?.set([]);
+    this.ttmlRenderer?.destroy();
+    this.ttmlRenderer = undefined;
+    if (this.textTrack) this.textTrack.mode = 'disabled';
+    let played = 0,
+      cancelled = false,
+      skipped = false;
+    this.diagnostics.interstitial = {
+      active: true,
+      id: event.range.id,
+      skippable: false,
+    };
+    this.emit('interstitialstart', {
+      id: event.range.id,
+      scheduled,
+      occupies: event.occupies,
+      style: event.style,
+    });
+    try {
+      const resolved = await resolveInterstitial(
+        event,
+        this.client,
+        this.primarySession,
+        primary.live && this.video.currentTime > scheduled
+          ? this.video.currentTime - scheduled
+          : undefined,
+      );
+      await this.eme?.destroy();
+      this.eme = undefined;
+      this.interstitialSession = new InterstitialSession(
+        this.video,
+        event,
+        resolved.skip,
+        this.abort.signal,
+        (name, detail) => {
+          if (name === 'interstitialprogress')
+            Object.assign(this.diagnostics.interstitial, detail);
+          this.emit(name, detail);
+        },
+      );
+      ({ played, cancelled, skipped } = await this.interstitialSession.run(
+        resolved.assets,
+        (url) => {
+          this.interstitialPlayer = new HlsEngine(this.video, {
+            protocol: 'hls',
+            url,
+            network: {
+              recoveryWindowMs: 5000,
+              retries: 1,
+              ...this.source.network,
+            },
+            drm: this.source.drm,
+            autoplay: this.interstitialAutoplay,
+            interstitials: false,
+            interstitialAsset: true,
+            targetBuffer: this.targetBuffer,
+            audioLanguage: this.source.audioLanguage,
+            subtitleLanguage: this.source.subtitleLanguage,
+          });
+          return this.interstitialPlayer;
+        },
+      ));
+    } catch (error) {
+      this.abort.signal.throwIfAborted();
+      cancelled = true;
+      this.emit('interstitialwarning', {
+        id: event.range.id,
+        message: String(error),
+      });
+    } finally {
+      this.interstitialSession = undefined;
+      this.interstitialPlayer = undefined;
+    }
+    this.abort.signal.throwIfAborted();
+    let resume =
+      this.pendingJump ??
+      interstitialResume(event, scheduled, played, cancelled);
+    this.pendingJump = undefined;
+    this.interstitialResumeBatch = this.interstitialQueue.length
+      ? { start: event.range.start, resume }
+      : undefined;
+    const main = primary.live
+      ? alignRendition(await this.readPlaylist(primary.url), primary)
+      : primary;
+    const audio = oldAudio
+      ? oldAudio.live
+        ? alignRendition(await this.readPlaylist(oldAudio.url), main)
+        : oldAudio
+      : undefined;
+    if (event.snap.includes('IN'))
+      resume = snapInterstitial(
+        resume,
+        [main, ...(audio ? [audio] : [])],
+        'IN',
+      );
+    const end = main.segments.at(-1)!.start + main.segments.at(-1)!.duration;
+    resume = Math.max(main.segments[0].start, Math.min(resume, end - 0.001));
+    this.initial = true;
+    this.resumeAfterReset = !post && this.interstitialAutoplay;
+    this.postRollEnded = post;
+    this.resumePosition = resume;
+    this.primaryPosition = resume;
+    this.dateRanges.reposition(resume);
+    this.video.pause();
+    this.video.removeAttribute('src');
+    this.video.load();
+    if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
+    this.video.playbackRate = rate;
+    this.offsets.clear();
+    this.captions608.reset();
+    this.captions708.reset();
+    this.captions608Seen.clear();
+    this.captions708Seen.clear();
+    this.gaps = [];
+    this.ended = false;
+    this.main = this.lane(
+      main,
+      'main',
+      this.qualityLevels[this.selectedQuality]?.codecs,
+    );
+    this.main.next = independentIndex(main, segmentAt(main, resume));
+    this.audio = audio
+      ? this.lane(
+          audio,
+          'audio',
+          this.qualityLevels[this.selectedQuality]?.codecs,
+        )
+      : undefined;
+    if (this.audio)
+      this.audio.next = independentIndex(
+        audio!,
+        segmentAt(audio!, main.segments[this.main.next].start),
+      );
+    if (this.source.drm)
+      this.eme = new EmeController(this.video, this.source.drm, (error) =>
+        this.fail(error),
+      );
+    this.media = new MediaSource();
+    this.mediaUrl = URL.createObjectURL(this.media);
+    const opened = this.event(this.media, 'sourceopen');
+    this.video.src = this.mediaUrl;
+    await opened;
+    this.media.duration = main.live ? Infinity : end;
+    await this.prime();
+    this.interstitialActive = false;
+    this.diagnostics.interstitial = { active: false };
+    this.interstitialEnd = {
+      id: event.range.id,
+      played,
+      resume,
+      cancelled,
+      skipped,
+    };
   }
   private assertLayout(prepared: PreparedSegment, lane: MediaLane) {
     if (
@@ -975,6 +1252,14 @@ export class HlsEngine extends EventTarget {
   private async run() {
     await this.prime();
     while (!this.abort.signal.aborted && !this.failed) {
+      if (this.interstitialQueue.length) {
+        if (this.interstitialEnd) {
+          this.emit('interstitialend', this.interstitialEnd);
+          this.interstitialEnd = undefined;
+        }
+        await this.playInterstitial(this.interstitialQueue.shift()!);
+        continue;
+      }
       if (this.steering && !this.initial) {
         await this.steering.refresh(this.abr.estimate);
         await this.applySteering();
@@ -1035,16 +1320,70 @@ export class HlsEngine extends EventTarget {
           this.media!.duration =
             p.segments.at(-1)!.start + p.segments.at(-1)!.duration;
       }
-      if (this.initial && this.video.buffered.length) {
-        this.video.currentTime = Math.max(
+      // Seek inside a fresh GOP only after its first picture is decoded. A
+      // boundary seek can establish that initial picture for non-zero windows.
+      const awaitInitialPicture =
+        this.initial &&
+        this.resumePosition !== undefined &&
+        this.video.buffered.length > 0 &&
+        this.resumePosition > this.video.buffered.start(0) + 0.1 &&
+        this.video.readyState < 2;
+      if (
+        awaitInitialPicture &&
+        this.video.buffered.start(0) > 0.1 &&
+        this.video.currentTime < this.video.buffered.start(0)
+      )
+        this.video.currentTime = this.video.buffered.start(0) + 0.001;
+      if (
+        this.initial &&
+        !awaitInitialPicture &&
+        this.video.buffered.length &&
+        (this.resumePosition === undefined ||
+          this.video.buffered.end(this.video.buffered.length - 1) >=
+            this.resumePosition)
+      ) {
+        const startPosition = Math.max(
           this.video.buffered.start(0) + 0.001,
           Math.min(
             this.resumeAfterReset !== undefined
-              ? 0
+              ? (this.resumePosition ?? 0)
               : (this.source.startTime ?? 0),
             this.video.buffered.end(0) - 0.001,
           ),
         );
+        // A new presentation already starts at zero. Avoid racing a frame-sized
+        // initial seek against the first play request.
+        if (
+          startPosition > 0.1 ||
+          this.video.currentTime > 0.1 ||
+          (this.source.startTime ?? 0) > 0 ||
+          (this.resumePosition ?? 0) > 0
+        ) {
+          const restored =
+            this.resumePosition !== undefined
+              ? this.event(this.video, 'seeked')
+              : undefined;
+          this.video.currentTime = startPosition;
+          if (restored) {
+            // Keep pumping media while the decoder seeks. Waiting here can
+            // starve browsers that need another appended fragment to finish.
+            this.resumeSeekDeadline = performance.now() + 250;
+            void restored
+              .then(() => {
+                if (this.abort.signal.aborted) return;
+                this.resumeSeekDeadline = 0;
+                if (this.interstitialEnd) {
+                  this.emit('interstitialend', this.interstitialEnd);
+                  this.interstitialEnd = undefined;
+                }
+              })
+              .catch((error) => this.fail(error));
+          }
+        }
+        if (this.interstitialEnd && !this.resumeSeekDeadline) {
+          this.emit('interstitialend', this.interstitialEnd);
+          this.interstitialEnd = undefined;
+        }
         this.mediaMode = this.main!.tracks.some((t) => t.kind === 'video')
           ? 'video'
           : 'audio';
@@ -1054,8 +1393,14 @@ export class HlsEngine extends EventTarget {
         const autoplay =
           this.resumeAfterReset ?? this.source.autoplay !== false;
         this.resumeAfterReset = undefined;
-        this.dateRanges.phase('PRE');
+        this.resumePosition = undefined;
+        if (!this.preRollDone) {
+          this.preRollDone = true;
+          this.dateRanges.phase('PRE');
+        }
+        if (this.interstitialQueue.length) continue;
         if (autoplay) void this.play();
+        else if (this.postRollEnded) this.state('ended');
       }
       if (!this.video.paused && this.video.readyState < 3) {
         const position =
@@ -1100,7 +1445,8 @@ export class HlsEngine extends EventTarget {
             (l) => !l.playlist.live && l.next >= l.playlist.segments.length,
           ) &&
           !this.ended &&
-          this.media?.readyState === 'open'
+          this.media?.readyState === 'open' &&
+          (!this.video.seeking || performance.now() >= this.resumeSeekDeadline)
         ) {
           this.media.endOfStream();
           this.ended = true;
@@ -1679,6 +2025,15 @@ export class HlsEngine extends EventTarget {
     });
   }
   async play() {
+    if (this.interstitialActive && !this.interstitialPlayer) return;
+    if (!this.interstitialActive && (this.postRollEnded || this.video.ended)) {
+      this.postRollEnded = false;
+      this.video.currentTime = this.playlist?.segments[0]?.start ?? 0;
+      this.dateRanges.restartPass();
+      this.dateRanges.phase('PRE');
+      this.interstitialAutoplay = true;
+      if (this.interstitialQueue.length) return;
+    }
     try {
       await this.video.play();
     } catch (error) {
@@ -1984,6 +2339,7 @@ export class HlsEngine extends EventTarget {
   async destroy() {
     if (this.abort.signal.aborted) return;
     this.abort.abort();
+    await this.interstitialPlayer?.destroy();
     for (const request of this.switches.splice(0))
       request.reject(new DOMException('Player closed', 'AbortError'));
     this.subtitleAbort?.abort();
@@ -2000,6 +2356,12 @@ export class HlsEngine extends EventTarget {
     }
     this.video.pause();
     this.video.playbackRate = 1;
+    if (this.media && this.media.readyState !== 'closed') {
+      for (const buffer of Array.from(this.media.sourceBuffers)) {
+        if (buffer.updating && this.media.readyState === 'open') buffer.abort();
+        this.media.removeSourceBuffer(buffer);
+      }
+    }
     this.video.removeAttribute('src');
     this.video.load();
     if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);

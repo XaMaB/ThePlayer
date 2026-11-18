@@ -23,6 +23,7 @@ export interface PlaybackEngine extends EventTarget {
   readonly autoQuality?: boolean;
   selectQuality?(index: number): Promise<void>;
   seekToLive?(): void;
+  skipInterstitial?(): boolean;
   init(): Promise<void>;
   play(): Promise<void>;
   destroy(): Promise<void>;
@@ -59,6 +60,11 @@ const events = [
   'daterangeenter',
   'daterangeexit',
   'daterangecue',
+  'interstitialstart',
+  'interstitialasset',
+  'interstitialprogress',
+  'interstitialend',
+  'interstitialwarning',
 ];
 
 /** No transport imports: applications can supply only the engines they need. */
@@ -136,6 +142,9 @@ export class PlayerCore extends EventTarget {
 
   get isLive() {
     return this.engine?.isLive ?? this.engine?.protocol === 'moq';
+  }
+  skipInterstitial() {
+    return this.engine?.skipInterstitial?.() ?? false;
   }
   seekToLive() {
     if (!this.isLive) return;

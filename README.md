@@ -91,7 +91,7 @@ The CC menu includes **Off**, language/service selection and DVB/TXT/CC badges. 
 | Session keys                         | Bounded identity-key preload, consumed by media/map decryption                                                           |
 | SAMPLE-AES TS                        | AVC/AAC/AC-3/E-AC-3 identity keys; rotation and explicit/sequence IV, byte-exact and browser tests                       |
 | DRM / EME                            | CENC/CBCS fMP4 through EME; ClearKey, identity keys and license callbacks tested                                         |
-| Content steering / interstitials     | Steering with matching inventories implemented; interstitial playback in progress                                        |
+| Content steering / interstitials     | Steering with matching inventories and interstitial playback implemented; see profile limits                             |
 | Timed metadata                       | ID3 from TS/packed AAC; emsg v0/v1 and CMAF ID3, with presentation-time event data                                       |
 | I-frame trick play / image playlists | Not implemented                                                                                                          |
 | Packed audio                         | ADTS AAC and MP3 with ID3 anchors, rollover and AES-128; AAC/AC-3/E-AC-3 SAMPLE-AES; single independent E-AC-3 substream |

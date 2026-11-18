@@ -1,5 +1,13 @@
 # Release versions
 
+## 0.26.0-alpha.1
+
+- Original interstitial asset/list resolution and isolated VOD playback with primary timeline restoration.
+- Resume offsets, playout limits, segment snapping, nested suppression and skip/jump handling.
+- In-video Skip UI, session events and diagnostics.
+- Restore the primary stream after an initial decoded picture, keep pumping while the resume seek completes, and order final-position seeking before EOS.
+- All 32 generated interstitial scenarios pass in Chromium, Firefox and WebKit; Amsterdam HTTPS playback/restoration passes. Twenty repeated WebKit TS/XHR metadata starts pass locally; the earlier CI startup anomaly is not yet confirmed resolved in CI.
+
 ## 0.25.0-alpha.1
 
 - EXT-X-DATERANGE merge/validation, END-ON-NEXT, SCTE-35 payload preservation and UTC date handling.

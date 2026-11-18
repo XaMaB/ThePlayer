@@ -136,3 +136,49 @@ test('Playback cue events distinguish PRE/POST, range entry/exit, backward seek 
     1,
   );
 });
+
+test('Cue scheduling can snap without changing metadata and engine resumption preserves replay state', () => {
+  const events = [];
+  const timeline = new DateRangeTimeline(
+    (type, detail) => events.push({ type, detail }),
+    () => 2,
+  );
+  timeline.update(
+    parsePlaylist(
+      body(
+        '#EXT-X-DATERANGE:ID="snap",START-DATE="2026-01-02T03:04:02.4Z",DURATION=2',
+      ),
+      base,
+    ),
+  );
+  timeline.tick(1.9);
+  assert.equal(events.filter((e) => e.type === 'daterangecue').length, 0);
+  timeline.tick(2.01);
+  assert.equal(events.find((e) => e.type === 'daterangecue').detail.start, 2.4);
+  timeline.reposition(1);
+  timeline.tick(1);
+  timeline.tick(3);
+  assert.equal(events.filter((e) => e.type === 'daterangecue').length, 1);
+  timeline.tick(0.5, true);
+  timeline.tick(3);
+  assert.equal(events.filter((e) => e.type === 'daterangecue').length, 2);
+});
+
+test('A deliberate replay restarts non-ONCE cues while retaining ONCE state', () => {
+  const cues = [];
+  const timeline = new DateRangeTimeline((name, range) => {
+    if (name === 'daterangecue') cues.push(range.id);
+  });
+  timeline.update(
+    parsePlaylist(
+      body(
+        '#EXT-X-DATERANGE:ID="pre",START-DATE="2026-01-02T03:04:00Z",CUE="PRE"\n#EXT-X-DATERANGE:ID="once",START-DATE="2026-01-02T03:04:00Z",CUE="PRE,ONCE"',
+      ),
+      base,
+    ),
+  );
+  timeline.phase('PRE');
+  timeline.restartPass();
+  timeline.phase('PRE');
+  assert.deepEqual(cues, ['pre', 'once', 'pre']);
+});

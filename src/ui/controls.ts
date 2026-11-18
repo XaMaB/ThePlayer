@@ -45,6 +45,8 @@ export function mountControls(
     'beforeend',
     `
   <button id="live-button" hidden class="live-indicator" title="Return to live" aria-label="Return to live"><span></span>LIVE</button>
+  <button id="interstitial-skip" class="interstitial-skip" hidden aria-label="Skip inserted content">Skip</button>
+  <div id="interstitial-label" class="interstitial-label" hidden role="status">Inserted content</div>
   <div id="audio-only-label" class="audio-only-label" hidden>Audio only</div>
   <div class="center-controls" role="group" aria-label="Quick playback controls">
    <button id="skip-back" class="icon-button center-button" title="Back 10 seconds (←)" aria-label="Back 10 seconds">${svg('back')}</button>
@@ -149,6 +151,7 @@ export function mountControls(
     volume.value = String(video.muted ? 0 : video.volume);
     showControls();
   }
+  el('interstitial-skip').onclick = () => getPlayer()?.skipInterstitial();
   play.onclick = () => void togglePlay();
   el('center-play').onclick = () => void togglePlay();
   listen(video, 'click', () => {
@@ -644,6 +647,16 @@ export function mountControls(
     const p = getPlayer(),
       q = video.getVideoPlaybackQuality(),
       d = p?.diagnostics;
+    const inserted = !!d?.interstitial?.active;
+    (cc as HTMLButtonElement).disabled = inserted || !p?.subtitleTracks?.length;
+    el('interstitial-label').hidden = !inserted;
+    el('interstitial-skip').hidden = !inserted || !d.interstitial.skippable;
+    if (inserted) {
+      (quality as HTMLButtonElement).disabled = true;
+      (audio as HTMLButtonElement).disabled = true;
+      (cc as HTMLButtonElement).disabled = true;
+      closeMenus();
+    }
     syncQuality();
     const bounds = seekBounds();
     (el('skip-back') as HTMLButtonElement).disabled =
@@ -656,7 +669,7 @@ export function mountControls(
     cc.title = p?.subtitleTracks?.length
       ? 'Subtitles (C)'
       : 'No subtitles available';
-    el('live-button').hidden = !p?.isLive;
+    el('live-button').hidden = !p?.isLive || inserted;
     seek.hidden = !p || p.isLive;
     el('playback-time').hidden = seek.hidden;
     el('control-spacer').hidden = !seek.hidden;

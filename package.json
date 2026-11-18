@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "0.25.0-alpha.1",
+  "version": "0.26.0-alpha.1",
   "private": true,
   "description": "Modular MoQ player with an original experimental HLS engine",
   "type": "module",
@@ -21,7 +21,7 @@
     "export": "node scripts/export.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
-    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-open-gop.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery && npm run test:hls:ll && npm run test:hls:text && npm run test:hls:sei && npm run test:hls:708 && npm run test:hls:protection && npm run test:hls:sample-aes && npm run test:hls:eme && npm run test:hls:packed-audio && npm run test:hls:metadata && npm run test:hls:mp3 && npm run test:hls:dolby && npm run test:hls:steering && npm run test:hls:dateranges",
+    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-open-gop.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery && npm run test:hls:ll && npm run test:hls:text && npm run test:hls:sei && npm run test:hls:708 && npm run test:hls:protection && npm run test:hls:sample-aes && npm run test:hls:eme && npm run test:hls:packed-audio && npm run test:hls:metadata && npm run test:hls:mp3 && npm run test:hls:dolby && npm run test:hls:steering && npm run test:hls:dateranges && npm run test:hls:interstitials",
     "test:hls:public": "node tests/hls-public.mjs",
     "test:hls:mux": "node tests/hls-mux-audit.mjs",
     "test:hls:recovery": "node tests/hls-recovery-browser.mjs",
@@ -40,7 +40,8 @@
     "test:hls:mp3": "node tests/hls-mp3.mjs && node tests/hls-mp3-browser.mjs",
     "test:hls:dolby": "node tests/hls-ac3.mjs && node tests/hls-dolby-browser.mjs",
     "test:hls:steering": "node tests/hls-steering-browser.mjs",
-    "test:hls:dateranges": "node tests/hls-daterange-browser.mjs"
+    "test:hls:dateranges": "node tests/hls-daterange-browser.mjs",
+    "test:hls:interstitials": "node tests/hls-interstitial-browser.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

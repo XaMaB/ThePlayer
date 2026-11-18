@@ -168,7 +168,14 @@ export class DateRangeTimeline {
   private fired = new Set<string>();
   private once = new Set<string>();
   private last?: number;
-  constructor(private emit: (name: string, detail: unknown) => void) {}
+  constructor(
+    private emit: (name: string, detail: unknown) => void,
+    private cueTime: (range: TimedDateRange) => number = (range) => range.start,
+  ) {}
+  /** Engine-directed resumption must not reset replay state like a user seek. */
+  reposition(time: number) {
+    this.last = time;
+  }
   update(p: Playlist) {
     this.ranges = timedDateRanges(p);
     const current = new Set(this.ranges.map((r) => r.id));
@@ -189,6 +196,10 @@ export class DateRangeTimeline {
     }
     while (this.once.size > 4096)
       this.once.delete(this.once.values().next().value!);
+  }
+  restartPass() {
+    this.fired.clear();
+    this.last = undefined;
   }
   phase(phase: 'PRE' | 'POST') {
     for (const r of this.ranges)
@@ -212,11 +223,15 @@ export class DateRangeTimeline {
         this.emit('daterangeenter', r);
       } else if (!inside && this.active.delete(r.id))
         this.emit('daterangeexit', r);
-      const crossed = (this.last ?? -Infinity) < r.start && time >= r.start;
+      const triggerTime = this.cueTime(r);
+      const crossed =
+        (this.last ?? -Infinity) < triggerTime && time >= triggerTime;
+      const cueInside =
+        time >= triggerTime && (r.end === undefined || time < r.end);
       if (
         !r.cue.includes('PRE') &&
         !r.cue.includes('POST') &&
-        (inside || (crossed && !seeking))
+        (cueInside || (crossed && !seeking))
       )
         this.trigger(r, seeking ? 'seek' : 'playback');
     }

@@ -54,6 +54,101 @@ export function faultServer({
         const count = (requests.get(url.pathname) ?? 0) + 1;
         requests.set(url.pathname, count);
         const segment = resource === 'segment03.ts';
+        if (scenario.startsWith('interstitial-')) {
+          const origin =
+            (req.socket.encrypted ? 'https' : 'http') +
+            '://' +
+            req.headers.host;
+          const prefix = `${origin}/scenario/${match[1]}/${scenario}/`;
+          if (scenario === 'interstitial-live' && resource === 'index.m3u8') {
+            const key = url.pathname;
+            if (!epochs.has(key)) epochs.set(key, Date.now());
+            const first = Math.min(
+              4,
+              Math.floor((Date.now() - epochs.get(key)) / 2000),
+            );
+            const last = Math.min(8, first + 6);
+            let text = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${first}\n#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 0, 2, 3, 4, first * 2)).toISOString()}\n`;
+            text += `#EXT-X-DATERANGE:ID="ad",CLASS="com.apple.hls.interstitial",START-DATE="2026-01-02T03:04:08Z",DURATION=4,CUE="ONCE",X-ASSET-URI="${prefix}ad.m3u8"\n`;
+            for (let n = first; n <= last; n++)
+              text += `#EXTINF:2,\nsegment${String(n).padStart(2, '0')}.ts\n`;
+            res.end(text);
+            return;
+          }
+          if (resource === 'index.m3u8') {
+            const original = await readFile(
+              path.join(fixtures, 'ts/index.m3u8'),
+              'utf8',
+            );
+            const pre = scenario === 'interstitial-pre';
+            const list = ['interstitial-list', 'interstitial-empty'].includes(
+              scenario,
+            );
+            const asset =
+              scenario === 'interstitial-error' ? 'missing.m3u8' : 'ad.m3u8';
+            const kind = scenario.slice('interstitial-'.length);
+            const cue = pre
+              ? 'PRE,ONCE'
+              : kind === 'post'
+                ? 'POST'
+                : kind === 'negative'
+                  ? ''
+                  : 'ONCE';
+            const offset =
+              kind === 'default'
+                ? ''
+                : `,X-RESUME-OFFSET=${kind === 'negative' ? -1 : kind === 'multiple' ? 1 : 0}`;
+            const extras =
+              {
+                limit: ',X-PLAYOUT-LIMIT=1',
+                skip: ',X-RESTRICT="SKIP",X-SKIP-CONTROL-OFFSET=1',
+                jump: ',X-RESTRICT="JUMP"',
+                snap: ',X-SNAP="OUT,IN"',
+              }[kind] ?? '';
+            const tag = `#EXT-X-DATERANGE:ID="ad",CLASS="com.apple.hls.interstitial",START-DATE="2026-01-02T03:04:0${pre ? 0 : kind === 'snap' ? '2.4' : 2}Z",DURATION=4,${list ? 'X-ASSET-LIST="list.json"' : `X-ASSET-URI="${prefix}${asset}"`}${offset}${cue ? `,CUE="${cue}"` : ''}${extras}\n`;
+            const metadata =
+              '#EXT-X-PROGRAM-DATE-TIME:2026-01-02T03:04:00Z\n' +
+              tag +
+              (kind === 'multiple' ? tag.replace('ID="ad"', 'ID="ad2"') : '');
+            res.end(original.replace('#EXTM3U\n', '#EXTM3U\n' + metadata));
+            return;
+          }
+          if (resource === 'list.json') {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                ASSETS:
+                  scenario === 'interstitial-empty'
+                    ? []
+                    : [
+                        { URI: prefix + 'missing.m3u8', DURATION: 4 },
+                        { URI: prefix + 'ad.m3u8', DURATION: 4 },
+                      ],
+              }),
+            );
+            return;
+          }
+          if (resource === 'missing.m3u8') {
+            res.writeHead(404);
+            res.end();
+            return;
+          }
+          if (resource === 'ad.m3u8') {
+            let content =
+              '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:2,\nsegment06.ts\n#EXTINF:2,\nsegment07.ts\n#EXT-X-ENDLIST\n';
+            if (scenario === 'interstitial-nested')
+              content = content.replace(
+                '#EXTM3U\n',
+                `#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-01-02T03:04:00Z\n#EXT-X-DATERANGE:ID="nested",CLASS="com.apple.hls.interstitial",START-DATE="2026-01-02T03:04:00Z",CUE="PRE",X-ASSET-URI="${prefix}ad.m3u8"\n`,
+              );
+            if (scenario === 'interstitial-live-asset')
+              content = content
+                .replace('#EXT-X-PLAYLIST-TYPE:VOD\n', '')
+                .replace('#EXT-X-ENDLIST\n', '');
+            res.end(content);
+            return;
+          }
+        }
         if (scenario === 'dateranges' && resource === 'index.m3u8') {
           const original = await readFile(
             path.join(fixtures, 'ts/index.m3u8'),
@@ -631,11 +726,13 @@ export function faultServer({
       const data = await readFile(file);
       res.setHeader(
         'Content-Type',
-        file.endsWith('.js')
-          ? 'text/javascript'
-          : file.endsWith('.m3u8')
-            ? 'application/vnd.apple.mpegurl'
-            : 'application/octet-stream',
+        file.endsWith('.css')
+          ? 'text/css'
+          : file.endsWith('.js')
+            ? 'text/javascript'
+            : file.endsWith('.m3u8')
+              ? 'application/vnd.apple.mpegurl'
+              : 'application/octet-stream',
       );
       res.end(data);
     } catch {

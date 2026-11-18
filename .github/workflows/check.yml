@@ -4,6 +4,7 @@ permissions:
   contents: read
 jobs:
   check:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,6 +16,7 @@ jobs:
       - run: npm run bootstrap
       - run: npm run check
   hls-browser:
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +33,7 @@ jobs:
       - run: npm run test:hls
       - run: npm run test:hls:soak
   hls-metadata-browsers:
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -52,9 +55,12 @@ jobs:
       - run: npm run fixtures:hls
       - run: npm run test:hls:packed-audio
       - run: npm run test:hls:metadata
+        timeout-minutes: 8
       - run: npm run test:hls:mp3
       - run: npm run test:hls:dolby
       - run: node tests/hls-parts-browser.mjs
         env:
           HLS_PART_SCENARIOS: ll-parts-open,ll-parts-map,ll-parts-encrypted
       - run: npm run test:hls:dateranges
+      - run: npm run test:hls:interstitials
+        timeout-minutes: 10
