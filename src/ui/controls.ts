@@ -1,7 +1,13 @@
+import {
+  PictureInPictureController,
+  type PictureInPictureOptions,
+} from './picture-in-picture';
 import { VERSION } from '../version';
 
 let keyboardOwner: HTMLElement | undefined;
 export interface ControlsOptions {
+  /** PiP defaults to adaptive manual activation; false removes the control. */
+  pictureInPicture?: false | PictureInPictureOptions;
   /** Idle delay in milliseconds; defaults to 3000. Zero keeps controls visible. */
   autoHideDelayMs?: number;
   /** Application localization; keys are HLS X-SKIP-CONTROL-LABEL-ID values. */
@@ -32,11 +38,28 @@ export function mountControls(
   const version = `<small class="player-version">v${VERSION}</small>`;
   const originalChildren = new Set(screen.children);
   const abort = new AbortController();
+  let documentAbort = new AbortController();
+  const documentBindings: [string, (event: any) => void][] = [];
   const listen = (
     target: EventTarget,
     type: string,
     handler: (event: any) => void,
-  ) => target.addEventListener(type, handler, { signal: abort.signal });
+  ) => {
+    if (target === document) {
+      documentBindings.push([type, handler]);
+      screen.ownerDocument.addEventListener(type, handler, {
+        signal: documentAbort.signal,
+      });
+    } else target.addEventListener(type, handler, { signal: abort.signal });
+  };
+  listen(screen, 'theplayerdocumentchange', () => {
+    documentAbort.abort();
+    documentAbort = new AbortController();
+    for (const [type, handler] of documentBindings)
+      screen.ownerDocument.addEventListener(type, handler, {
+        signal: documentAbort.signal,
+      });
+  });
   const icons = {
     quality:
       '<rect class="stroke" x="1" y="5" width="22" height="14" rx="3"/><text id="quality-badge" x="12" y="15" text-anchor="middle" class="quality-badge">—</text>',
@@ -51,6 +74,7 @@ export function mountControls(
       '<path d="m11 5-6 4H2v6h3l6 4z"/><path class="stroke" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
     muted:
       '<path d="m11 5-6 4H2v6h3l6 4z"/><path class="stroke" d="m16 9 6 6m0-6-6 6"/>',
+    pip: '<rect class="stroke" x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="8" height="7" rx="1"/>',
     fullscreen:
       '<path class="stroke" d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/>',
     cc: '<rect class="stroke" x="2" y="5" width="20" height="14" rx="3"/><path class="stroke" d="M10 9H7v6h3m8-6h-3v6h3"/>',
@@ -81,6 +105,7 @@ export function mountControls(
    <button id="audio-toggle" class="icon-button" title="Audio language" aria-label="Audio language" aria-expanded="false" aria-controls="audio-menu" disabled>${svg('audio')}</button>
    <button id="cc-toggle" class="icon-button" title="Subtitles (C)" aria-label="Subtitles" aria-expanded="false" aria-controls="cc-menu" disabled>${svg('cc')}</button>
    <button id="info-toggle" class="icon-button" title="Player options" aria-label="Player options" aria-haspopup="menu" aria-expanded="false">${svg('more')}</button>
+   <button id="pip-toggle" class="icon-button" title="Picture-in-Picture" aria-label="Picture-in-Picture" aria-pressed="false" hidden>${svg('pip')}</button>
    <button id="fullscreen" class="icon-button" title="Fullscreen (F)" aria-label="Fullscreen">${svg('fullscreen')}</button>
   </div>
   <div id="cc-menu" class="video-popup track-menu" hidden><strong>Subtitles</strong><select id="subtitle-select" hidden aria-hidden="true"><option value="">Off</option></select><div class="track-options" role="menu" aria-label="Subtitle tracks"></div></div>
@@ -109,6 +134,32 @@ export function mountControls(
     audioMenu = el('audio-menu');
   const quality = el('quality-toggle'),
     qualityMenu = el('quality-menu');
+  const pipButton = el('pip-toggle') as HTMLButtonElement;
+  const updatePip = () => {
+    if (!pip) return;
+    pipButton.hidden = !pip.supported;
+    pipButton.disabled =
+      !pip.active && (!video.videoWidth || video.readyState < 1);
+    pipButton.setAttribute('aria-pressed', String(pip.active));
+    pipButton.classList.toggle('selected', pip.active);
+    pipButton.title = pip.active
+      ? 'Exit Picture-in-Picture'
+      : 'Picture-in-Picture';
+    pipButton.setAttribute('aria-label', pipButton.title);
+  };
+  const pip =
+    config.pictureInPicture === false
+      ? undefined
+      : new PictureInPictureController(
+          screen,
+          video,
+          config.pictureInPicture,
+          updatePip,
+        );
+  pipButton.onclick = () => {
+    void pip?.toggle().catch((error) => report(error.message));
+  };
+  updatePip();
   let hideTimer: ReturnType<typeof setTimeout>;
   const touchPointers = new Set<number>();
   let lastTouchAt = -Infinity;
@@ -511,7 +562,7 @@ export function mountControls(
         panel.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
       );
       const index = buttons.indexOf(
-        document.activeElement as HTMLButtonElement,
+        screen.ownerDocument.activeElement as HTMLButtonElement,
       );
       const next =
         e.key === 'Home'
@@ -565,15 +616,15 @@ export function mountControls(
   el('stats-close').onclick = () => showStats(false);
   el('fullscreen').onclick = async () => {
     try {
-      if (document.fullscreenElement === screen)
-        await document.exitFullscreen();
+      if (screen.ownerDocument.fullscreenElement === screen)
+        await screen.ownerDocument.exitFullscreen();
       else await screen.requestFullscreen();
     } catch (e: any) {
       report(e.message);
     }
   };
   listen(document, 'fullscreenchange', () => {
-    const full = document.fullscreenElement === screen;
+    const full = screen.ownerDocument.fullscreenElement === screen;
     el('fullscreen').setAttribute(
       'aria-label',
       full ? 'Exit fullscreen' : 'Fullscreen',
@@ -627,7 +678,8 @@ export function mountControls(
     )
       return;
     const target = e.target as HTMLElement;
-    if (target !== document.body && !screen.contains(target)) return;
+    if (target !== screen.ownerDocument.body && !screen.contains(target))
+      return;
     if (
       target.closest(
         'input,select,textarea,[contenteditable="true"],[role="textbox"]',
@@ -987,7 +1039,10 @@ export function mountControls(
   bindPlayer();
   sync();
   return {
+    pictureInPicture: pip,
     destroy() {
+      pip?.destroy();
+      documentAbort.abort();
       abort.abort();
       playerEvents?.abort();
       observer.disconnect();

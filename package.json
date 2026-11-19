@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "description": "Modular MoQ, HLS and MPEG-DASH browser player",
   "type": "module",
@@ -79,7 +79,9 @@
     "test:moq:websocket": "node tests/moq-websocket-browser.mjs",
     "test:controls": "node tests/touch-controls-browser.mjs",
     "test:abr:policy": "node tests/abr-policy-browser.mjs",
-    "test:demo:drm": "node tests/demo-drm-browser.mjs"
+    "test:demo:drm": "node tests/demo-drm-browser.mjs",
+    "test:pip": "node tests/pip-browser.mjs",
+    "test:pip:fallback": "node tests/pip-fallback-browser.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

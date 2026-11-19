@@ -60,9 +60,23 @@ export class SubtitleRenderer {
       },
       { signal: abort.signal },
     );
+    let frameWindow = video.ownerDocument.defaultView!;
+    const schedule = () => {
+      frameWindow = video.ownerDocument.defaultView!;
+      animation = frameWindow.requestAnimationFrame(renderSubtitles);
+    };
+    video.addEventListener(
+      'theplayerdocumentchange',
+      () => {
+        frameWindow.cancelAnimationFrame(animation);
+        drawn = null;
+        schedule();
+      },
+      { signal: abort.signal },
+    );
     function renderSubtitles() {
-      if (document.hidden || !isVisible() || video.readyState < 2) {
-        animation = requestAnimationFrame(renderSubtitles);
+      if (video.ownerDocument.hidden || !isVisible() || video.readyState < 2) {
+        schedule();
         return;
       }
       const cue = activeCue(cues, video.currentTime);
@@ -116,13 +130,13 @@ export class SubtitleRenderer {
         } else subtitleCounters.present(null, false);
         updateSubtitleCounters();
       }
-      animation = requestAnimationFrame(renderSubtitles);
+      schedule();
     }
 
-    animation = requestAnimationFrame(renderSubtitles);
+    schedule();
     this.detach = () => {
       abort.abort();
-      cancelAnimationFrame(animation);
+      frameWindow.cancelAnimationFrame(animation);
       clear();
     };
   }

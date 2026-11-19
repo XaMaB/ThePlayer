@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.5.0
+
+- Add an adaptive Picture-in-Picture module and shared control button for MoQ, HLS and DASH: Document PiP, standard video PiP and WebKit presentation-mode fallback.
+- Add configurable browser-driven Auto PiP with page-level Media Session ownership, manual toggling and safe teardown/DOM restoration.
+- Keep controls, canvas captions and TTML/CEA-708 frame scheduling attached to the active PiP document. Native video PiP retains browser-owned rendering limitations.
+- Add real Chromium PiP playback checks and deterministic fallback/lifecycle checks in Chromium and WebKit. Document API options, integration requirements and browser-controlled automatic-entry limits.
+
 ## 1.4.1
 
 - Refresh the demo with graphite surfaces and blue-violet accents, including player controls and the demo logo.

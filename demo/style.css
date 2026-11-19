@@ -1367,3 +1367,37 @@ button:not(:disabled):hover {
   visibility: hidden;
   pointer-events: none;
 }
+
+.pip-placeholder {
+  display: grid;
+  place-items: center;
+  background: #0b0d17;
+  color: #b6bfd5;
+  border: 1px dashed #3a425c;
+  border-radius: 8px;
+}
+.pip-preference {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.pip-preference input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .video-controls {
+    gap: 4px;
+    padding-inline: 10px;
+  }
+  .video-controls .icon-button {
+    width: 32px;
+    height: 34px;
+    padding: 5px;
+  }
+  .video-controls #quality-toggle {
+    width: auto;
+  }
+}

@@ -6,6 +6,7 @@ export class TtmlRenderer {
   private documents: TtmlDocument[] = [];
   private observer: ResizeObserver;
   private frame = 0;
+  private frameWindow = window;
   private closed = false;
   private previous = '';
   private parent: HTMLElement;
@@ -266,15 +267,28 @@ export class TtmlRenderer {
   private tick = () => {
     if (this.closed) return;
     this.render();
+    this.frameWindow = this.video.ownerDocument.defaultView!;
     this.frame = this.video.requestVideoFrameCallback
       ? this.video.requestVideoFrameCallback(this.tick)
-      : requestAnimationFrame(this.tick);
+      : this.frameWindow.requestAnimationFrame(this.tick);
+  };
+  private documentChanged = () => {
+    if (this.video.cancelVideoFrameCallback)
+      this.video.cancelVideoFrameCallback(this.frame);
+    else this.frameWindow.cancelAnimationFrame(this.frame);
+    this.previous = '';
+    this.measure();
+    this.tick();
   };
   destroy() {
     this.closed = true;
     if (this.video.cancelVideoFrameCallback)
       this.video.cancelVideoFrameCallback(this.frame);
-    else cancelAnimationFrame(this.frame);
+    else this.frameWindow.cancelAnimationFrame(this.frame);
+    this.video.removeEventListener(
+      'theplayerdocumentchange',
+      this.documentChanged,
+    );
     this.video.removeEventListener('seeked', this.render);
     this.video.removeEventListener('loadedmetadata', this.measure);
     this.observer.disconnect();

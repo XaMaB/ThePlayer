@@ -7,6 +7,7 @@ export class Cea708Renderer {
   private previousPosition: string;
   private observer: ResizeObserver;
   private frame = 0;
+  private frameWindow = window;
   private closed = false;
   private signature = '';
   private width = 0;
@@ -32,6 +33,7 @@ export class Cea708Renderer {
     this.parent.append(this.element);
     this.observer = new ResizeObserver(this.measure);
     this.observer.observe(video);
+    video.addEventListener('theplayerdocumentchange', this.documentChanged);
     video.addEventListener('loadedmetadata', this.measure);
     video.addEventListener('seeked', this.render);
     this.measure();
@@ -202,11 +204,21 @@ export class Cea708Renderer {
   private tick = () => {
     if (this.closed) return;
     this.render();
-    this.frame = requestAnimationFrame(this.tick);
+    this.frameWindow = this.video.ownerDocument.defaultView!;
+    this.frame = this.frameWindow.requestAnimationFrame(this.tick);
+  };
+  private documentChanged = () => {
+    this.frameWindow.cancelAnimationFrame(this.frame);
+    this.measure();
+    this.tick();
   };
   destroy() {
     this.closed = true;
-    cancelAnimationFrame(this.frame);
+    this.frameWindow.cancelAnimationFrame(this.frame);
+    this.video.removeEventListener(
+      'theplayerdocumentchange',
+      this.documentChanged,
+    );
     this.observer.disconnect();
     this.video.removeEventListener('loadedmetadata', this.measure);
     this.video.removeEventListener('seeked', this.render);

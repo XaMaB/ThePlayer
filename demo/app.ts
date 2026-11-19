@@ -5,14 +5,18 @@ import { SubtitleRenderer } from '../src/subtitles/renderer';
 import { mountControls } from '../src/ui/controls';
 import { ThePlayer } from '../src/player';
 
-const $ = (id: string) => document.getElementById(id)!;
+const playerScreen = document.getElementById('screen')!;
+const $ = (id: string) =>
+  (id === 'screen' ? playerScreen : document.getElementById(id)) ??
+  playerScreen.querySelector<HTMLElement>('#' + id)!;
 const video = $('video') as HTMLVideoElement;
 const canvas = $('subtitles') as HTMLCanvasElement;
-mountControls(
+const controls = mountControls(
   $('screen'),
   video,
   () => player,
   (message) => error(message),
+  { pictureInPicture: { automatic: true } },
 );
 let state: any;
 let channel: any;
@@ -456,3 +460,10 @@ function updateDrmFields() {
     field.disabled = !enabled;
 }
 $('drm-system').addEventListener('change', updateDrmFields);
+
+const autoPip = $('auto-pip') as HTMLInputElement;
+autoPip.checked = controls.pictureInPicture?.automaticEnabled ?? false;
+autoPip.disabled = !controls.pictureInPicture?.automaticEnabled;
+autoPip.addEventListener('change', () =>
+  controls.pictureInPicture?.setAutomatic(autoPip.checked),
+);

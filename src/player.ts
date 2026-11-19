@@ -57,3 +57,6 @@ export type { Thumbnail } from './core/thumbnail';
 export type { DashSource } from './engines/dash/engine';
 
 export type { AbrOptions } from './engines/hls/abr';
+
+export { PictureInPictureController } from './ui/picture-in-picture';
+export type { PictureInPictureOptions } from './ui/picture-in-picture';

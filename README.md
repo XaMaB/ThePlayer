@@ -24,6 +24,7 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 - **HLS live, VOD and EVENT playback:** TS/fMP4 segments, Auto ABR, manual quality selection and audio-only streams.
 - **DASH live and VOD:** fMP4, quality/audio selection, text and broadcast captions, MPD Patch, ClearKey/Widevine and low-latency CMAF; see the verified playback scope below.
 - **Multilingual audio and captions:** audio/CC menus, source-positioned broadcast captions and subtitle Off.
+- **Adaptive Picture-in-Picture:** Document PiP with controls/captions where available, native video PiP fallback and configurable browser-driven Auto PiP. [Configuration and browser limits](docs/picture-in-picture.md).
 - **Shared controls:** current Auto quality, resolution badges, play/pause, ±10 s seeking, keyboard shortcuts, fullscreen and MediaInfo. LIVE appears only for live presentations.
 - **Independent integration:** explicit source configuration, separate engine modules and no Origin/Relay dashboard dependency.
 
