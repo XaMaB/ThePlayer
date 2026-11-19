@@ -50,7 +50,7 @@ export function layout708Window(win, width, height, cellWidth) {
   };
 }
 
-export function draw708(context, cue, width, height) {
+export function draw708(context, cue, width, height, appearance = {}) {
   let visible = false;
   // Lower numerical priority is on top; keep windows separate.
   for (const win of [...(cue.windows ?? [])].sort(
@@ -59,7 +59,7 @@ export function draw708(context, cue, width, height) {
   )) {
     const size = layout708Window(win, width, height, 1).fontSize;
     context.save();
-    context.font = `${size}px monospace`;
+    context.font = `${size}px ${appearance.font && appearance.font !== 'source' ? appearance.font : 'monospace'}`;
     context.textBaseline = 'top';
     const cellWidth = context.measureText('M').width;
     const box = layout708Window(win, width, height, cellWidth);
@@ -84,9 +84,19 @@ export function draw708(context, cue, width, height) {
           : box.align === 'right'
             ? x - textWidth
             : x - textWidth / 2;
-      context.fillStyle = 'rgba(0,0,0,.75)';
+      context.fillStyle =
+        { transparent: 'transparent', dark: 'rgba(0,0,0,.75)', solid: '#000' }[
+          appearance.background
+        ] ?? 'rgba(0,0,0,.75)';
       context.fillRect(left, y, textWidth, box.lineHeight);
-      context.fillStyle = '#fff';
+      context.fillStyle =
+        appearance.color && appearance.color !== 'source'
+          ? appearance.color
+          : '#fff';
+      if (appearance.outline) {
+        context.shadowColor = '#000';
+        context.shadowBlur = 3;
+      }
       if (box.justify === 3 && /\S +\S/.test(line.trim())) {
         const words = line.trim().split(/ +/),
           total = words.reduce((n, w) => n + context.measureText(w).width, 0);

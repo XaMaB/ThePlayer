@@ -60,3 +60,21 @@ export type { AbrOptions } from './engines/hls/abr';
 
 export { PictureInPictureController } from './ui/picture-in-picture';
 export type { PictureInPictureOptions } from './ui/picture-in-picture';
+
+export { PlaybackQueue, chaptersFor } from './ui/playback-queue';
+export type { QueueItem, Chapter } from './ui/playback-queue';
+export {
+  CastSender,
+  NativeRemotePlayback,
+  loadCastSdk,
+} from './ui/remote-playback';
+export type { CastMedia, CastSenderOptions } from './ui/remote-playback';
+export { captureFrame, downloadFrame, copyFrame } from './ui/frame-capture';
+export { CaptionAppearanceController } from './ui/caption-appearance';
+export type { CaptionAppearance } from './ui/caption-appearance';
+export type { ControlExtrasOptions } from './ui/control-extras';
+export type {
+  ControlLayout,
+  ToolbarControl,
+  CenterControl,
+} from './ui/control-layout';

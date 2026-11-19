@@ -216,7 +216,8 @@ export class PictureInPictureController {
           for (const node of this.origin.querySelectorAll(
             'link[rel="stylesheet"], style',
           ))
-            doc.head.append(node.cloneNode(true));
+            if (!this.screen.contains(node))
+              doc.head.append(node.cloneNode(true));
           for (const sheet of this.origin.adoptedStyleSheets) {
             const style = doc.createElement('style');
             style.textContent = Array.from(

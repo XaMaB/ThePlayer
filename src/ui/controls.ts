@@ -1,3 +1,5 @@
+import { ControlExtras, type ControlExtrasOptions } from './control-extras';
+import { applyControlLayout, type ControlLayout } from './control-layout';
 import {
   PictureInPictureController,
   type PictureInPictureOptions,
@@ -6,6 +8,8 @@ import { VERSION } from '../version';
 
 let keyboardOwner: HTMLElement | undefined;
 export interface ControlsOptions {
+  layout?: ControlLayout;
+  extras?: false | ControlExtrasOptions;
   /** PiP defaults to adaptive manual activation; false removes the control. */
   pictureInPicture?: false | PictureInPictureOptions;
   /** Idle delay in milliseconds; defaults to 3000. Zero keeps controls visible. */
@@ -111,7 +115,7 @@ export function mountControls(
   <div id="cc-menu" class="video-popup track-menu" hidden><strong>Subtitles</strong><select id="subtitle-select" hidden aria-hidden="true"><option value="">Off</option></select><div class="track-options" role="menu" aria-label="Subtitle tracks"></div></div>
   <div id="quality-menu" class="video-popup track-menu" hidden><strong>Quality</strong><div class="track-options" role="menu" aria-label="Quality levels"></div></div>
   <div id="audio-menu" class="video-popup track-menu" hidden><strong>Audio language</strong><div class="track-options" role="menu" aria-label="Audio tracks"></div></div>
-  <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><div class="context-brand">${brand}${version}</div><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
+  <div id="player-menu" class="video-popup context-menu" role="menu" aria-label="Player options" hidden><div class="context-brand">${brand}${version}<button id="options-close" type="button" aria-label="Close player options" title="Close">×</button></div><button id="stats-toggle" role="menuitemcheckbox" aria-checked="false">mediainfo</button></div>
   <section id="stats-overlay" class="stats-overlay" aria-label="mediainfo" hidden>
    <div class="stats-title">${brand}${version}<span>mediainfo</span><button id="stats-close" aria-label="Close stats" title="Close stats">×</button></div>
    <dl><dt>Quality</dt><dd id="stats-quality">—</dd><dt>Resolution</dt><dd id="stats-resolution">—</dd><dt>Frames / dropped</dt><dd><span id="frames">0</span> / <span id="dropped">0</span></dd>
@@ -121,6 +125,11 @@ export function mountControls(
    <dt>Playback</dt><dd id="stats-state">idle</dd><dt>Codecs</dt><dd id="stats-codecs">—</dd><dt>Source</dt><dd id="stats-namespace">—</dd></dl><pre id="details" hidden></pre>
   </section>`,
   );
+  applyControlLayout(screen, config.layout ?? {});
+  const extras =
+    config.extras === false
+      ? undefined
+      : new ControlExtras(screen, video, getPlayer, report, config.extras);
   const el = (id: string) => screen.querySelector<HTMLElement>('#' + id)!;
   const play = el('play-toggle'),
     mute = el('mute-toggle'),
@@ -614,6 +623,10 @@ export function mountControls(
     screen.focus();
   };
   el('stats-close').onclick = () => showStats(false);
+  el('options-close').onclick = () => {
+    closeMenus();
+    options.focus();
+  };
   el('fullscreen').onclick = async () => {
     try {
       if (screen.ownerDocument.fullscreenElement === screen)
@@ -887,6 +900,7 @@ export function mountControls(
   }
   let lastInserted = false;
   const statsTimer = setInterval(() => {
+    extras?.refresh();
     (quality as HTMLButtonElement).disabled =
       (getPlayer()?.qualityLevels?.length ?? 0) < 2 &&
       (getPlayer()?.availableMediaModes?.length ?? 0) < 2 &&
@@ -1040,8 +1054,12 @@ export function mountControls(
   sync();
   return {
     pictureInPicture: pip,
+    extras,
+    configureLayout: (layout: ControlLayout) =>
+      applyControlLayout(screen, layout),
     destroy() {
       pip?.destroy();
+      extras?.destroy();
       documentAbort.abort();
       abort.abort();
       playerEvents?.abort();

@@ -1,3 +1,4 @@
+import { captionAppearance } from '../ui/caption-appearance';
 import { draw708 } from './cea708/render.mjs';
 import { activeCue, trimCues, SubtitleCounters } from './cues.mjs';
 
@@ -10,7 +11,9 @@ export class SubtitleRenderer {
     readonly canvas: HTMLCanvasElement,
     readonly onChange: () => void = () => {},
     readonly isVisible: () => boolean = () => true,
-  ) {}
+  ) {
+    canvas.setAttribute('data-caption-layer', '');
+  }
   attach(player: EventTarget) {
     this.detach();
     const { video, canvas, onChange: updateSubtitleCounters, isVisible } = this;
@@ -74,6 +77,13 @@ export class SubtitleRenderer {
       },
       { signal: abort.signal },
     );
+    video.addEventListener(
+      'theplayercaptionappearance',
+      () => {
+        drawn = null;
+      },
+      { signal: abort.signal },
+    );
     function renderSubtitles() {
       if (video.ownerDocument.hidden || !isVisible() || video.readyState < 2) {
         schedule();
@@ -98,7 +108,10 @@ export class SubtitleRenderer {
         context.clearRect(0, 0, w, h);
         drawn = cue;
         if (cue && typeof cue.text === 'string') {
-          subtitleCounters.present(cue, draw708(context, cue, w, h));
+          subtitleCounters.present(
+            cue,
+            draw708(context, cue, w, h, captionAppearance(video)),
+          );
         } else if (cue) {
           cue.rects.forEach((r: any, i: number) =>
             context.drawImage(

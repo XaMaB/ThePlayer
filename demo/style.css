@@ -1446,3 +1446,78 @@ button:not(:disabled):hover {
     width: auto;
   }
 }
+
+[data-layout-hidden] {
+  display: none !important;
+}
+.video-popup.context-menu {
+  width: min(310px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.control-extras {
+  border-top: 1px solid #ffffff20;
+  margin-top: 5px;
+  padding: 8px;
+}
+.control-extras label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 12px;
+  font-size: 12px;
+  color: #c8cfe1;
+}
+.control-extras select {
+  padding: 8px;
+  font-size: 12px;
+}
+.control-extras details {
+  padding-top: 10px;
+  margin: 10px 0 4px;
+}
+.control-extras summary {
+  margin-bottom: 10px;
+  color: #e0e5f5;
+}
+.control-extras small {
+  display: block;
+  line-height: 1.5;
+  font-size: 11px;
+}
+.control-extras button {
+  font-size: 12px;
+  padding: 9px 7px;
+}
+
+#player-menu {
+  max-height: calc(100% - 76px);
+}
+
+.context-menu .context-brand {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  background: #131725;
+}
+.context-menu #options-close {
+  width: 28px;
+  padding: 0;
+  margin-left: auto;
+  font-size: 24px;
+  text-align: center;
+  line-height: 28px;
+  flex: none;
+}
+@media (max-width: 600px) {
+  #player-menu {
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 8px !important;
+    top: auto !important;
+    width: calc(100% - 16px);
+    max-height: calc(100% - 16px);
+  }
+}

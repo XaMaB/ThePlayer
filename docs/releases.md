@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.6.0
+
+- Add configurable toolbar/center layouts and grouped optional settings without expanding the main playback bar.
+- Add VOD speed, subtitle appearance/reset, application/native chapters, an application-owned playback queue, and PNG download/clipboard helpers with DRM/CORS guards.
+- Add native remote playback discovery/picker support and an explicit Google Cast sender adapter with receiver URL configuration, Play/Pause and disconnect. Hardware/provider acceptance tests remain integration-specific.
+- Add the complete controls integration guide, a public-example demo queue and opt-in Cast initialization. Document bitmap/native caption limits, live/ad restrictions, ownership and cleanup.
+
 ## 1.5.2
 
 - Replace the circular seek arrows with mirrored double-triangle icons and an embedded `10s` label. Use wider, rounded skip buttons with responsive sizing.

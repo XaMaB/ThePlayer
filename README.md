@@ -25,6 +25,7 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 - **DASH live and VOD:** fMP4, quality/audio selection, text and broadcast captions, MPD Patch, ClearKey/Widevine and low-latency CMAF; see the verified playback scope below.
 - **Multilingual audio and captions:** audio/CC menus, source-positioned broadcast captions and subtitle Off.
 - **Adaptive Picture-in-Picture:** Document PiP with controls/captions where available, native video PiP fallback and configurable browser-driven Auto PiP. [Configuration and browser limits](docs/picture-in-picture.md).
+- **Configurable controls and extras:** toolbar layouts, VOD speed, subtitle appearance, chapters, queue navigation, optional frame capture and native/Cast sender adapters. [Integrator guide and limitations](docs/controls-integration.md).
 - **Shared controls:** current Auto quality, resolution badges, play/pause, ±10 s seeking, keyboard shortcuts, fullscreen and MediaInfo. LIVE appears only for live presentations.
 - **Independent integration:** explicit source configuration, separate engine modules and no Origin/Relay dashboard dependency.
 
@@ -270,6 +271,8 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 - Extend caption conformance and fixture coverage.
 
 ## License
+
+Google Cast optionally loads Google’s Web Sender SDK only after explicit application/demo opt-in; it is not bundled with the player.
 
 Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE`, the included upstream notices and `vendor/mux.js/LICENSE` for bundled dependencies.
 

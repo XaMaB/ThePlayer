@@ -3,7 +3,12 @@ import { dashExamples } from './dash-examples.mjs';
 import { hlsExamples } from './hls-examples.mjs';
 import { SubtitleRenderer } from '../src/subtitles/renderer';
 import { mountControls } from '../src/ui/controls';
-import { ThePlayer } from '../src/player';
+import {
+  ThePlayer,
+  PlaybackQueue,
+  CastSender,
+  loadCastSdk,
+} from '../src/player';
 
 const playerScreen = document.getElementById('screen')!;
 const $ = (id: string) =>
@@ -11,16 +16,61 @@ const $ = (id: string) =>
   playerScreen.querySelector<HTMLElement>('#' + id)!;
 const video = $('video') as HTMLVideoElement;
 const canvas = $('subtitles') as HTMLCanvasElement;
+let player: any;
+let castSender: CastSender | undefined;
+const demoQueue = new PlaybackQueue(
+  () => ({
+    video,
+    get isLive() {
+      return player?.isLive ?? false;
+    },
+    get diagnostics() {
+      return player?.diagnostics;
+    },
+    async load(source) {
+      manual = true;
+      const next = { ...source, source: true, status: 'live' };
+      sourceForm(next);
+      const loaded = await openChannel(next);
+      if (!loaded || !player || player.diagnostics?.state === 'error')
+        throw new Error('Could not load queue item');
+    },
+    async play() {
+      await player?.play();
+    },
+  }),
+  [
+    {
+      id: 'hls-example',
+      title: 'HLS · Big Buck Bunny',
+      source: {
+        protocol: 'hls',
+        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+      },
+    },
+    {
+      id: 'dash-example',
+      title: 'DASH · Public sample',
+      source: { protocol: 'dash', url: dashExamples[0].url },
+    },
+  ],
+);
 const controls = mountControls(
   $('screen'),
   video,
   () => player,
   (message) => error(message),
-  { pictureInPicture: { automatic: true } },
+  {
+    pictureInPicture: { automatic: true },
+    extras: {
+      frameCapture: true,
+      queue: demoQueue,
+      remote: { cast: () => castSender },
+    },
+  },
 );
 let state: any;
 let channel: any;
-let player: any;
 let activeNamespace = '';
 let playing = false;
 let opening = false;
@@ -181,6 +231,7 @@ async function openChannel(next: any) {
       player.subtitleTracks.some((t: any) => t.name === selectedLanguage)
     )
       player.selectSubtitleTrack(selectedLanguage);
+    return true;
   } catch (e: any) {
     if (token === operation) {
       error(e.message);
@@ -251,6 +302,7 @@ $('source-form').addEventListener('submit', (e) => {
   e.preventDefault();
   if (opening) return;
   manual = true;
+  demoQueue.reset();
   selectedChannelId = '';
   const value = (id: string) => ($(id) as HTMLInputElement).value.trim();
   const protocol = value('source-protocol');
@@ -296,6 +348,7 @@ $('source-form').addEventListener('submit', (e) => {
   }
 });
 $('disconnect').addEventListener('click', async () => {
+  demoQueue.reset();
   manual = true;
   operation++;
   opening = true;
@@ -467,3 +520,39 @@ autoPip.disabled = !controls.pictureInPicture?.automaticEnabled;
 autoPip.addEventListener('change', () =>
   controls.pictureInPicture?.setAutomatic(autoPip.checked),
 );
+
+$('enable-cast').addEventListener('click', async () => {
+  const button = $('enable-cast') as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    await loadCastSdk();
+    castSender = new CastSender(video, {
+      media: () => {
+        const source = player?.source;
+        if (
+          !source ||
+          !['hls', 'dash'].includes(source.protocol) ||
+          source.drm ||
+          source.network?.headers
+        )
+          return undefined;
+        return {
+          url: source.url,
+          contentType:
+            source.protocol === 'hls'
+              ? 'application/x-mpegURL'
+              : 'application/dash+xml',
+          title: 'ThePlayer',
+          live: player.isLive,
+        };
+      },
+    });
+    text(
+      'cast-message',
+      'Cast enabled. Open Player options to connect when a compatible device and source are available.',
+    );
+  } catch (e: any) {
+    text('cast-message', e.message);
+    button.disabled = false;
+  }
+});
