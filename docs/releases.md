@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.4.1
+
+- Refresh the demo with graphite surfaces and blue-violet accents, including player controls and the demo logo.
+- Add HLS/DASH DRM test fields for key system, binary license endpoint, request headers, cookies, timeout, base64 server certificate, robustness and local Clear Key keys.
+- Keep DRM credentials out of generated integration examples; show an editable license callback instead. Settings are not persisted or placed in share URLs.
+- Document provider-specific DRM limits and verify the demo form with encrypted playback and license error handling.
+
 ## 1.4.0
 
 - Add HLS/DASH Auto startup selection (`lowest` / `highest`) and upgrade policy (`stepwise` / `direct`). Preserve existing defaults, manual quality precedence and bandwidth/buffer safeguards.

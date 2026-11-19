@@ -142,6 +142,9 @@ jobs:
         timeout-minutes: 10
         env:
           ABR_TEST_BROWSER: ${{ matrix.browser }}
+      - run: npm run test:demo:drm
+        if: matrix.browser == 'chromium'
+        timeout-minutes: 3
       - run: npm run test:dash:drm
         if: matrix.browser == 'chromium'
       - run: npm run test:dash:soak

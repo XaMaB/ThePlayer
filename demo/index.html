@@ -20,8 +20,8 @@
           <title id="title">ThePlayer — signal and play</title>
           <defs>
             <linearGradient id="signal" x1="0" y1="0" x2="1" y2="1">
-              <stop stop-color="#61ffe0" />
-              <stop offset=".52" stop-color="#55c9ff" />
+              <stop stop-color="#8b9dff" />
+              <stop offset=".52" stop-color="#b6bfff" />
               <stop offset="1" stop-color="#a891ff" />
             </linearGradient>
           </defs>
@@ -30,7 +30,7 @@
           <path d="M150 100l70 44-70 44z" fill="url(#signal)" />
           <path
             d="M42 112h28m-28 32h18m-18 32h28"
-            stroke="#61ffe0"
+            stroke="#8b9dff"
             stroke-width="8"
             stroke-linecap="round"
             opacity=".55"
@@ -136,6 +136,100 @@
                   ABR settings apply on Connect. Manual quality selection
                   overrides Auto.
                 </p>
+                <details class="drm-panel">
+                  <summary>DRM · License configuration</summary>
+                  <label
+                    >Key system<select id="drm-system">
+                      <option value="">None / unencrypted</option>
+                      <option value="com.widevine.alpha">Widevine</option>
+                      <option value="com.microsoft.playready">PlayReady</option>
+                      <option value="com.apple.fps">FairPlay (EME)</option>
+                      <option value="org.w3.clearkey">Clear Key</option>
+                    </select></label
+                  >
+                  <div id="drm-options" hidden>
+                    <label
+                      >License server URL<input
+                        id="drm-url"
+                        type="url"
+                        autocomplete="off"
+                        placeholder="https://license.example.com/…"
+                    /></label>
+                    <label
+                      >License request headers · JSON<textarea
+                        id="drm-headers"
+                        rows="3"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder='{"Authorization": "Bearer …"}'
+                      ></textarea>
+                    </label>
+                    <label
+                      >License cookies<select id="drm-credentials">
+                        <option value="omit">Do not send</option>
+                        <option value="same-origin">Same origin only</option>
+                        <option value="include">
+                          Include cross-origin cookies
+                        </option>
+                      </select></label
+                    >
+                    <label
+                      >License timeout · milliseconds<input
+                        id="drm-timeout"
+                        type="number"
+                        min="1"
+                        max="120000"
+                        value="15000"
+                    /></label>
+                    <div id="drm-clearkey" hidden>
+                      <label
+                        >Clear Key keys · JSON<textarea
+                          id="drm-keys"
+                          rows="3"
+                          autocomplete="off"
+                          spellcheck="false"
+                          placeholder='{"32-digit hex key ID": "32-digit hex key"}'
+                        ></textarea>
+                      </label>
+                      <p class="notice">
+                        Local keys take precedence over the license server.
+                      </p>
+                    </div>
+                    <details>
+                      <summary>Certificate &amp; robustness</summary>
+                      <label
+                        >Server certificate · base64<textarea
+                          id="drm-certificate"
+                          rows="3"
+                          spellcheck="false"
+                          placeholder="Base64-encoded binary certificate"
+                        ></textarea>
+                      </label>
+                      <label
+                        >Video robustness<input
+                          id="drm-video-robustness"
+                          placeholder="Browser default"
+                      /></label>
+                      <label
+                        >Audio robustness<input
+                          id="drm-audio-robustness"
+                          placeholder="Browser default"
+                      /></label>
+                    </details>
+                    <p class="notice">
+                      Binary POST challenge → binary license response. The
+                      license server must allow CORS. Provider-specific request
+                      wrappers, FairPlay content-ID transforms and legacy Safari
+                      APIs require a custom integration. Key-system availability
+                      depends on the browser and device.
+                    </p>
+                    <p class="notice">
+                      Settings apply on Connect. Credentials and keys stay in
+                      this page's memory and are omitted from the integration
+                      example.
+                    </p>
+                  </div>
+                </details>
                 <p class="notice">
                   HLS and DASH support live and on-demand playback with quality,
                   audio and subtitle selection. Codec and DRM availability
@@ -187,7 +281,12 @@
         </section>
       </div>
       <footer>
-        <span>THEPLAYER · MoQ + HLS + DASH</span
+        <a
+          href="https://github.com/XaMaB/ThePlayer"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="ThePlayer project on GitHub"
+          >ThePlayer on GitHub ↗</a
         ><span>WebTransport / WebSocket · HTTP · MSE</span>
       </footer>
     </main>

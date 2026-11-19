@@ -14,6 +14,8 @@
 
 ThePlayer is a modular browser player for live television and on-demand video. It combines MoQ delivery, original HLS and DASH engines, multilingual audio, broadcast captions and shared playback controls.
 
+[**Try the live demo ↗**](https://demo.theplayer.dev)
+
 [Protocols](#protocols) · [Codecs](#audio-and-video) · [Subtitles](#subtitles) · [HLS features](#hls-features) · [DASH](#dash) · [Quick start](#development) · [Integration](#library) · [Architecture](docs/architecture.md)
 
 ## What you get
@@ -273,3 +275,11 @@ Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE`, the included ups
 ### Playback shortcuts
 
 Space or K toggles play/pause; Left/Right seeks by ten seconds within the available timeline. The center controls offer the same actions. Live streams can seek only within their available DVR/buffer window. Shortcuts apply to the active player and leave text fields and menu selection keys alone. Unavailable audio/CC controls use an ordinary cursor, not a loading indicator.
+
+### Demo DRM configuration
+
+In the HLS or MPEG-DASH source form, expand **DRM · License configuration**. Choose a key system and enter the license server URL. Optional settings include JSON request headers, cookie credentials, license timeout (1–120000 ms), a base64-encoded binary server certificate, and video/audio robustness strings. Clear Key also accepts a JSON mapping of 32-digit hexadecimal key IDs to 32-digit hexadecimal keys; local keys take precedence over the license URL. Choose **None / unencrypted** to disable DRM on the next connection.
+
+The demo posts the raw EME challenge and reads the binary license response. License endpoints must permit browser CORS requests, including preflights for custom headers. This is a generic EME adapter: selecting Widevine, PlayReady or FairPlay does not guarantee browser/CDM/provider compatibility. Providers requiring JSON/XML envelopes, response extraction, FairPlay content-ID transformations or legacy Safari APIs need an application-specific `drm.license` integration and, where applicable, additional engine support. See [DASH DRM integration](docs/dash-integration.md).
+
+DRM settings apply on **Connect** and remain in page memory. They are not stored in browser storage or added to share URLs. The integration example omits license URLs, headers, certificates and keys, and includes placeholders for application-owned values. The license callback forwards the engine's abort signal and uses its configured timeout. License requests use Fetch even when media transport is set to XMLHttpRequest.

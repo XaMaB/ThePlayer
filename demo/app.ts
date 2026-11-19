@@ -1,3 +1,4 @@
+import { readDrmForm, drmSnippet } from './drm.mjs';
 import { dashExamples } from './dash-examples.mjs';
 import { hlsExamples } from './hls-examples.mjs';
 import { SubtitleRenderer } from '../src/subtitles/renderer';
@@ -111,6 +112,7 @@ async function openChannel(next: any) {
             quality: next.quality ?? 'auto',
             abr: next.abr,
             media: next.media,
+            drm: next.drm,
           }
         : {
             relayUrl: next.relayUrl,
@@ -218,7 +220,7 @@ function sourceForm(next: any) {
     };
     text(
       'snippet',
-      `import {ThePlayer} from './player.js';\nconst player = new ThePlayer(video);\nawait player.load(${JSON.stringify(connectedSource, null, 2)});`,
+      `import {ThePlayer} from './player.js';\nconst player = new ThePlayer(video);\n${drmSnippet(connectedSource, next.drm)}`,
     );
     text('channel-title', next.name ?? `${next.protocol.toUpperCase()} source`);
     return;
@@ -257,6 +259,7 @@ $('source-form').addEventListener('submit', (e) => {
         protocol,
         url: url.href,
         transport: value('hls-transport'),
+        drm: readDrmForm(document),
         abr: { startup: value('abr-startup'), upswitch: value('abr-upswitch') },
         source: true,
         status: 'live',
@@ -372,6 +375,11 @@ function updateSourceFields() {
   for (const example of protocol === 'dash' ? dashExamples : hlsExamples)
     examples.add(new Option(example.name, example.id));
   $('hls-fields').hidden = !hls;
+  for (const field of $('hls-fields').querySelectorAll<
+    HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+  >('input, select, textarea'))
+    field.disabled = !hls;
+  updateDrmFields();
   $('moq-fields').hidden = hls;
   ($('hls-url') as HTMLInputElement).required = hls;
   for (const id of ['relay-url', 'namespace', 'catalog'])
@@ -436,3 +444,15 @@ examples.addEventListener('change', () => {
     (document.getElementById('hls-url') as HTMLInputElement).value =
       example.url;
 });
+
+function updateDrmFields() {
+  const system = ($('drm-system') as HTMLSelectElement).value;
+  const enabled = !!system && !$('hls-fields').hidden;
+  $('drm-options').hidden = !system;
+  $('drm-clearkey').hidden = system !== 'org.w3.clearkey';
+  for (const field of $('drm-options').querySelectorAll<
+    HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+  >('input, select, textarea'))
+    field.disabled = !enabled;
+}
+$('drm-system').addEventListener('change', updateDrmFields);
