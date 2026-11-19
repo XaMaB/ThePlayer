@@ -130,7 +130,7 @@ await player.load({
 
 Optional `serverCertificate: Uint8Array`, `videoRobustness` and `audioRobustness` are forwarded to EME. Temporary sessions are closed during teardown; pending license callbacks are aborted. Persistent/offline licenses are not implemented. CENC/CBCS ClearKey and public Widevine are tested; passing a PlayReady or FairPlay key-system string is not proof of a working device/provider integration.
 
-For synthetic ClearKey fixtures, use `keySystem: 'org.w3.clearkey'` and `clearKeys: { [hexKid]: hexKey }`, with 16-byte hexadecimal KIDs and keys. Keep fixture keys distinct from production secrets. MPD/in-band PSSH and initialization KIDs are handled by the shared EME controller; arbitrary in-Period sample-group key rotation remains unverified for DASH.
+For synthetic ClearKey fixtures, use `keySystem: 'org.w3.clearkey'` and `clearKeys: { [hexKid]: hexKey }`, with 16-byte hexadecimal KIDs and keys. Keep fixture keys distinct from production secrets. MPD/in-band PSSH and initialization KIDs are handled by the shared EME controller. In-Period `sgpd`/`sbgp` (`seig`) key rotation is verified with CENC/CBCS ClearKey fixtures, including alternating keys and in-band PSSH; commercial-CDM rotation still requires provider/device testing.
 
 ## Metadata and diagnostics
 
