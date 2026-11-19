@@ -67,6 +67,8 @@ const events = [
   'captionwarning',
   'metadata',
   'metadatawarning',
+  'qoe',
+  'periodchange',
   'pathwaychange',
   'daterange',
   'daterangeremove',

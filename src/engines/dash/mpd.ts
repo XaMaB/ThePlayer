@@ -100,6 +100,11 @@ export function resolveUrl(value: string, base: string) {
   return url.href;
 }
 function bases(element: Element, parent: string[]) {
+  const xmlBase = element.getAttributeNS(
+    'http://www.w3.org/XML/1998/namespace',
+    'base',
+  );
+  if (xmlBase) parent = parent.map((base) => resolveUrl(xmlBase, base));
   const urls = children(element, 'BaseURL');
   if (!urls.length) return parent;
   if (urls.length * parent.length > 32)
@@ -107,6 +112,36 @@ function bases(element: Element, parent: string[]) {
   return parent.flatMap((base) =>
     urls.map((e) => resolveUrl(e.textContent!.trim(), base)),
   );
+}
+function services(element: Element, parent: string[]) {
+  const urls = children(element, 'BaseURL');
+  return urls.length
+    ? parent.flatMap((id) => urls.map((e) => attr(e, 'serviceLocation') ?? id))
+    : parent;
+}
+const thumbnailScheme = 'http://dashif.org/guidelines/thumbnail_tile';
+function unsupportedEssential(element: Element) {
+  return children(element, 'EssentialProperty').some(
+    (e) => attr(e, 'schemeIdUri') !== thumbnailScheme,
+  );
+}
+function tiles(element: Element) {
+  const property = children(element, 'EssentialProperty').find(
+    (e) => attr(e, 'schemeIdUri') === thumbnailScheme,
+  );
+  if (!property) return;
+  const match = /^(\d+)x(\d+)$/.exec(attr(property, 'value') ?? '');
+  const columns = Number(match?.[1]),
+    rows = Number(match?.[2]);
+  if (
+    !Number.isSafeInteger(columns) ||
+    !Number.isSafeInteger(rows) ||
+    columns < 1 ||
+    rows < 1 ||
+    columns * rows > 4096
+  )
+    throw new Error('Invalid DASH thumbnail grid');
+  return { columns, rows };
 }
 function range(value: string | undefined) {
   if (!value) return;
@@ -243,12 +278,19 @@ export function parseMpd(xml: string, url: string): Manifest {
     throw new Error('Expected MPEG-DASH MPD');
   if (doc.querySelectorAll('*').length > 150000)
     throw new Error('DASH MPD element limit');
-  if (
-    Array.from(doc.querySelectorAll('*')).some((e) =>
-      e.hasAttributeNS('http://www.w3.org/1999/xlink', 'href'),
-    )
-  )
-    throw new Error('DASH XLink resolution is not implemented');
+  const deferred = (e: Element) =>
+    e.parentElement === root &&
+    e.localName === 'Period' &&
+    e.hasAttributeNS('http://www.w3.org/1999/xlink', 'href') &&
+    (e.getAttributeNS('http://www.w3.org/1999/xlink', 'actuate') ??
+      'onRequest') === 'onRequest';
+  for (const e of Array.from(doc.querySelectorAll('*'))) {
+    let owner: Element | null = e;
+    while (owner && owner.parentElement !== root) owner = owner.parentElement;
+    if (owner && deferred(owner)) continue;
+    if (e.hasAttributeNS('http://www.w3.org/1999/xlink', 'href'))
+      throw new Error('Unresolved DASH XLink');
+  }
   if (children(root, 'EssentialProperty').length)
     throw new Error('DASH EssentialProperty profiles are not implemented yet');
   const type = attr(root, 'type') ?? 'static';
@@ -314,10 +356,24 @@ export function parseMpd(xml: string, url: string): Manifest {
       maxRate,
     };
   }
+  const steering = one(root, 'ContentSteering');
+  if (steering && boolean(attr(steering, 'clientRequirement'), true)) {
+    manifest.steering = {
+      url: resolveUrl(steering.textContent!.trim(), url),
+      defaults: (attr(steering, 'defaultServiceLocation') ?? '')
+        .split(/\s+/)
+        .filter(Boolean),
+      queryBeforeStart: boolean(attr(steering, 'queryBeforeStart'), false),
+    };
+  }
+  manifest.locationServices = children(root, 'Location').map(
+    (e) => attr(e, 'serviceLocation') ?? '',
+  );
+  const rootServices = services(root, ['']);
   const rootBases = bases(root, [url]),
     rootAddress = address(root);
   for (const [pi, pe] of children(root, 'Period').entries()) {
-    if (children(pe, 'EssentialProperty').length)
+    if (!deferred(pe) && children(pe, 'EssentialProperty').length)
       throw new Error('Unsupported DASH Period EssentialProperty');
     const previous = manifest.periods.at(-1);
     const start =
@@ -333,7 +389,12 @@ export function parseMpd(xml: string, url: string): Manifest {
       start,
       duration: duration(attr(pe, 'duration')),
       adaptations: [],
+      remote: pe.hasAttributeNS('http://www.w3.org/1999/xlink', 'href'),
     };
+    if (period.remote) {
+      manifest.periods.push(period);
+      continue;
+    }
     period.events = children(pe, 'EventStream').flatMap((stream) => {
       const scale = decimal(attr(stream, 'timescale'), 1, 1);
       if (!Number.isSafeInteger(scale))
@@ -366,16 +427,18 @@ export function parseMpd(xml: string, url: string): Manifest {
     });
     if (period.events.length > 1000)
       throw new Error('DASH EventStream event limit');
+    const ps = services(pe, rootServices);
     const pb = bases(pe, rootBases),
       pa = address(pe, rootAddress);
     for (const [ai, ae] of children(pe, 'AdaptationSet').entries()) {
-      if (children(ae, 'EssentialProperty').length) continue;
+      if (unsupportedEssential(ae)) continue;
+      const as = services(ae, ps);
       const ab = bases(ae, pb),
         aa = address(ae, pa);
       const roles = children(ae, 'Role').map((e) => attr(e, 'value') ?? '');
       const reps: Representation[] = [];
       for (const [ri, re] of children(ae, 'Representation').entries()) {
-        if (children(re, 'EssentialProperty').length) continue;
+        if (unsupportedEssential(re)) continue;
         const get = (name: string) => attr(re, name) ?? attr(ae, name);
         const mimeType = get('mimeType') ?? '';
         const externalText = ['text/vtt', 'application/ttml+xml'].includes(
@@ -426,7 +489,20 @@ export function parseMpd(xml: string, url: string): Manifest {
           width: get('width') ? decimal(get('width'), 0, 1) : undefined,
           height: get('height') ? decimal(get('height'), 0, 1) : undefined,
           frameRate,
+          channels: (() => {
+            const e =
+              one(re, 'AudioChannelConfiguration') ??
+              one(ae, 'AudioChannelConfiguration');
+            return e
+              ? {
+                  scheme: attr(e, 'schemeIdUri') ?? '',
+                  value: attr(e, 'value') ?? '',
+                }
+              : undefined;
+          })(),
+          tiles: tiles(re) ?? tiles(ae),
           baseUrls: bases(re, ab),
+          serviceLocations: services(re, as),
           address: segmentAddress,
           protection: [...protections(ae), ...protections(re)],
           producerReferences: [
@@ -447,7 +523,9 @@ export function parseMpd(xml: string, url: string): Manifest {
           ? 'video'
           : content === 'audio' || mime.startsWith('audio/')
             ? 'audio'
-            : 'text';
+            : content === 'image' || mime.startsWith('image/')
+              ? 'image'
+              : 'text';
       if (reps.length)
         period.adaptations.push({
           id: attr(ae, 'id') ?? `adaptation-${ai}`,
@@ -456,10 +534,14 @@ export function parseMpd(xml: string, url: string): Manifest {
           label:
             one(ae, 'Label')?.textContent?.trim() ?? attr(ae, 'lang') ?? kind,
           roles,
+          accessibility: children(ae, 'Accessibility').map((e) => ({
+            scheme: attr(e, 'schemeIdUri') ?? '',
+            value: attr(e, 'value') ?? '',
+          })),
           representations: reps,
         });
     }
-    if (!period.adaptations.length)
+    if (!period.adaptations.length && !period.remote)
       throw new Error('No supported DASH AdaptationSet in Period');
     manifest.periods.push(period);
   }

@@ -122,7 +122,7 @@ try {
     );
     rejects(
       wrap(
-        '<Period xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://example.com/period"/>',
+        '<Period xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://example.com/period" xlink:actuate="onLoad"/>',
       ),
       'Unsupported XLink explicit',
     );

@@ -14,7 +14,7 @@ const browser = await { chromium, firefox, webkit }[name].launch(
 try {
   for (const scenario of (
     process.env.DASH_SCENARIOS ??
-    'timeline,number,list,redirect,pto,periods,audio,live,cdn'
+    'timeline,number,list,hierarchical,redirect,pto,periods,audio,live,cdn'
   ).split(',')) {
     for (const transport of ['fetch', 'xhr']) {
       const deadline = caseDeadline(`${name} ${transport} ${scenario}`);
@@ -212,7 +212,9 @@ try {
     'Initialization was fetched',
   );
   assert.ok(
-    requests.some((url) => url.endsWith('.m4s')),
+    requests.some(
+      (url) => url.endsWith('.m4s') || /indexed-\d+\.mp4$/.test(url),
+    ),
     'Media was fetched',
   );
 } finally {

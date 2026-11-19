@@ -1,6 +1,6 @@
 # DASH integration
 
-The [support matrix](dash-support.md) defines the implemented preview profiles and remaining limits. This guide describes the public API; availability of an option does not certify every codec, CDM or device.
+The [support matrix](dash-support.md) defines the implemented profiles and explicit limits. This guide describes the public API; availability of an option does not certify every codec, CDM or device.
 
 ## Load and destroy
 
@@ -47,7 +47,9 @@ Build with `npm run build` and deploy **all of `dist/`**, including `chunks/`. B
 | `startTime`            | VOD beginning / live target | Nonnegative presentation position in seconds                                                 |
 | `quality`              | `'auto'`                    | Auto or a zero-based available quality index                                                 |
 | `targetBuffer`         | `12`                        | Buffer target in seconds, accepted range 2–120; not a fixed latency                          |
-| `audioLanguage`        | MPD main/default order      | Case-insensitive exact match to the MPD language string                                      |
+| `audioRole`            | Main/default                | Optional MPD audio Role preference, such as `description`                                    |
+| `cmcd`                 | Disabled                    | Opt-in CMCD request mode; version, query/headers and identifiers below                       |
+| `audioLanguage`        | MPD main/default order      | Canonical language/primary-language match, including ISO aliases                             |
 | `liveRecoveryWindowMs` | `30000`                     | Live failure recovery budget, 1000–120000 ms; individual requests also time out              |
 | `lowLatency`           | Enabled when signaled       | Set `false` to disable incremental Fetch CMAF appends                                        |
 | `latencyControl`       | `false`                     | Opt in to playback-rate adjustment around the advertised target                              |
@@ -56,14 +58,15 @@ Build with `npm run build` and deploy **all of `dist/`**, including `chunks/`. B
 | `network`              | Fetch                       | Transport, timeout/retry/credential settings below                                           |
 | `drm`                  | None                        | Application-configured EME key system and license integration                                |
 
-`audioLanguage: 'en'` is not currently an ISO-639 alias lookup for `eng`. Get actual languages from `player.audioTracks`. Explicit track IDs come from the inventories, not display labels.
+`audioLanguage: 'en'` matches `eng`; `bg` matches `bul`. `audioRole` optionally prefers an MPD Role such as `description`. Inventories expose original language, roles, accessibility descriptors and channel configuration. Explicit track IDs come from the inventories, not display labels.
 
-## Quality, audio and subtitles
+## Quality, audio, views and subtitles
 
 ```js
 await player.selectQuality(-1); // Auto
 await player.selectQuality(0); // index in player.qualityLevels
 await player.selectAudioTrack(player.audioTracks[0].name);
+await player.selectVideoTrack(player.videoTracks[0].name); // when multiple views exist
 player.selectSubtitleTrack(player.subtitleTracks[0].name);
 player.selectSubtitleTrack(''); // Off
 ```
@@ -93,7 +96,7 @@ network: {
 
 The final redirected MPD URL is the base for relative resources. The player does not copy the MPD query string onto unrelated relative segment URLs: signed resources must be signaled correctly by the server. Media origins need CORS access for MPDs, segments, indexes, subtitles and UTC resources. Credentialed cross-origin requests need appropriate explicit-origin CORS responses. Byte-range delivery must expose valid Content-Range metadata.
 
-BaseURL failover tries only MPD-declared alternatives after retryable failures, temporarily penalizes failed directories and preserves byte ranges. HTTP 401/403 is terminal. A mirror is not spliced into an already partially appended response. Steering servers, serviceLocation priority policies, explicit ETag/304 handling and CMCD/CMSD are separate pending features.
+BaseURL failover tries only MPD-declared alternatives after retryable failures, temporarily penalizes failed directories and preserves byte ranges. HTTP 401/403 is terminal. A mirror is not spliced into an already partially appended response. MPD ContentSteering activates serviceLocation priorities and cloning, with startup/TTL/410/429 handling. Media/Location alternatives retain credential scoping. MPD reloads use ETag or Last-Modified validators and retain the body on HTTP 304. Cross-origin responses must expose ETag, Last-Modified and CMSD headers when those features are used.
 
 ## DRM with EME
 
@@ -144,6 +147,42 @@ player.addEventListener('metadatawarning', ({ detail }) => {
 
 EventStream emits `type: 'dash-event'`, `scheme`, `value`, string `id`, presentation `time`, optional `duration`, string `data` and Period ID. In-band emsg uses the shared `type: 'emsg'`/`'id3'` payload, numeric ID and byte payload where applicable. The engine bounds and deduplicates notifications; it does not execute scripts or automatically insert ads. An application requiring cue enter/exit behavior must implement playback-time scheduling and seek policy.
 
-`player.diagnostics` includes `buffer`, `quality`, `recovery`, `delivery`, `patches`, `lowLatency`, `metadataEvents`, `clockOffset` and `clockWarning`. Producer latency is `null` without a usable MPD reference; `producerType` distinguishes encoder/capture timing. A pending seek with decoded, buffered target data may be retried once after one second, shifting the target by 1 ms to release a browser seek stall; `recovery.seekRetries` counts these attempts. This does not bypass unavailable media or change paused state. A measured encoder-to-playback delay is not a capture-to-display measurement. MPD producer clocks currently require UTC date-time values; in-band prft is pending. Rate control respects advertised ServiceDescription bounds and yields to a manual playback-rate change.
+`player.diagnostics` includes `buffer`, `quality`, `recovery`, `delivery`, `patches`, `lowLatency`, `metadataEvents`, `clockOffset` and `clockWarning`. Producer latency is `null` without a usable MPD or in-band reference; `producerType` distinguishes encoder/capture timing. A pending seek with decoded, buffered target data may be retried once after one second, shifting the target by 1 ms to release a browser seek stall; `recovery.seekRetries` counts these attempts. This does not bypass unavailable media or change paused state. A measured encoder-to-playback delay is not a capture-to-display measurement. MPD producer clocks require UTC date-time values; in-band prft supports NTP clocks and version 0/1 media timestamps. `lowLatency.producerSource` is `mpd`, `inband` or empty. `throughputSamples` counts usable intra-chunk transfer measurements. Rate control respects advertised ServiceDescription bounds and yields to a manual playback-rate change.
 
 Counters help troubleshoot playback; they are not a stable telemetry export schema or a promise of complete QoE accounting. Avoid publishing raw source configuration when sharing diagnostics.
+
+## Thumbnails, Period lifecycle and telemetry
+
+The shared controls call `player.getThumbnail(time)` for a JPEG preview when the MPD declares an image AdaptationSet. The returned object supplies an engine-owned object URL, tile rectangle, sheet dimensions and presentation interval. Do not revoke that URL yourself; it is valid until cache eviction or player destruction.
+
+```js
+player.addEventListener('periodchange', ({ detail }) => {
+  // Fired for the Period at the playhead, including seek transitions.
+  console.log(detail.id, detail.previousId, detail.start, detail.duration);
+});
+player.addEventListener('qoe', ({ detail }) => {
+  // Local metrics. Send to an analytics service only under application policy.
+  console.log(detail.startupMs, detail.rebufferCount, detail.rebufferMs);
+});
+```
+
+`periodchange` lets an application follow server-inserted content/ad Periods. It does not infer ad policy or execute EventStream payloads. XLink decisions are made when required by onLoad/onRequest semantics, and deferred Period decisions survive backward seeks. QoE startup measures time to the first `loadeddata` event; it is not display-panel latency. Rebuffer counters exclude pause and seek. Frame counters are supplied by the browser video element.
+
+CMCD is disabled unless configured. Version 2 is the default; version 1 provides CDN compatibility. Request mode implements the available `sf`, `st`, `sid`, `cid`, `ot`, `d`, `br`, `bl`, `mtp` and `su` fields, including version 2 inner-list syntax. Identifiers are optional, application-provided printable ASCII strings of at most 64 characters.
+
+```js
+await player.load({
+  protocol: 'dash',
+  url: manifestUrl,
+  cmcd: {
+    version: 2,
+    mode: 'headers', // or 'query' (default)
+    sessionId: sessionIdentifier,
+    contentId: contentIdentifier,
+  },
+});
+```
+
+Query mode adds `CMCD` to media/manifest requests; ensure your signing policy permits that parameter. Header mode requires appropriate CORS preflight permission. No analytics collection endpoint is contacted automatically. Bounded raw `CMSD-Static`/`CMSD-Dynamic` values are available in `diagnostics.delivery.cmsd` for application interpretation; they do not silently override ABR. CMCD event/batch mode is outside this implementation.
+
+Diagnostics also include `xlink`, `steering` and `qoe`. The support matrix describes the supported remote-element, steering, index and metadata profiles and their limits.

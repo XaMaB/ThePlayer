@@ -121,3 +121,29 @@ for (const name of ['prepare-sei-fixtures.mjs', 'prepare-708-fixtures.mjs'])
     stdio: 'inherit',
     env: { ...process.env, THEPLAYER_HLS_FIXTURES: root },
   });
+
+execFileSync(
+  'ffmpeg',
+  [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=160x90:rate=1',
+    '-vf',
+    'tile=2x2',
+    '-frames:v',
+    '1',
+    '-threads',
+    '1',
+    path.join(root, 'thumbnails.jpg'),
+  ],
+  { stdio: 'inherit' },
+);
+
+await import('./prepare-dash-seig-fixtures.mjs');
+
+await import('./prepare-dash-codec-fixtures.mjs');

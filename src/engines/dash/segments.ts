@@ -53,7 +53,9 @@ export function initializationResource(rep: Representation) {
             ),
         }
       : {}),
+    telemetry: { type: 'i' as const },
     range: a.initializationRange,
+    serviceLocations: rep.serviceLocations,
   };
 }
 const floorDiv = (a: bigint, b: bigint) => (a >= 0n ? a / b : (a - b + 1n) / b);
@@ -103,6 +105,17 @@ export function segmentReferences(
     if (a.kind === 'template' && !a.media)
       throw new Error('DASH SegmentTemplate needs media');
     out.push({
+      telemetry: {
+        type: rep.mimeType.startsWith('video/')
+          ? 'v'
+          : rep.mimeType.startsWith('audio/')
+            ? 'a'
+            : rep.mimeType.startsWith('image/')
+              ? 'o'
+              : 'tt',
+        duration: Number(d) / a.timescale,
+        bitrate: rep.bandwidth,
+      },
       number,
       time,
       start,
@@ -121,6 +134,7 @@ export function segmentReferences(
             ),
         rep.baseUrls[0],
       ),
+      serviceLocations: rep.serviceLocations,
       ...(rep.baseUrls.length > 1
         ? {
             alternatives: rep.baseUrls

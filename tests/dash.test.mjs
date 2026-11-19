@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 const bundled = await build({
   stdin: {
     contents:
-      "export * from './segments.ts'; export * from './mpd.ts'; export * from './sidx.ts'; export * from './chunks.ts';",
+      "export * from './segments.ts'; export * from './mpd.ts'; export * from './sidx.ts'; export * from './chunks.ts'; export * from './producer-time.ts'; export * from './chunk-throughput.ts';",
     resolveDir: new URL('../src/engines/dash/', import.meta.url).pathname,
   },
   bundle: true,
@@ -18,7 +18,10 @@ const {
   duration,
   initializationResource,
   parseSidx,
+  loadSidx,
   CmafChunks,
+  producerClocks,
+  ChunkThroughput,
 } = await import(
   'data:text/javascript;base64,' +
     Buffer.from(bundled.outputFiles[0].text).toString('base64')
@@ -280,4 +283,79 @@ test('CMAF streaming frames moof/mdat across every byte boundary', () => {
   const huge = box('moof');
   huge.writeUInt32BE(0xffffffff);
   assert.throws(() => new CmafChunks().push(huge), /size/);
+});
+
+test('Hierarchical SIDX expands child ranges and rejects inconsistent timing', async () => {
+  const make = (size, duration, firstOffset = 0) => {
+    const b = Buffer.alloc(44);
+    b.writeUInt32BE(44);
+    b.write('sidx', 4);
+    b.writeUInt32BE(1, 12);
+    b.writeUInt32BE(1000, 16);
+    b.writeUInt32BE(firstOffset, 24);
+    b.writeUInt16BE(1, 30);
+    b.writeUInt32BE(size, 32);
+    b.writeUInt32BE(duration, 36);
+    return b;
+  };
+  const parent = make(0x80000000 + 44, 2000),
+    child = make(100, 2000);
+  const calls = [];
+  const url = 'https://example.com/media.mp4';
+  const client = {
+    get: async (r) => {
+      calls.push(r);
+      return { url, data: child };
+    },
+  };
+  const references = await loadSidx(client, parent, 100, url, rep(), period);
+  assert.deepEqual(calls[0].range, { offset: 144, length: 44 });
+  assert.deepEqual(references[0].range, { offset: 188, length: 100 });
+  child.writeUInt32BE(3000, 36);
+  await assert.rejects(
+    loadSidx(client, parent, 100, url, rep(), period),
+    /timing/,
+  );
+  await assert.rejects(
+    loadSidx(client, make(0x80000000 + 9000000, 2000), 100, url, rep(), period),
+    /limit/,
+  );
+});
+
+test('Producer reference time preserves fractional NTP, era rollover and media clock', () => {
+  const b = Buffer.alloc(32);
+  b.writeUInt32BE(32);
+  b.write('prft', 4);
+  b[8] = 1;
+  b.writeUInt32BE(7, 12);
+  const unix = Date.UTC(2040, 0, 1) / 1000;
+  b.writeUInt32BE((unix + 2208988800) % 2 ** 32, 16);
+  b.writeUInt32BE(2 ** 31, 20);
+  b.writeBigUInt64BE(900900n, 24);
+  const tracks = [{ id: 7, timescale: 90000 }];
+  assert.deepEqual(producerClocks(b, tracks, unix), [
+    { type: 'encoder', wallClockTime: unix + 0.5, mediaTime: 10.01 },
+  ]);
+  b[11] = 24;
+  assert.equal(producerClocks(b, tracks, unix)[0].type, 'captured');
+  b[11] = 1;
+  assert.deepEqual(producerClocks(b, tracks, unix), []);
+  b[8] = 2;
+  assert.throws(() => producerClocks(b, tracks, unix), /Invalid/);
+});
+
+test('CMAF throughput excludes production waits but retains in-unit network stalls', () => {
+  const sample = new ChunkThroughput();
+  sample.observe(16384, 0, 0);
+  sample.observe(49152, 65536, 50);
+  sample.observe(16384, 0, 2050);
+  sample.observe(49152, 65536, 2100);
+  assert.equal(sample.samples, 2);
+  assert.equal(sample.bytes, 131072);
+  assert.equal(sample.elapsed, 100);
+  sample.observe(65536, 65536, 3000);
+  assert.equal(sample.samples, 2);
+  sample.observe(16384, 0, 4000);
+  sample.observe(49152, 65536, 5000);
+  assert.equal(sample.elapsed, 1100);
 });

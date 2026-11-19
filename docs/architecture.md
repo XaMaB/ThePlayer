@@ -10,16 +10,16 @@ The `PlaybackEngine` TypeScript interface in `src/core/player.ts` defines initia
 
 ## Module boundaries
 
-| Module               | Responsibility                                                                  |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `src/core/player.ts` | Engine registry, serialized source replacement, event forwarding and teardown   |
-| `src/player.ts`      | Default MoQ registration and lazy HLS/DASH registration                         |
-| `src/engines/moq/`   | moq-dev transport integration, media ingestion and group-based buffering        |
-| `src/engines/hls/`   | Original playlist parser, segment scheduling, ABR, demux/remux and HLS captions |
-| `src/engines/dash/`  | MPD/Patch parsing, addressing, live recovery, fMP4/CMAF lanes and captions      |
-| `src/subtitles/`     | MoQ bitmap/CEA-708 caption rendering and shared caption metrics                 |
-| `src/ui/controls.ts` | Playback, quality/audio/CC menus, keyboard controls and MediaInfo               |
-| `demo/`              | Source selection, directory discovery and integration examples                  |
+| Module               | Responsibility                                                                   |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `src/core/player.ts` | Engine registry, serialized source replacement, event forwarding and teardown    |
+| `src/player.ts`      | Default MoQ registration and lazy HLS/DASH registration                          |
+| `src/engines/moq/`   | moq-dev transport integration, media ingestion and group-based buffering         |
+| `src/engines/hls/`   | Original playlist parser, segment scheduling, ABR, demux/remux and HLS captions  |
+| `src/engines/dash/`  | MPD/Patch/XLink, indexes, live recovery, fMP4/CMAF, steering, text and telemetry |
+| `src/subtitles/`     | MoQ bitmap/CEA-708 caption rendering and shared caption metrics                  |
+| `src/ui/controls.ts` | Playback, quality/audio/CC menus, keyboard controls and MediaInfo                |
+| `demo/`              | Source selection, directory discovery and integration examples                   |
 
 ```mermaid
 flowchart TD
@@ -109,3 +109,5 @@ Content steering is isolated in `src/engines/hls/steering.ts`: it validates mani
 `dash/network.ts` retries only MPD-declared BaseURL alternatives, temporarily penalizes failed locations and recomputes headers for each destination. It does not replay a partially appended CMAF response from a mirror in the same assembler. Clock/timing or track-topology resets replace MediaSource through a bounded restart path; independent Origin/Relay services are unaffected.
 
 DASH `EventStream` and `emsg` dispatch bounded, deduplicated `metadata` payloads without interpreting scripts. MPD `ProducerReferenceTime` maps the media clock to the producer clock for diagnostics and opt-in latency control. MPD/metadata inspection is not full support for every optional DASH extension. See [integration](dash-integration.md), [test coverage](dash-validation.md) and the explicit [support limits](dash-support.md).
+
+DASH remote-element resolution lives in `xlink.ts`; `sidx.ts` resolves bounded index trees. `network.ts` adds manifest validators and mirror selection to the shared HTTP client, while `steering.ts` applies service-location policy. `producer-time.ts` and `chunk-throughput.ts` distinguish production clocks from transfer timing. `thumbnails.ts`, `telemetry.ts` and `qoe.ts` keep image lookup, CMCD serialization and local playback measurements separate from media scheduling. The core forwards `periodchange` and `qoe` alongside the existing track/metadata events. Telemetry has no automatic collection endpoint.

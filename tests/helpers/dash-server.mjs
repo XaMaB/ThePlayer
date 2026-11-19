@@ -1,3 +1,5 @@
+import { loopMedia } from './dash-loop-media.mjs';
+import { indexedMedia } from './dash-index.mjs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,6 +13,11 @@ export function dashServer() {
     process.env.THEPLAYER_DIST ??
     fileURLToPath(new URL('../../dist/', import.meta.url));
   const requests = [];
+  const indexed = new Map();
+  const getIndexed = (id) => {
+    if (!indexed.has(id)) indexed.set(id, indexedMedia(root, id));
+    return indexed.get(id);
+  };
   const controls = {
     manifestFailures: 0,
     mediaFailures: 0,
@@ -26,18 +33,84 @@ export function dashServer() {
     replacePeriod: false,
     depth: 12,
     chunkResponsesClosed: 0,
+    chunkPaceMs: 0,
+    chunkDisconnects: 0,
     producerTime: 0,
+    inbandProducer: false,
+    steeringPriority: ['good', 'bad'],
+    steeringStatus: 200,
+    steeringClones: undefined,
+    cloneRequests: 0,
+    steeringRequests: [],
+    telemetry: [],
   };
   const epochs = new Map();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     requests.push(url.pathname);
+    if (url.searchParams.get('pathway') === 'clone') controls.cloneRequests++;
+    if (url.searchParams.has('CMCD') || req.headers['cmcd-session'])
+      controls.telemetry.push({
+        path: url.pathname,
+        query: url.searchParams.get('CMCD'),
+        session: req.headers['cmcd-session'],
+        object: req.headers['cmcd-object'],
+        request: req.headers['cmcd-request'],
+      });
+    res.setHeader('CMSD-Dynamic', 'testcdn;etp=5000');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (url.pathname === '/harness.html') {
         res.setHeader('Content-Type', 'text/html');
         res.end('<!doctype html><div><video muted></video></div>');
+        return;
+      }
+      if (/^\/dash\/indexed-\d+\.mp4$/.test(url.pathname)) {
+        const id = /indexed-(\d+)/.exec(url.pathname)[1];
+        const { data } = await getIndexed(id);
+        const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? '');
+        if (!range) {
+          res.end(data);
+          return;
+        }
+        const start = Number(range[1]),
+          end = Number(range[2]);
+        if (end >= data.length || end < start) {
+          res.writeHead(416);
+          res.end();
+          return;
+        }
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Type': 'video/mp4',
+        });
+        res.end(data.subarray(start, end + 1));
+        return;
+      }
+      if (url.pathname === '/steering.json') {
+        controls.steeringRequests.push(url.search);
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(controls.steeringStatus);
+        res.end(
+          JSON.stringify({
+            VERSION: 1,
+            TTL: 1,
+            'PATHWAY-PRIORITY': controls.steeringPriority,
+            ...(controls.steeringClones
+              ? { 'PATHWAY-CLONES': controls.steeringClones }
+              : {}),
+          }),
+        );
+        return;
+      }
+      if (/^\/profiles\/(av1|hevc|ac3|eac3)\/[^/]+$/.test(url.pathname)) {
+        const data = await readFile(path.join(root, url.pathname));
+        res.setHeader(
+          'Content-Type',
+          url.pathname.endsWith('.mpd') ? 'application/dash+xml' : 'video/mp4',
+        );
+        res.end(data);
         return;
       }
       if (url.pathname === '/redirect.mpd') {
@@ -63,6 +136,24 @@ export function dashServer() {
         );
         return;
       }
+      if (
+        url.pathname === '/remote/period.xml' ||
+        url.pathname === '/remote/redirect'
+      ) {
+        if (url.pathname.endsWith('/redirect')) {
+          res.writeHead(302, { Location: '/remote/period.xml' });
+          res.end();
+          return;
+        }
+        const xml = await readFile(path.join(root, 'timeline.mpd'), 'utf8');
+        const contents = /<Period[^>]*>([\s\S]*?)<\/Period>/.exec(xml)[1];
+        const start = url.searchParams.get('start') ?? '0';
+        res.setHeader('Content-Type', 'application/xml');
+        res.end(
+          `<Period xmlns="urn:mpeg:dash:schema:mpd:2011" id="remote-${start}" start="PT${start}S" duration="PT${24 - Number(start)}S"><BaseURL>/dash/</BaseURL>${contents}</Period>`,
+        );
+        return;
+      }
       if (url.pathname.startsWith('/dash/') && url.pathname.endsWith('.mpd')) {
         if (controls.manifestFailures > 0) {
           controls.manifestFailures--;
@@ -72,6 +163,75 @@ export function dashServer() {
         }
         let body = await readFile(path.join(root, 'timeline.mpd'), 'utf8');
         const mode = path.basename(url.pathname);
+        if (mode === 'views.mpd') {
+          body = body.replace(
+            /(<AdaptationSet id="2"[^>]*>)/,
+            '$1<Role schemeIdUri="urn:mpeg:dash:role:2011" value="description"/><Accessibility schemeIdUri="urn:test:purpose" value="description"/>',
+          );
+          body = body.replace(
+            /<AdaptationSet id="0"([\s\S]*?)<\/AdaptationSet>/,
+            (whole, content) => {
+              const first =
+                /<Representation id="0"[\s\S]*?<\/Representation>/.exec(
+                  content,
+                )[0];
+              const second =
+                /<Representation id="1"[\s\S]*?<\/Representation>/.exec(
+                  content,
+                )[0];
+              return `<AdaptationSet id="front" contentType="video" mimeType="video/mp4"><Label>Front camera</Label>${first}</AdaptationSet><AdaptationSet id="side" contentType="video" mimeType="video/mp4"><Label>Side camera</Label>${second}</AdaptationSet>`;
+            },
+          );
+        }
+        if (mode === 'thumbnails.mpd') {
+          body = body.replace(
+            '</Period>',
+            '<AdaptationSet id="images" contentType="image" mimeType="image/jpeg"><SegmentTemplate duration="24" media="thumbnails.jpg"/><Representation id="sheet" bandwidth="10000" width="320" height="180"><EssentialProperty schemeIdUri="http://dashif.org/guidelines/thumbnail_tile" value="2x2"/></Representation></AdaptationSet></Period>',
+          );
+        }
+        if (mode === 'steering.mpd') {
+          body = body.replace(
+            '<Period',
+            '<BaseURL serviceLocation="bad">/missing/</BaseURL><BaseURL serviceLocation="good">/dash/</BaseURL><Period',
+          );
+          body = body.replace(
+            '</MPD>',
+            '<ContentSteering defaultServiceLocation="bad" queryBeforeStart="true">/steering.json</ContentSteering></MPD>',
+          );
+        }
+        if (mode === 'hierarchical.mpd') {
+          for (let id = 0; id < 4; id++) {
+            const index = await getIndexed(String(id));
+            const pattern = new RegExp(
+              `(<Representation id="${id}"[^>]*>)([\\s\\S]*?)(</Representation>)`,
+            );
+            body = body.replace(
+              pattern,
+              (_, open, content, close) =>
+                open +
+                content.replace(
+                  /<SegmentTemplate[\s\S]*?<\/SegmentTemplate>/,
+                  `<BaseURL>indexed-${id}.mp4</BaseURL><SegmentBase indexRange="${index.indexStart}-${index.indexEnd}"><Initialization range="0-${index.initEnd}"/></SegmentBase>`,
+                ) +
+                close,
+            );
+          }
+        }
+        if (mode.startsWith('xlink-')) {
+          const content = /<Period[^>]*>([\s\S]*?)<\/Period>/.exec(body)[1];
+          const start = mode === 'xlink-request.mpd' ? 12 : 0;
+          const href =
+            mode === 'xlink-fallback.mpd'
+              ? '/missing.xml'
+              : mode === 'xlink-load.mpd'
+                ? '/remote/redirect'
+                : `/remote/period.xml?start=${start}`;
+          const remote = `<Period xmlns:xlink="http://www.w3.org/1999/xlink" id="placeholder" start="PT${start}S" duration="PT${24 - start}S" xlink:href="${href}" xlink:actuate="${start ? 'onRequest' : 'onLoad'}">${mode === 'xlink-fallback.mpd' ? content : ''}</Period>`;
+          body = body.replace(
+            /<Period[^>]*>[\s\S]*?<\/Period>/,
+            `${start ? `<Period id="first" start="PT0S" duration="PT12S">${content}</Period>` : ''}${remote}`,
+          );
+        }
         if (mode === 'number.mpd' || mode === 'soak.mpd')
           body = body.replace(
             /<SegmentTemplate([^>]*)>[\s\S]*?<\/SegmentTemplate>/g,
@@ -98,7 +258,7 @@ export function dashServer() {
               `<Representation id="0"${attributes}><SegmentTemplate timescale="1000" duration="2000" startNumber="0" initialization="${folder}/init.mp4" media="${folder}/segment$Number%02d$.m4s"/></Representation>`,
           );
         }
-        if (/^(cenc|cbcs)(-constant|-rotation)?\.mpd$/.test(mode)) {
+        if (/^(cenc|cbcs)(-constant|-rotation|-seig)?\.mpd$/.test(mode)) {
           const scheme = mode.slice(0, -4);
           body = body.replace(
             /<Representation id="1"[\s\S]*?<\/Representation>/,
@@ -178,7 +338,7 @@ export function dashServer() {
           );
         }
         if (
-          ['live.mpd', 'll.mpd', 'soak.mpd'].includes(mode) &&
+          ['live.mpd', 'll.mpd', 'll-soak.mpd', 'soak.mpd'].includes(mode) &&
           !controls.finish
         ) {
           const session = url.searchParams.get('session') ?? '';
@@ -202,12 +362,12 @@ export function dashServer() {
               `<PatchLocation ttl="60">/dash/patch.mpp?publish=${encodeURIComponent(publish)}</PatchLocation><Period`,
             );
         }
-        if (mode === 'll.mpd') {
+        if (mode === 'll.mpd' || mode === 'll-soak.mpd') {
           controls.producerTime =
             (epochs.get(url.searchParams.get('session') ?? '') - 1000) / 1000;
           body = body.replace(
             /(<AdaptationSet[^>]*>)/g,
-            `$1<ProducerReferenceTime id="7" type="encoder" inband="false" wallClockTime="${new Date(controls.producerTime * 1000).toISOString()}" presentationTime="0"/>`,
+            `$1<ProducerReferenceTime id="7" type="encoder" inband="${controls.inbandProducer}" wallClockTime="${new Date(controls.producerTime * 1000).toISOString()}" presentationTime="0"/>`,
           );
           body = body.replace(
             'suggestedPresentationDelay="PT4S"',
@@ -223,6 +383,8 @@ export function dashServer() {
               `<SegmentTemplate${attrs.replace(/ media="[^"]*"/, ' media="ll-$RepresentationID$-$Number$.m4s"')} duration="${Number(/timescale="(\d+)"/.exec(attrs)[1]) * 4}" availabilityTimeOffset="2" availabilityTimeComplete="false"/>`,
           );
         }
+        if (mode === 'll-soak.mpd')
+          body = body.replaceAll('media="ll-', 'media="ll-loop-');
         if (controls.removeAudio)
           body = body.replace(
             /<AdaptationSet id="[12]"[\s\S]*?<\/AdaptationSet>/g,
@@ -254,51 +416,44 @@ export function dashServer() {
           res.end();
           return;
         }
-        const number = Number(loop[2]);
-        if (!Number.isSafeInteger(number) || number < 1)
-          throw new Error('Invalid loop number');
-        const original = ((number - 1) % 12) + 1;
-        const data = await readFile(
-          path.join(
-            root,
-            `segment-${loop[1]}-${String(original).padStart(5, '0')}.m4s`,
-          ),
-        );
-        const manifest = await readFile(
-          path.join(root, 'timeline.mpd'),
-          'utf8',
-        );
-        const representation = new RegExp(
-          `<Representation id="${loop[1]}"[\\s\\S]*?<SegmentTemplate timescale="(\\d+)"`,
-        ).exec(manifest);
-        const shift = BigInt(
-          Math.floor((number - 1) / 12) * 24 * Number(representation[1]),
-        );
-        const walk = (start, end) => {
-          for (let at = start; at + 8 <= end; ) {
-            const size = data.readUInt32BE(at),
-              type = data.toString('ascii', at + 4, at + 8);
-            if (size < 8 || at + size > end)
-              throw new Error('Invalid generated fragment');
-            if (type === 'moof' || type === 'traf') walk(at + 8, at + size);
-            if (type === 'tfdt') {
-              if (data[at + 8] === 1)
-                data.writeBigUInt64BE(
-                  data.readBigUInt64BE(at + 12) + shift,
-                  at + 12,
-                );
-              else
-                data.writeUInt32BE(
-                  data.readUInt32BE(at + 12) + Number(shift),
-                  at + 12,
-                );
-            }
-            at += size;
-          }
-        };
-        walk(0, data.length);
+        const data = await loopMedia(root, loop[1], Number(loop[2]));
         res.setHeader('Content-Type', 'video/mp4');
         res.end(data);
+        return;
+      }
+      const llLoop = /^\/dash\/ll-loop-(\d+)-(\d+)\.m4s$/.exec(url.pathname);
+      if (llLoop) {
+        if (controls.mediaFailures > 0) {
+          controls.mediaFailures--;
+          res.writeHead(503);
+          res.end();
+          return;
+        }
+        const number = Number(llLoop[2]);
+        res.setHeader('Content-Type', 'video/mp4');
+        for (let i = 0; i < 2; i++) {
+          const deadline =
+            epochs.get('') + ((number - 1) * 4 + (i + 1) * 2) * 1000;
+          await new Promise((r) =>
+            setTimeout(
+              r,
+              Math.max(0, deadline - Date.now()) + ((number + i) % 4) * 50,
+            ),
+          );
+          if (res.destroyed) return;
+          const data = await loopMedia(
+            root,
+            llLoop[1],
+            (number - 1) * 2 + i + 1,
+          );
+          const split = Math.floor(data.length / 2);
+          res.write(data.subarray(0, split));
+          await new Promise((r) => setTimeout(r, 30));
+          if (res.destroyed) return;
+          res.write(data.subarray(split));
+        }
+        controls.chunkResponsesClosed++;
+        res.end();
         return;
       }
       const metadata = /^\/dash\/meta-(\d+)-(\d+)\.m4s$/.exec(url.pathname);
@@ -334,17 +489,38 @@ export function dashServer() {
       const chunked = /^\/dash\/ll-(\d+)-(\d+)\.m4s$/.exec(url.pathname);
       if (chunked) {
         const first = (Number(chunked[2]) - 1) * 2 + 1;
-        const segment = (n) =>
-          readFile(
+        const segment = async (n) => {
+          const data = await readFile(
             path.join(
               root,
               `segment-${chunked[1]}-${String(n).padStart(5, '0')}.m4s`,
             ),
           );
+          if (!controls.inbandProducer) return data;
+          const prft = Buffer.alloc(32);
+          prft.writeUInt32BE(32);
+          prft.write('prft', 4);
+          prft[8] = 1;
+          prft.writeUInt32BE(1, 12);
+          const ntp = controls.producerTime + 2208988800;
+          prft.writeUInt32BE(Math.floor(ntp) % 2 ** 32, 16);
+          prft.writeUInt32BE(Math.floor((ntp % 1) * 2 ** 32), 20);
+          // time zero maps to the producer epoch independently of each fragment.
+          return Buffer.concat([prft, data]);
+        };
         const [a, b] = await Promise.all([segment(first), segment(first + 1)]);
         res.setHeader('Content-Type', 'video/mp4');
-        res.write(a.subarray(0, 17));
-        res.write(a.subarray(17));
+        const split = controls.chunkPaceMs ? Math.floor(a.length / 2) : 17;
+        res.write(a.subarray(0, split));
+        if (controls.chunkPaceMs)
+          await new Promise((r) => setTimeout(r, controls.chunkPaceMs));
+        res.write(a.subarray(split));
+        if (controls.chunkDisconnects > 0) {
+          controls.chunkDisconnects--;
+          await new Promise((r) => setTimeout(r, 100));
+          res.destroy();
+          return;
+        }
         await new Promise((r) => setTimeout(r, 2500));
         if (!res.destroyed) res.write(b);
         await new Promise((r) => setTimeout(r, 100));

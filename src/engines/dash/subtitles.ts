@@ -10,7 +10,7 @@ import { textMetadata, textSamples } from '../hls/text-mp4';
 import { parseTtml } from '../hls/ttml';
 import { TtmlRenderer } from '../hls/ttml-renderer';
 import { initializationResource, segmentReferences } from './segments';
-import { parseSidx } from './sidx';
+import { loadSidx } from './sidx';
 import type {
   Adaptation,
   Period,
@@ -124,13 +124,17 @@ export class DashSubtitles {
             url: rep.baseUrls[0],
             alternatives: rep.baseUrls.slice(1),
             range: rep.address.indexRange,
+            serviceLocations: rep.serviceLocations,
           });
-          this.index = parseSidx(
-            data.data,
-            rep.address.indexRange.offset,
-            data.url,
-            rep,
-            period,
+          this.index = (
+            await loadSidx(
+              this.client,
+              data.data,
+              rep.address.indexRange.offset,
+              data.url,
+              rep,
+              period,
+            )
           ).map((reference) => ({
             ...reference,
             alternatives: rep.baseUrls.filter((url) => url !== data.url),

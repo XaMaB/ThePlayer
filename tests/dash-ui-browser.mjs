@@ -1,6 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { dashServer } from './helpers/dash-server.mjs';
+const { version } = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+);
 const { server } = dashServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -37,9 +41,8 @@ try {
   await page.locator('#audio-toggle').click();
   await page.locator('#screen').click({ button: 'right' });
   assert.match(await page.locator('#player-menu').innerText(), /ThePlayer/);
-  assert.match(
-    await page.locator('#player-menu').innerText(),
-    /1\.2\.0-alpha\.1/,
+  assert.ok(
+    (await page.locator('#player-menu').innerText()).includes(`v${version}`),
   );
   await page.locator('#hls-url').fill(base + '/dash/live.mpd?session=ui');
   await page.locator('#connect').click();

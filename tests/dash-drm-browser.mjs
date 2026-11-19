@@ -7,12 +7,14 @@ const browser = await chromium.launch({
 const { server } = dashServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 try {
-  for (const scheme of [
+  for (const scheme of process.env.DASH_DRM_SCHEMES?.split(',') ?? [
     'cenc',
     'cbcs',
     'cbcs-constant',
     'cenc-rotation',
     'cbcs-rotation',
+    'cenc-seig',
+    'cbcs-seig',
   ]) {
     for (const transport of ['fetch', 'xhr']) {
       const page = await browser.newPage();
@@ -81,7 +83,7 @@ try {
         console.log(
           scheme,
           transport,
-          'ClearKey playback, seek, Period rotation and teardown PASS',
+          'ClearKey playback, seek, key rotation and teardown PASS',
         );
       } catch (e) {
         console.log(

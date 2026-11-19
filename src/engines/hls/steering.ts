@@ -51,7 +51,7 @@ export function pathways(master: Playlist) {
   }
   return result;
 }
-function replaceUri(uri: string, replacement: Record<string, unknown>) {
+export function replaceUri(uri: string, replacement: Record<string, unknown>) {
   const u = new URL(uri);
   if (replacement.HOST !== undefined) {
     const host = text(replacement.HOST);

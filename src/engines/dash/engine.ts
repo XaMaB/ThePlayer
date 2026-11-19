@@ -1,3 +1,8 @@
+import { ChunkThroughput } from './chunk-throughput';
+import { PlaybackMetrics } from './qoe';
+import type { CmcdOptions } from './telemetry';
+import { DashThumbnails } from './thumbnails';
+import { producerClocks, type ProducerClock } from './producer-time';
 import type { PlaybackEngine } from '../../core/player';
 import { VERSION } from '../../version';
 import { delay, type NetworkOptions } from '../hls/network';
@@ -10,6 +15,7 @@ import { EmeController, type DrmOptions } from '../hls/eme';
 import type { Resource } from '../hls/playlist';
 import { parseMpd } from './mpd';
 import { initializationResource, segmentReferences } from './segments';
+import { RemoteElements } from './xlink';
 import { DashResourceClient } from './network';
 import { DashCaptions } from './captions';
 import type { FragmentTrack } from '../hls/fragment-samples';
@@ -17,7 +23,7 @@ import type { P16Encoding } from '../hls/cea708-packets';
 import { applyMpdPatch } from './patch';
 import { CmafChunks } from './chunks';
 import { DashSubtitles, textFormat } from './subtitles';
-import { parseSidx } from './sidx';
+import { loadSidx } from './sidx';
 import { mediaEvent } from './media';
 import type {
   Adaptation,
@@ -38,6 +44,8 @@ export interface DashSource {
   targetBuffer?: number;
   quality?: 'auto' | number;
   audioLanguage?: string;
+  audioRole?: string;
+  cmcd?: CmcdOptions;
   liveRecoveryWindowMs?: number;
   lowLatency?: boolean;
   latencyControl?: boolean;
@@ -59,6 +67,7 @@ interface Lane {
   failureSince?: number;
   index?: SegmentReference[];
   captionMetadata?: FragmentTrack[];
+  producerClock?: ProducerClock;
 }
 export class DashEngine extends EventTarget implements PlaybackEngine {
   readonly protocol = 'dash';
@@ -71,17 +80,20 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     requests: 0,
     manifestUpdates: 0,
     metadataEvents: 0,
+    xlink: { requests: 0, resolved: 0, fallbacks: 0, removed: 0 },
     patches: { applied: 0, fallbacks: 0 },
     delivery: { switches: 0, failures: 0, origin: '' },
     clockOffset: 0,
     clockWarning: '',
     lowLatency: {
       chunks: 0,
+      throughputSamples: 0,
       latency: 0,
       target: 0,
       playbackRate: 1,
       producerLatency: null as number | null,
       producerType: '',
+      producerSource: '',
     },
     recovery: {
       manifestFailures: 0,
@@ -94,10 +106,14 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       seekRetries: 0,
     },
     buffer: { ahead: 0, target: 12, live: false, mode: 'dash-segment' },
+    qoe: {} as Record<string, unknown>,
+    steering: {} as Record<string, unknown>,
     quality: { mode: 'auto', current: 0, bandwidthEstimate: 0 },
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
   };
   catalog: any = { profile: 'dash', tracks: [] };
+  videoTracks: any[] = [];
+  selectedVideoTrack = '';
   audioTracks: any[] = [];
   subtitleTracks: any[] = [];
   qualityLevels: any[] = [];
@@ -114,6 +130,11 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private lanes: Lane[] = [];
   private abort = new AbortController();
   private client: DashResourceClient;
+  private metrics: PlaybackMetrics;
+  private lastQoeAt = 0;
+  private presentedPeriod = '';
+  private thumbnails?: DashThumbnails;
+  private remote: RemoteElements;
   private media?: MediaSource;
   private mediaUrl = '';
   private eme?: EmeController;
@@ -138,7 +159,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private startPosition = 0;
   private qualityTimeline: { at: number; index: number }[] = [];
   private commands: {
-    kind: 'quality' | 'audio';
+    kind: 'quality' | 'audio' | 'view';
     index: number;
     resolve: () => void;
     reject: (e: unknown) => void;
@@ -184,10 +205,22 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         } else this.emit(event, detail);
       },
     );
+    this.metrics = new PlaybackMetrics(video, this.abort.signal);
     this.client = new DashResourceClient(
       source.network ?? {},
       this.abort.signal,
     );
+    if (source.cmcd)
+      this.client.telemetry = {
+        options: source.cmcd,
+        metrics: () => ({
+          live: this.manifest?.live,
+          buffer: bufferedAhead(video.buffered, video.currentTime),
+          throughput: this.abr.estimate,
+          startup: this.initial,
+        }),
+      };
+    this.remote = new RemoteElements(this.client);
     this.autoQuality = typeof source.quality !== 'number';
     if (source.drm)
       this.eme = new EmeController(video, source.drm, (e) => this.fail(e));
@@ -287,14 +320,35 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     for (const command of this.commands.splice(0)) command.reject(error);
   }
   private async readManifest(url: string, refresh = false) {
-    const result = await this.client.get(
-      { url },
+    const result = await this.client.manifest(
+      url,
       refresh ? this.liveRequestOptions(true) : {},
+      this.manifest?.locations.includes(url)
+        ? {
+            url,
+            alternatives: this.manifest.locations.filter((u) => u !== url),
+            serviceLocations: [
+              this.manifest.locationServices?.[
+                this.manifest.locations.indexOf(url)
+              ] ?? '',
+              ...this.manifest.locations.flatMap((u, i) =>
+                u !== url ? [this.manifest.locationServices?.[i] ?? ''] : [],
+              ),
+            ],
+          }
+        : undefined,
     );
     if (result.data.length > 4 * 1024 * 1024)
       throw new Error('DASH MPD exceeds 4 MiB');
     const xml = new TextDecoder('utf-8', { fatal: true }).decode(result.data);
-    const parsed = parseMpd(xml, result.url);
+    const resolved = await this.remote.resolve(
+      xml,
+      result.url,
+      this.manifest ? this.video.currentTime : this.source.startTime,
+    );
+    const parsed = parseMpd(resolved, result.url);
+    this.client.configure(parsed);
+    if (!this.manifest) await this.client.steering?.refresh(false, 0);
     this.manifestXml = xml;
     return parsed;
   }
@@ -315,7 +369,15 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
           this.manifestXml,
           new TextDecoder('utf-8', { fatal: true }).decode(response.data),
         );
-        const next = parseMpd(patched, this.manifest.url);
+        const next = parseMpd(
+          await this.remote.resolve(
+            patched,
+            this.manifest.url,
+            this.video.currentTime,
+          ),
+          this.manifest.url,
+        );
+        this.client.configure(next);
         this.manifestXml = patched;
         this.diagnostics.patches.applied++;
         return next;
@@ -419,9 +481,18 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       .sort((a, b) => a.bandwidth - b.bandwidth);
   }
   private inventory(period: Period) {
-    const video = period.adaptations.find(
+    const videos = period.adaptations.filter(
       (a) => a.kind === 'video' && this.usable(a).length,
     );
+    const video =
+      videos.find((a) => a.id === this.selectedVideoTrack) ?? videos[0];
+    this.videoTracks = videos.map((a) => ({
+      name: a.id,
+      label: a.label,
+      adaptation: a,
+    }));
+    this.selectedVideoTrack = video?.id ?? '';
+    this.emit('videotracks', this.videoTracks);
     const audio = period.adaptations.filter(
       (a) => a.kind === 'audio' && this.usable(a).length,
     );
@@ -442,6 +513,9 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       name: a.id,
       label: a.label,
       language: a.language,
+      roles: a.roles,
+      accessibility: a.accessibility,
+      channels: a.representations[0]?.channels,
       adaptation: a,
     }));
     this.subtitleTracks = period.adaptations
@@ -497,16 +571,31 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         url: rep.baseUrls[0],
         alternatives: rep.baseUrls.slice(1),
         range: rep.address.indexRange,
+        serviceLocations: rep.serviceLocations,
       });
-      lane.index = parseSidx(
-        index.data,
-        rep.address.indexRange.offset,
-        index.url,
-        rep,
-        period,
+      lane.index = (
+        await loadSidx(
+          this.client,
+          index.data,
+          rep.address.indexRange.offset,
+          index.url,
+          rep,
+          period,
+        )
       ).map((reference) => ({
         ...reference,
+        telemetry: {
+          type: adaptation.kind === 'audio' ? ('a' as const) : ('v' as const),
+          duration: reference.end - reference.start,
+          bitrate: rep.bandwidth,
+        },
         alternatives: rep.baseUrls.filter((url) => url !== reference.url),
+        serviceLocations: [
+          rep.serviceLocations?.[rep.baseUrls.indexOf(reference.url)] ?? '',
+          ...rep.baseUrls.flatMap((url, i) =>
+            url !== reference.url ? [rep.serviceLocations?.[i] ?? ''] : [],
+          ),
+        ],
       }));
     }
     lane.cursor = this.prerollPosition(lane, cursor);
@@ -603,6 +692,23 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     );
   }
   private async enterPeriod(period: Period, cursor: number, initial = false) {
+    if (period.remote) {
+      const resolved = parseMpd(
+        await this.remote.resolve(
+          this.manifestXml,
+          this.manifest.url,
+          cursor,
+          false,
+        ),
+        this.manifest.url,
+      );
+      this.manifest = resolved;
+      period = this.periodAt(cursor);
+      if (period.remote)
+        throw new Error(
+          'DASH remote Period is unavailable at playback position',
+        );
+    }
     const { primary, video, audio } = this.inventory(period);
     const reps = this.usable(primary);
     let index =
@@ -616,7 +722,11 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       audio.find(
         (a) =>
           this.source.audioLanguage &&
-          a.language.toLowerCase() === this.source.audioLanguage.toLowerCase(),
+          languageMatches(a.language, this.source.audioLanguage) &&
+          (!this.source.audioRole || a.roles.includes(this.source.audioRole)),
+      ) ??
+      audio.find(
+        (a) => this.source.audioRole && a.roles.includes(this.source.audioRole),
       ) ??
       audio.find((a) => a.roles.includes('main')) ??
       audio[0];
@@ -931,12 +1041,19 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       !lane.rep.address.availabilityTimeComplete &&
       !segment.range;
     const chunks = chunked ? new CmafChunks() : undefined;
+    const transfer = new ChunkThroughput();
     let work: Promise<void> = Promise.resolve();
     let appendError: unknown;
     let units = 0;
     const onChunk = chunks
       ? (bytes: Uint8Array) => {
-          for (const unit of chunks.push(bytes)) {
+          const complete = chunks.push(bytes);
+          transfer.observe(
+            bytes.length,
+            complete.reduce((n, u) => n + u.length, 0),
+            performance.now(),
+          );
+          for (const unit of complete) {
             work = work
               .then(async () => {
                 if (
@@ -1015,7 +1132,13 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     lane.failureSince = undefined;
     lane.retryAt = undefined;
     if (generation !== this.generation) return;
-    if (response) this.abr.observe(response.data.length, response.elapsed);
+    if (response) {
+      this.abr.observe(
+        transfer.samples ? transfer.bytes : response.data.length,
+        transfer.samples ? transfer.elapsed : response.elapsed,
+      );
+      this.diagnostics.lowLatency.throughputSamples += transfer.samples;
+    }
     if (!units)
       await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
         lane.buffer!.appendBuffer((data ?? response!.data) as BufferSource),
@@ -1077,6 +1200,17 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   }
   private fragmentEvents(data: Uint8Array, lane: Lane) {
     try {
+      const signaled = lane.rep.producerReferences?.find(
+        (ref) =>
+          ref.inband &&
+          (this.manifest?.service?.referenceId === undefined
+            ? ref.type === 'encoder'
+            : ref.id === this.manifest.service.referenceId),
+      );
+      for (const clock of producerClocks(data, lane.tracks, this.now())) {
+        if (clock.type === (signaled?.type ?? 'encoder'))
+          lane.producerClock = clock;
+      }
       const offset =
         lane.period.start -
         Number(lane.rep.address.presentationTimeOffset) /
@@ -1119,35 +1253,58 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     const target =
       service?.targetLatency ?? this.manifest.suggestedPresentationDelay ?? 12;
     const playbackPeriod = this.periodAt(this.video.currentTime);
-    const representation =
-      playbackPeriod.adaptations
-        .find((a) => a.kind === 'video')
-        ?.representations.find(
-          (r) =>
-            r.id === this.qualityLevels[this.currentQuality]?.representationId,
-        ) ??
+    const primary =
       playbackPeriod.adaptations.find(
-        (a) => a.kind === 'video' || a.kind === 'audio',
-      )?.representations[0];
+        (a) => a.kind === 'video' && a.id === this.selectedVideoTrack,
+      ) ??
+      playbackPeriod.adaptations.find((a) => a.kind === 'video') ??
+      playbackPeriod.adaptations.find(
+        (a) => a.kind === 'audio' && a.id === this.selectedAudioTrack,
+      ) ??
+      playbackPeriod.adaptations.find((a) => a.kind === 'audio');
+    const representation =
+      primary?.representations.find(
+        (r) =>
+          r.id === this.qualityLevels[this.currentQuality]?.representationId,
+      ) ?? primary?.representations[0];
     const producer = representation?.producerReferences?.find((ref) =>
       service?.referenceId === undefined
         ? ref.type === 'encoder'
         : ref.id === service.referenceId,
     );
+    const inband = this.lanes.find(
+      (lane) =>
+        lane.period.id === playbackPeriod.id &&
+        lane.rep.id === representation?.id,
+    )?.producerClock;
     const producerLatency =
-      producer && representation
+      inband && representation
         ? this.now() -
-          (producer.wallClockTime +
+          (inband.wallClockTime +
             this.video.currentTime -
             playbackPeriod.start -
-            Number(
-              producer.presentationTime -
-                representation.address.presentationTimeOffset,
-            ) /
-              representation.address.timescale)
-        : null;
+            (inband.mediaTime -
+              Number(representation.address.presentationTimeOffset) /
+                representation.address.timescale))
+        : producer && representation
+          ? this.now() -
+            (producer.wallClockTime +
+              this.video.currentTime -
+              playbackPeriod.start -
+              Number(
+                producer.presentationTime -
+                  representation.address.presentationTimeOffset,
+              ) /
+                representation.address.timescale)
+          : null;
     this.diagnostics.lowLatency.producerLatency = producerLatency;
-    this.diagnostics.lowLatency.producerType = producer?.type ?? '';
+    this.diagnostics.lowLatency.producerType =
+      inband?.type ?? producer?.type ?? '';
+    this.diagnostics.lowLatency.producerSource = inband
+      ? 'inband'
+      : producer
+        ? 'mpd'
+        : '';
     const latency = Math.max(
       0,
       producerLatency ?? this.edge() - this.video.currentTime,
@@ -1179,7 +1336,32 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.diagnostics.lowLatency.playbackRate = this.video.playbackRate;
   }
   private updateDiagnostics() {
+    this.diagnostics.qoe = this.metrics.snapshot();
+    const presented = this.periodAt(this.video.currentTime);
+    if (presented.id !== this.presentedPeriod) {
+      const previousId = this.presentedPeriod;
+      this.presentedPeriod = presented.id;
+      this.emit('periodchange', {
+        id: presented.id,
+        previousId,
+        start: presented.start,
+        duration: presented.duration,
+        time: this.video.currentTime,
+      });
+    }
+    if (performance.now() - this.lastQoeAt >= 1000) {
+      this.lastQoeAt = performance.now();
+      this.emit('qoe', {
+        ...this.diagnostics.qoe,
+        time: this.video.currentTime,
+        buffer: bufferedAhead(this.video.buffered, this.video.currentTime),
+        quality: this.currentQuality,
+      });
+    }
+
+    this.diagnostics.steering = this.client.steering?.diagnostics ?? {};
     this.diagnostics.delivery = { ...this.client.delivery };
+    this.diagnostics.xlink = { ...this.remote.diagnostics };
     this.diagnostics.bytes = this.client.bytes;
     this.diagnostics.requests = this.client.requests;
     this.diagnostics.buffer = {
@@ -1225,6 +1407,12 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private async run() {
     while (!this.abort.signal.aborted && !this.failed) {
       await this.refresh();
+      await this.client.steering?.refresh(
+        !this.initial &&
+          bufferedAhead(this.video.buffered, this.video.currentTime) >=
+            this.targetBuffer,
+        this.abr.estimate,
+      );
       if (
         this.isLive &&
         !this.initial &&
@@ -1339,14 +1527,18 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       if (!appended) await delay(100, this.abort.signal);
     }
   }
-  private async switchLane(kind: 'quality' | 'audio', index: number) {
+  private async switchLane(kind: 'quality' | 'audio' | 'view', index: number) {
     const old =
-      kind === 'quality'
+      kind === 'quality' || kind === 'view'
         ? this.lanes[0]
         : this.lanes.find((l) => l.adaptation.kind === 'audio');
     if (!old) throw new Error('DASH media lane is unavailable');
     const adaptation =
-      kind === 'quality' ? old.adaptation : this.audioTracks[index]?.adaptation;
+      kind === 'quality'
+        ? old.adaptation
+        : kind === 'view'
+          ? this.videoTracks[index]?.adaptation
+          : this.audioTracks[index]?.adaptation;
     if (!adaptation) throw new Error('Unknown DASH audio track');
     const rep = this.usable(adaptation)[kind === 'quality' ? index : 0];
     if (!rep) throw new Error('Unknown DASH quality');
@@ -1360,6 +1552,12 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       if (generation !== this.generation)
         throw new Error('DASH seek interrupted switching');
       await this.refresh();
+      await this.client.steering?.refresh(
+        !this.initial &&
+          bufferedAhead(this.video.buffered, this.video.currentTime) >=
+            this.targetBuffer,
+        this.abr.estimate,
+      );
       const updated = this.period.adaptations
         .find((a) => a.id === adaptation.id)
         ?.representations.find((r) => r.id === rep.id);
@@ -1384,6 +1582,16 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         ...this.qualityLevels[index],
         effectiveAt: reference.start,
       });
+    } else if (kind === 'view') {
+      this.selectedVideoTrack = adaptation.id;
+      this.selectedQuality = 0;
+      this.inventory(this.period);
+      this.qualityTimeline.push({ at: reference.start, index: 0 });
+      this.qualityTimeline = this.qualityTimeline.slice(-100);
+      this.emit('videochange', {
+        ...this.videoTracks[index],
+        effectiveAt: reference.start,
+      });
     } else {
       this.selectedAudioTrack = adaptation.id;
       this.emit('audiochange', this.audioTracks[index]);
@@ -1406,12 +1614,20 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.autoQuality = false;
     await this.enqueue('quality', index);
   }
+  async selectVideoTrack(name: string) {
+    const index = this.videoTracks.findIndex((t) => t.name === name);
+    if (index < 0) throw new Error('Unknown DASH video view');
+    await this.enqueue('view', index);
+  }
   async selectAudioTrack(name: string) {
     const index = this.audioTracks.findIndex((t) => t.name === name);
     if (index < 0) throw new Error('Unknown DASH audio track');
     await this.enqueue('audio', index);
   }
-  private enqueue(kind: 'quality' | 'audio', index: number): Promise<void> {
+  private enqueue(
+    kind: 'quality' | 'audio' | 'view',
+    index: number,
+  ): Promise<void> {
     if (this.failed || this.abort.signal.aborted)
       return Promise.reject(new Error('DASH engine is not active'));
     return new Promise((resolve, reject) =>
@@ -1457,7 +1673,12 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         this.fail(e);
     }
   }
+  getThumbnail(time: number) {
+    this.thumbnails ??= new DashThumbnails(this.client, () => this.manifest);
+    return this.thumbnails.get(time);
+  }
   destroy(): Promise<void> {
+    this.thumbnails?.destroy();
     return (this.closing ??= (async () => {
       this.abort.abort(new DOMException('DASH player destroyed', 'AbortError'));
       for (const command of this.commands.splice(0))
@@ -1479,3 +1700,14 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   }
 }
 export type { DrmOptions } from '../hls/eme';
+
+function languageMatches(language: string, preference: string) {
+  const canonical = (value: string) => {
+    try {
+      return new Intl.Locale(value).language;
+    } catch {
+      return value.toLowerCase().split('-')[0];
+    }
+  };
+  return canonical(language) === canonical(preference);
+}

@@ -1,5 +1,8 @@
 name: Check
-on: [push, pull_request]
+on:
+  push:
+    branches: ['**']
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -104,7 +107,7 @@ jobs:
         timeout-minutes: 3
 
   dash-browsers:
-    timeout-minutes: 40
+    timeout-minutes: 60
     # Keep browser/system media libraries aligned with the validated host.
     runs-on: ubuntu-24.04
     strategy:
@@ -127,7 +130,7 @@ jobs:
       - run: npm run fixtures:dash
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
       - run: npm run test:dash
-        timeout-minutes: 15
+        timeout-minutes: 25
       - run: npm run test:dash:drm
         if: matrix.browser == 'chromium'
       - run: npm run test:dash:soak

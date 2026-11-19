@@ -8,8 +8,19 @@ const browser = await { chromium, firefox, webkit }[name].launch(
     : {},
 );
 try {
-  for (const transport of ['fetch', 'xhr']) {
+  for (const variant of [
+    'mpd-fetch',
+    'mpd-xhr',
+    'inband-fetch',
+    'inband-xhr',
+    'retry-fetch',
+  ]) {
+    const [mode, transport] = variant.split('-');
+    const producer = mode === 'retry' ? 'mpd' : mode;
     const { server, controls } = dashServer();
+    controls.inbandProducer = producer === 'inband';
+    controls.chunkDisconnects = mode === 'retry' ? 1 : 0;
+    controls.chunkPaceMs = transport === 'fetch' ? 30 : 0;
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const page = await browser.newPage();
     try {
@@ -57,7 +68,9 @@ try {
       );
       const diagnostics = await page.evaluate(() => window.player.diagnostics);
       assert.equal(diagnostics.lowLatency.target, 3);
+      if (mode === 'retry') assert.ok(diagnostics.recovery.segmentFailures > 0);
       assert.equal(diagnostics.lowLatency.producerType, 'encoder');
+      assert.equal(diagnostics.lowLatency.producerSource, producer);
       const measured = await page.evaluate(
         (reference) =>
           Date.now() / 1000 -
@@ -69,7 +82,10 @@ try {
         Math.abs(measured - diagnostics.lowLatency.producerLatency) < 0.5,
         'Producer reference maps media time to production clock',
       );
-      if (transport === 'fetch') assert.ok(diagnostics.lowLatency.chunks >= 4);
+      if (transport === 'fetch') {
+        assert.ok(diagnostics.lowLatency.chunks >= 4);
+        assert.ok(diagnostics.lowLatency.throughputSamples > 0);
+      }
       assert.ok(
         diagnostics.lowLatency.playbackRate >= 0.97 &&
           diagnostics.lowLatency.playbackRate <= 1.03,
@@ -77,7 +93,7 @@ try {
       assert.deepEqual(await page.evaluate(() => window.errors), []);
       console.log(
         name,
-        transport,
+        variant,
         'LL CMAF decode, ServiceDescription and playback progress PASS',
         { closedAtFirstFrames, chunks: diagnostics.lowLatency.chunks },
       );

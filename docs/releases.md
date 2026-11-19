@@ -1,5 +1,13 @@
 # Release versions
 
+## 1.3.0
+
+- Promote the documented browser fMP4/CMAF DASH profile to Implemented; keep optional-profile and physical-device limits explicit in the support matrix.
+- Add XLink, hierarchical SIDX, MPD validators/304, in-band producer time and CMAF transfer measurement that excludes inter-chunk production waits.
+- Add Content Steering, JPEG thumbnails, alternate video views, audio language aliases/roles, CMCD v1/v2 request telemetry, raw CMSD and local QoE/Period events.
+- Verify in-Period CENC/CBCS sample-group key rotation, AV1 in three browser engines and HEVC Main/AC-3/E-AC-3 in Linux WebKit; reject unavailable decoders explicitly.
+- Expand deterministic/browser/public/soak coverage and refresh the README, demo, architecture, integration and verification documentation.
+
 ## CI follow-up to 1.2.0-alpha.1
 
 - Pin GitHub runners to the validated Ubuntu 24.04 environment instead of the moving ubuntu-latest label.

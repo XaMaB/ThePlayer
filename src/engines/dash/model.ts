@@ -41,17 +41,21 @@ export interface Representation {
   width?: number;
   height?: number;
   frameRate?: number;
+  channels?: { scheme: string; value: string };
+  tiles?: { columns: number; rows: number };
   baseUrls: string[];
+  serviceLocations?: string[];
   address: SegmentAddress;
   protection: Protection[];
   producerReferences?: ProducerReference[];
 }
 export interface Adaptation {
   id: string;
-  kind: 'video' | 'audio' | 'text';
+  kind: 'video' | 'audio' | 'text' | 'image';
   language: string;
   label: string;
   roles: string[];
+  accessibility?: { scheme: string; value: string }[];
   representations: Representation[];
 }
 export interface DashEvent {
@@ -68,6 +72,7 @@ export interface Period {
   start: number;
   duration?: number;
   adaptations: Adaptation[];
+  remote?: boolean;
   events?: DashEvent[];
 }
 export interface Manifest {
@@ -91,11 +96,15 @@ export interface Manifest {
   };
   utcTiming: { scheme: string; value: string }[];
   locations: string[];
+  locationServices?: string[];
+  steering?: { url: string; defaults: string[]; queryBeforeStart: boolean };
   patchLocations?: { url: string; ttl?: number }[];
   periods: Period[];
 }
 export interface SegmentReference extends Resource {
+  telemetry?: import('./telemetry').MediaRequest;
   alternatives?: string[];
+  serviceLocations?: string[];
   number: bigint;
   time: bigint;
   start: number;

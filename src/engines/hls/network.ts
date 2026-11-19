@@ -36,6 +36,9 @@ export interface RequestProgress {
   elapsedMs: number;
 }
 export interface RequestOptions {
+  headers?: Record<string, string>;
+  /** Only callers retaining the exact representation may accept HTTP 304. */
+  acceptNotModified?: boolean;
   timeoutMs?: number;
   retries?: number;
   signal?: AbortSignal;
@@ -45,6 +48,10 @@ export interface RequestOptions {
   onChunk?: (chunk: Uint8Array, url: string) => void;
 }
 export interface ResourceResponse {
+  status?: number;
+  etag?: string;
+  lastModified?: string;
+  cmsd?: { static?: string; dynamic?: string };
   data: Uint8Array;
   url: string;
   elapsed: number;
@@ -119,6 +126,7 @@ export class ResourceClient {
             signal,
             request.onProgress,
             request.onChunk,
+            request,
           );
           if (recovering) this.recovery.recovered++;
           return { ...result, elapsed: performance.now() - started };
@@ -158,6 +166,7 @@ export class ResourceClient {
     signal: AbortSignal,
     progress?: (value: RequestProgress) => void,
     chunk?: (data: Uint8Array, url: string) => void,
+    request: RequestOptions = {},
   ) {
     const controller = new AbortController();
     const stop = () => controller.abort(signal.reason);
@@ -183,7 +192,10 @@ export class ResourceClient {
     };
     const pulse = progress ? setInterval(notify, 250) : undefined;
     try {
-      const headers = { ...this.options.headers?.(resource.url) };
+      const headers = {
+        ...request.headers,
+        ...this.options.headers?.(resource.url),
+      };
       if (resource.rangeStart != null)
         headers.Range = `bytes=${resource.rangeStart}-9007199254740991`;
       if (resource.range)
@@ -192,7 +204,10 @@ export class ResourceClient {
         url: string,
         status: number,
         contentRange: string | null,
-        age: number | undefined;
+        age: number | undefined,
+        etag: string | undefined,
+        lastModified: string | undefined,
+        cmsd: { static?: string; dynamic?: string };
       if (this.options.transport === 'xhr') {
         const result = await new Promise<{
           data: Uint8Array;
@@ -201,6 +216,9 @@ export class ResourceClient {
           range: string | null;
           retryAfter: string | null;
           age?: number;
+          etag?: string;
+          lastModified?: string;
+          cmsd: { static?: string; dynamic?: string };
         }>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           const cancel = () => {
@@ -213,7 +231,17 @@ export class ResourceClient {
           xhr.withCredentials = this.options.credentials === 'include';
           for (const [name, value] of Object.entries(headers))
             xhr.setRequestHeader(name, value);
-          xhr.onload = () =>
+          xhr.onload = () => {
+            const exposed = new Set(
+              xhr
+                .getAllResponseHeaders()
+                .split(/\r?\n/)
+                .map((line) => line.split(':', 1)[0].toLowerCase()),
+            );
+            const optionalHeader = (name: string) =>
+              exposed.has(name.toLowerCase())
+                ? xhr.getResponseHeader(name)
+                : null;
             resolve({
               data: new Uint8Array(xhr.response),
               url: xhr.responseURL,
@@ -221,7 +249,14 @@ export class ResourceClient {
               range: xhr.getResponseHeader('Content-Range'),
               retryAfter: xhr.getResponseHeader('Retry-After'),
               age: httpAge(xhr.getResponseHeader('Age')),
+              etag: optionalHeader('ETag') ?? undefined,
+              lastModified: optionalHeader('Last-Modified') ?? undefined,
+              cmsd: {
+                static: optionalHeader('CMSD-Static')?.slice(0, 8192),
+                dynamic: optionalHeader('CMSD-Dynamic')?.slice(0, 8192),
+              },
             });
+          };
           xhr.onprogress = (event) => {
             loaded = event.loaded;
             total = event.lengthComputable ? event.total : undefined;
@@ -239,6 +274,25 @@ export class ResourceClient {
         ({ data, url, status } = result);
         contentRange = result.range;
         age = result.age;
+        etag = result.etag;
+        lastModified = result.lastModified;
+        cmsd = result.cmsd;
+        if (
+          status === 304 &&
+          request.acceptNotModified &&
+          !resource.range &&
+          resource.rangeStart == null
+        )
+          return {
+            data: new Uint8Array(),
+            url,
+            status,
+            etag,
+            lastModified,
+            age,
+            elapsed: performance.now() - start,
+            receivedAt: performance.now(),
+          };
         if (status < 200 || status >= 300)
           throw new HttpError(status, result.retryAfter);
       } else {
@@ -251,6 +305,28 @@ export class ResourceClient {
         url = response.url;
         contentRange = response.headers.get('Content-Range');
         age = httpAge(response.headers.get('Age'));
+        etag = response.headers.get('ETag') ?? undefined;
+        lastModified = response.headers.get('Last-Modified') ?? undefined;
+        cmsd = {
+          static: response.headers.get('CMSD-Static')?.slice(0, 8192),
+          dynamic: response.headers.get('CMSD-Dynamic')?.slice(0, 8192),
+        };
+        if (
+          status === 304 &&
+          request.acceptNotModified &&
+          !resource.range &&
+          resource.rangeStart == null
+        )
+          return {
+            data: new Uint8Array(),
+            url,
+            status,
+            etag,
+            lastModified,
+            age,
+            elapsed: performance.now() - start,
+            receivedAt: performance.now(),
+          };
         const length = Number(response.headers.get('Content-Length'));
         total =
           length > 0 && !response.headers.get('Content-Encoding')
@@ -337,6 +413,10 @@ export class ResourceClient {
       return {
         data,
         url,
+        status,
+        etag,
+        lastModified,
+        cmsd,
         elapsed: performance.now() - start,
         age,
         receivedAt: performance.now(),

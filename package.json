@@ -1,8 +1,8 @@
 {
   "name": "theplayer",
-  "version": "1.2.0-alpha.1",
+  "version": "1.3.0",
   "private": true,
-  "description": "Modular MoQ and HLS player with an original DASH engine preview",
+  "description": "Modular MoQ, HLS and MPEG-DASH browser player",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
@@ -56,7 +56,7 @@
     "test:hls:switch-wait": "node tests/hls-switch-wait-browser.mjs",
     "test:hls:native-clock": "node tests/hls-native-clock-browser.mjs",
     "fixtures:dash": "node scripts/prepare-dash-fixtures.mjs",
-    "test:dash": "node tests/dash-server.mjs && node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs && npm run test:dash:recovery && npm run test:dash:text && npm run test:dash:ll && npm run test:dash:captions && npm run test:dash:metadata",
+    "test:dash": "node tests/dash-server.mjs && node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs && npm run test:dash:recovery && npm run test:dash:text && npm run test:dash:ll && npm run test:dash:captions && npm run test:dash:metadata && npm run test:dash:xlink && npm run test:dash:http && npm run test:dash:steering && npm run test:dash:thumbnails && npm run test:dash:views && npm run test:dash:telemetry && npm run test:dash:codecs",
     "test:dash:public": "node tests/dash-public.mjs",
     "test:dash:recovery": "node tests/dash-recovery-browser.mjs",
     "test:dash:text": "node tests/dash-text-browser.mjs",
@@ -65,7 +65,16 @@
     "test:dash:widevine": "node tests/dash-widevine-public.mjs",
     "test:dash:captions": "node tests/dash-captions-browser.mjs",
     "test:dash:metadata": "node tests/dash-metadata-browser.mjs",
-    "test:dash:soak": "node tests/dash-soak.mjs"
+    "test:dash:soak": "node tests/dash-soak.mjs",
+    "test:dash:xlink": "node tests/dash-xlink-resolver.mjs && node tests/dash-xlink-browser.mjs",
+    "test:dash:http": "node tests/dash-http-browser.mjs",
+    "test:dash:steering": "node tests/dash-steering-browser.mjs",
+    "test:dash:thumbnails": "node tests/dash-thumbnail-browser.mjs",
+    "test:dash:views": "node tests/dash-views-browser.mjs",
+    "test:dash:telemetry": "node tests/dash-telemetry-browser.mjs",
+    "test:dash:codecs": "node tests/dash-codecs-browser.mjs",
+    "test:dash:ll-soak": "node tests/dash-ll-soak.mjs",
+    "test:dash:drm-soak": "node tests/dash-drm-soak.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",
