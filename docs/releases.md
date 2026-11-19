@@ -1,5 +1,9 @@
 # Release versions
 
+## 1.5.2
+
+- Replace the circular seek arrows with mirrored double-triangle icons and an embedded `10s` label. Use wider, rounded skip buttons with responsive sizing.
+
 ## 1.5.1
 
 - Refresh PiP availability when decoded dimensions arrive after `loadedmetadata` (resize, loadeddata, canplay, play and playing). Prevent a disabled button from remaining stale during MSE/WebKit playback.

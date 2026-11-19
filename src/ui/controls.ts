@@ -63,9 +63,9 @@ export function mountControls(
   const icons = {
     quality:
       '<rect class="stroke" x="1" y="5" width="22" height="14" rx="3"/><text id="quality-badge" x="12" y="15" text-anchor="middle" class="quality-badge">—</text>',
-    back: '<path class="stroke" d="M5 8a8 8 0 1 1-1 7M5 3v5h5"/><text x="12" y="15" text-anchor="middle" class="skip-number">10</text>',
+    back: '<g transform="translate(48 0) scale(-1 1)"><path class="skip-trail" d="M23 4 44 16 23 28Z"/><path class="skip-face" d="M4 3 31 16 4 29Z"/></g><text x="36" y="18.6" text-anchor="middle" class="skip-number">10<tspan class="skip-unit">s</tspan></text>',
     forward:
-      '<path class="stroke" d="M19 8a8 8 0 1 0 1 7m-1-12v5h-5"/><text x="12" y="15" text-anchor="middle" class="skip-number">10</text>',
+      '<path class="skip-trail" d="M23 4 44 16 23 28Z"/><path class="skip-face" d="M4 3 31 16 4 29Z"/><text x="12" y="18.6" text-anchor="middle" class="skip-number">10<tspan class="skip-unit">s</tspan></text>',
     audio:
       '<path class="stroke" d="M4 14v-3a8 8 0 0 1 16 0v3M4 12H2v7h5v-7zm16 0h2v7h-5v-7z"/>',
     play: '<path d="m9 5 11 7-11 7z"/>',
@@ -81,7 +81,7 @@ export function mountControls(
     more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   };
   const svg = (name: keyof typeof icons) =>
-    `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`;
+    `<svg viewBox="${name === 'back' || name === 'forward' ? '0 0 48 32' : '0 0 24 24'}" aria-hidden="true">${icons[name]}</svg>`;
   screen.insertAdjacentHTML(
     'beforeend',
     `

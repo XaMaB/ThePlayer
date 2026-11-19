@@ -1120,14 +1120,59 @@ body[data-embed] .screen {
   width: 40px;
   height: 40px;
 }
+.center-controls #skip-back,
+.center-controls #skip-forward {
+  width: 76px;
+  height: 56px;
+  border-radius: 18px;
+}
+.center-controls #skip-back svg,
+.center-controls #skip-forward svg {
+  width: 54px;
+  height: 36px;
+  overflow: visible;
+}
+.skip-face,
+.skip-trail {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.icon-button svg .skip-face {
+  fill: #a5b0ff24;
+}
+.icon-button svg .skip-trail {
+  fill: currentColor;
+  fill-opacity: 0.2;
+  stroke-opacity: 0.65;
+}
 .skip-number {
   font:
-    600 8px Inter,
+    750 8px Inter,
     ui-sans-serif,
     system-ui,
     sans-serif;
   fill: currentColor;
   stroke: none;
+  letter-spacing: -0.4px;
+}
+.skip-unit {
+  font-size: 6px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+@media (max-width: 600px) {
+  .center-controls #skip-back,
+  .center-controls #skip-forward {
+    width: 64px;
+    height: 48px;
+    border-radius: 15px;
+  }
+  .center-controls #skip-back svg,
+  .center-controls #skip-forward svg {
+    width: 48px;
+    height: 32px;
+  }
 }
 .seek-feedback {
   position: absolute;
