@@ -63,6 +63,9 @@ try {
       await page.waitForFunction(
         () => video.getVideoPlaybackQuality().totalVideoFrames > 15,
       );
+      // UI assertions may outlast the short fixture on a slower CI runner.
+      // Pause so its natural ended event cannot advance the queue mid-click.
+      await page.evaluate(() => video.pause());
       await page.click('#info-toggle');
       await page
         .getByLabel('Playback speed', { exact: true })
@@ -136,6 +139,7 @@ try {
         overlay.remove();
         delete player.subtitleTracks;
       });
+      assert.equal(await page.evaluate(() => queue.index), 0);
       await page.getByText('Playback queue', { exact: true }).click();
       await page
         .getByRole('button', { name: 'DASH test', exact: true })
@@ -146,6 +150,23 @@ try {
           video.getVideoPlaybackQuality().totalVideoFrames > 15,
       );
       assert.equal(await page.evaluate(() => player.protocol), 'dash');
+      // Exercise automatic advancement independently of the manual menu click.
+      await page.evaluate(async () => {
+        await queue.select(0);
+      });
+      await page.waitForFunction(
+        () => Number.isFinite(video.duration) && video.readyState >= 2,
+      );
+      await page.evaluate(() => {
+        video.currentTime = video.duration - 0.25;
+      });
+      await page.waitForFunction(
+        () =>
+          queue.index === 1 &&
+          !queue.loading &&
+          player.protocol === 'dash' &&
+          video.currentTime > 0.1,
+      );
       await page.click('#options-close');
       assert.equal(await page.locator('#player-menu').isVisible(), false);
       await page.evaluate(() => {
