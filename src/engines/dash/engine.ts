@@ -1258,10 +1258,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       );
       // Do not flush a newly starting decoder for a sub-frame adjustment.
       // WebKit/GStreamer can deadlock if a seek races its initial preroll.
-      if (
-        this.video.currentTime < b.start(index) ||
-        Math.abs(this.video.currentTime - this.startupSeek) > 0.05
-      ) {
+      if (Math.abs(this.video.currentTime - this.startupSeek) > 0.05) {
         this.pendingSeek = {
           position: this.startupSeek,
           started: performance.now(),

@@ -2,7 +2,7 @@
 
 ## 1.6.2
 
-- Avoid an unnecessary sub-frame startup seek when DASH playback is already inside the intended buffered range. This prevents flushing a decoder during its initial preroll; real start offsets and live positioning still seek normally.
+- Avoid an unnecessary sub-frame startup seek when DASH playback is already within 50 ms of its intended starting position, including small audio/video timestamp offsets. This prevents flushing a decoder during its initial preroll; real start offsets and live positioning still seek normally.
 - Isolate DASH browser scenarios and bound subtitle-test execution with stage diagnostics. Add regressions for natural VOD startup without a seek and explicit start-time positioning.
 
 ## 1.6.1

@@ -79,7 +79,7 @@ try {
           { timeout: 15000 },
         );
         assert.deepEqual(await page.evaluate(() => window.errors), []);
-        if (scenario === 'timeline')
+        if (scenario === 'timeline' || scenario === 'pto')
           assert.deepEqual(
             await page.evaluate(() => window.startupSeeks),
             [],
