@@ -1,12 +1,9 @@
 import { chromium, firefox, webkit } from 'playwright';
 import assert from 'node:assert/strict';
+import { caseDeadline } from './helpers/case-deadline.mjs';
 import { dashServer } from './helpers/dash-server.mjs';
 const name = process.env.DASH_TEST_BROWSER ?? 'chromium';
-const browser = await { chromium, firefox, webkit }[name].launch(
-  name === 'chromium'
-    ? { args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] }
-    : {},
-);
+let browser;
 const { server } = dashServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 try {
@@ -16,13 +13,30 @@ try {
     'text-pto',
   ]) {
     for (const transport of ['fetch', 'xhr']) {
+      const deadline = caseDeadline(`${name} ${transport} ${scenario}`);
+      console.log(name, transport, scenario, 'START');
+      // Isolate independent scenarios, including WebKit's media process.
+      deadline.phase('launch browser');
+      browser = await { chromium, firefox, webkit }[name].launch(
+        name === 'chromium'
+          ? {
+              args: [
+                '--no-sandbox',
+                '--autoplay-policy=no-user-gesture-required',
+              ],
+            }
+          : {},
+      );
+      deadline.phase('create page');
       const page = await browser.newPage();
       const faults = [];
       page.on('pageerror', (e) => faults.push(e.message));
       try {
+        deadline.phase('navigate');
         await page.goto(
           `http://127.0.0.1:${server.address().port}/harness.html`,
         );
+        deadline.phase('initialize player');
         await page.evaluate(
           async ({ transport, scenario }) => {
             const { ThePlayer } = await import('/player.js');
@@ -47,6 +61,7 @@ try {
           },
           { transport, scenario },
         );
+        deadline.phase('startup playback');
         await page.waitForFunction(
           () => document.querySelector('video').currentTime > 1,
         );
@@ -55,6 +70,7 @@ try {
           4,
         );
         for (const format of ['vtt', 'ttml', 'wvtt', 'stpp']) {
+          deadline.phase('subtitle selection and seek');
           console.log('Text case', scenario, format);
           await page.locator('video').evaluate((v) => {
             v.currentTime = 0.5;
@@ -98,6 +114,7 @@ try {
         assert.deepEqual(await page.evaluate(() => window.errors), []);
         assert.deepEqual(await page.evaluate(() => window.warnings), []);
         assert.deepEqual(faults, []);
+        deadline.phase('destroy player');
         await page.evaluate(() => window.player.destroy());
         assert.equal(
           await page.locator('.theplayer-ttml, video track').count(),
@@ -109,6 +126,8 @@ try {
           'external WebVTT/TTML, wvtt/stpp, seek, Off and teardown PASS',
         );
       } catch (error) {
+        console.error(name, transport, scenario, error);
+        deadline.phase('collect failure diagnostics');
         console.dir(
           await page.evaluate(() => ({
             errors: window.errors,
@@ -143,13 +162,19 @@ try {
         );
         throw error;
       } finally {
+        deadline.phase('cleanup player');
         await page.evaluate(() => window.player?.destroy());
+        deadline.phase('close page');
         await page.close();
+        deadline.phase('close browser');
+        await browser?.close();
+        browser = undefined;
+        deadline.finish();
       }
     }
   }
 } finally {
-  await browser.close();
+  await browser?.close();
   await new Promise((r) => server.close(r));
 }
 async function expectCaption(page, format) {

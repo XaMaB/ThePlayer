@@ -6,11 +6,7 @@ const { server, requests } = dashServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 const name = process.env.DASH_TEST_BROWSER ?? 'chromium';
-const browser = await { chromium, firefox, webkit }[name].launch(
-  name === 'chromium'
-    ? { args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] }
-    : {},
-);
+let browser;
 try {
   for (const scenario of (
     process.env.DASH_SCENARIOS ??
@@ -19,6 +15,19 @@ try {
     for (const transport of ['fetch', 'xhr']) {
       const deadline = caseDeadline(`${name} ${transport} ${scenario}`);
       console.log(name, transport, scenario, 'START');
+      // Isolate independent scenarios, including WebKit's media process.
+      deadline.phase('launch browser');
+      browser = await { chromium, firefox, webkit }[name].launch(
+        name === 'chromium'
+          ? {
+              args: [
+                '--no-sandbox',
+                '--autoplay-policy=no-user-gesture-required',
+              ],
+            }
+          : {},
+      );
+      deadline.phase('create page');
       const page = await browser.newPage();
       const failures = [];
       page.on('pageerror', (e) => failures.push(e.message));
@@ -177,6 +186,7 @@ try {
         await page.evaluate(() => window.player.destroy());
         assert.equal(await page.locator('video').getAttribute('src'), null);
       } catch (e) {
+        console.error(name, transport, scenario, e);
         deadline.phase('collect failure diagnostics');
         console.log(
           name,
@@ -202,6 +212,9 @@ try {
         await page.evaluate(() => window.player.destroy());
         deadline.phase('close page');
         await page.close();
+        deadline.phase('close browser');
+        await browser?.close();
+        browser = undefined;
         deadline.finish();
       }
       console.log(name, transport, scenario, 'PASS');
@@ -218,7 +231,7 @@ try {
     'Media was fetched',
   );
 } finally {
-  await browser.close();
+  await browser?.close();
   await new Promise((r) => server.close(r));
 }
 
