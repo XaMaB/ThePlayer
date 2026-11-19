@@ -36,7 +36,8 @@ jobs:
       - run: npm run test:hls
       - run: npm run test:hls:soak
   hls-metadata-browsers:
-    timeout-minutes: 45
+    # Dependency downloads can consume 25 minutes before browser tests start.
+    timeout-minutes: 60
     # Keep browser/system media libraries aligned with the validated host.
     runs-on: ubuntu-24.04
     strategy:
