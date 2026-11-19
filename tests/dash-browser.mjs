@@ -10,7 +10,7 @@ let browser;
 try {
   for (const scenario of (
     process.env.DASH_SCENARIOS ??
-    'timeline,number,list,hierarchical,redirect,pto,periods,audio,live,cdn'
+    'timeline,start-time,number,list,hierarchical,redirect,pto,periods,audio,live,cdn'
   ).split(',')) {
     for (const transport of ['fetch', 'xhr']) {
       const deadline = caseDeadline(`${name} ${transport} ${scenario}`);
@@ -39,6 +39,12 @@ try {
           const { ThePlayer } = await import('/player.js');
           window.player = new ThePlayer(document.querySelector('video'));
           window.errors = [];
+          window.startupSeeks = [];
+          document.querySelector('video').addEventListener('seeking', () => {
+            window.startupSeeks.push(
+              document.querySelector('video').currentTime,
+            );
+          });
           window.player.addEventListener('error', (e) =>
             window.errors.push(String(e.detail)),
           );
@@ -49,7 +55,8 @@ try {
                 location.origin +
                 (scenario === 'redirect'
                   ? '/redirect.mpd'
-                  : `/dash/${scenario}.mpd?session=${transport}`),
+                  : `/dash/${scenario === 'start-time' ? 'timeline' : scenario}.mpd?session=${transport}`),
+              startTime: scenario === 'start-time' ? 9 : undefined,
               quality: 0,
               targetBuffer: 4,
               audioLanguage: 'eng',
@@ -72,6 +79,21 @@ try {
           { timeout: 15000 },
         );
         assert.deepEqual(await page.evaluate(() => window.errors), []);
+        if (scenario === 'timeline')
+          assert.deepEqual(
+            await page.evaluate(() => window.startupSeeks),
+            [],
+            'Starting at the natural beginning must not flush the decoder with a seek',
+          );
+        if (scenario === 'start-time') {
+          const position = await page
+            .locator('video')
+            .evaluate((v) => v.currentTime);
+          assert.ok(
+            position >= 9 && position < 12,
+            `Requested start at 9s, got ${position}`,
+          );
+        }
         assert.equal(await page.evaluate(() => window.player.protocol), 'dash');
         assert.equal(
           await page.evaluate(() => window.player.isLive),

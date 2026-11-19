@@ -1256,12 +1256,21 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         b.start(index) + 0.001,
         Math.min(this.startPosition, b.end(index) - 0.001),
       );
-      this.pendingSeek = {
-        position: this.startupSeek,
-        started: performance.now(),
-        retried: false,
-      };
-      this.video.currentTime = this.startupSeek;
+      // Do not flush a newly starting decoder for a sub-frame adjustment.
+      // WebKit/GStreamer can deadlock if a seek races its initial preroll.
+      if (
+        this.video.currentTime < b.start(index) ||
+        Math.abs(this.video.currentTime - this.startupSeek) > 0.05
+      ) {
+        this.pendingSeek = {
+          position: this.startupSeek,
+          started: performance.now(),
+          retried: false,
+        };
+        this.video.currentTime = this.startupSeek;
+      } else {
+        this.startupSeek = undefined;
+      }
       this.initial = false;
       const resume = this.resumeAfterStart ?? this.source.autoplay !== false;
       this.resumeAfterStart = undefined;
