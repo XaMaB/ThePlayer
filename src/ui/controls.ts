@@ -925,7 +925,7 @@ export function mountControls(
       video.paused && d?.state === 'playing' ? 'paused' : (d?.state ?? 'idle');
     el('stats-transport').textContent =
       p?.protocol === 'moq'
-        ? `WebTransport · ${d?.version ?? 'MoQ'}`
+        ? `${d?.transport === 'websocket' ? 'WebSocket' : 'WebTransport'} · ${d?.version ?? 'MoQ'}`
         : (p?.protocol ?? '—');
     el('stats-codecs').textContent =
       p?.catalog?.tracks?.map((t: any) => t.codec).join(' / ') ?? '—';

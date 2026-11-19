@@ -1,3 +1,9 @@
+import {
+  createMediaSource,
+  mediaSourceConstructor,
+  supportsMediaType,
+  releaseMediaSource,
+} from '../../core/media-source';
 import { ImageThumbnails } from './thumbnails';
 import { IFrameThumbnails } from './iframe-thumbnails';
 import { DateRangeTimeline, type TimedDateRange } from './date-ranges';
@@ -501,8 +507,7 @@ export class HlsEngine extends EventTarget {
     this.state('connecting');
     this.loadTime = performance.now();
     this.videoName = this.source.videoRendition;
-    if (typeof MediaSource === 'undefined')
-      throw new Error('Media Source Extensions required');
+    mediaSourceConstructor();
     let p = await this.readPlaylist(this.source.url);
     if (p.variants.length) {
       if (p.steering) {
@@ -531,7 +536,7 @@ export class HlsEngine extends EventTarget {
           });
         }
       let usable = browserVariants(p.variants, (mime) =>
-        MediaSource.isTypeSupported(mime),
+        supportsMediaType(mime),
       );
       this.availableMediaModes = [];
       if (usable.some(hasVideo)) this.availableMediaModes.push('video');
@@ -588,7 +593,7 @@ export class HlsEngine extends EventTarget {
             catalog.variants,
             variant,
             this.mediaMode,
-            (mime) => MediaSource.isTypeSupported(mime),
+            (mime) => supportsMediaType(mime),
           );
           this.qualityLevels = replacement.levels;
           this.selectedQuality = replacement.index;
@@ -655,7 +660,7 @@ export class HlsEngine extends EventTarget {
       this.selectedAudioTrack = audioTrack.name;
     }
     this.state('buffering');
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.mediaUrl = URL.createObjectURL(this.media);
     const opened = this.event(this.media, 'sourceopen');
     this.video.src = this.mediaUrl;
@@ -870,7 +875,7 @@ export class HlsEngine extends EventTarget {
     this.diagnostics.live.stale = false;
     this.diagnostics.live.lanes = {};
     this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.mediaUrl = URL.createObjectURL(this.media);
     const opened = this.event(this.media, 'sourceopen');
     this.video.src = this.mediaUrl;
@@ -1129,7 +1134,7 @@ export class HlsEngine extends EventTarget {
       this.eme = new EmeController(this.video, this.source.drm, (error) =>
         this.fail(error),
       );
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.mediaUrl = URL.createObjectURL(this.media);
     const opened = this.event(this.media, 'sourceopen');
     this.video.src = this.mediaUrl;
@@ -1173,7 +1178,7 @@ export class HlsEngine extends EventTarget {
       throw new Error('Video rendition contains no supported video track');
     const codecs = prepared.tracks.map((t) => t.codec).join(',');
     if (
-      !MediaSource.isTypeSupported(
+      !supportsMediaType(
         prepared.mime ??
           `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codecs}"`,
       )
@@ -1760,7 +1765,7 @@ export class HlsEngine extends EventTarget {
     this.selectedAudioTrack = audioName;
     this.selectedSubtitle = subtitleName;
     this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.mediaUrl = URL.createObjectURL(this.media);
     const opened = this.event(this.media, 'sourceopen');
     this.video.src = this.mediaUrl;
@@ -1801,7 +1806,7 @@ export class HlsEngine extends EventTarget {
         catalog.variants,
         this.qualityLevels[this.selectedQuality],
         this.mediaMode,
-        (mime) => MediaSource.isTypeSupported(mime),
+        (mime) => supportsMediaType(mime),
       );
       const selected = replacement.levels[replacement.index];
       const oldAudio = this.audioTracks.find(
@@ -2892,6 +2897,7 @@ export class HlsEngine extends EventTarget {
     }
     this.video.removeAttribute('src');
     this.video.load();
+    releaseMediaSource(this.video);
     if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
     this.keys.clear();
     this.identityKeys.clear();

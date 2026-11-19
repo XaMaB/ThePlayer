@@ -1,3 +1,4 @@
+import { supportsMediaType } from '../../core/media-source';
 import { packedAc3 } from './packed-ac3';
 import { packedAudioKind, packedMp3 } from './packed-mp3';
 import { isId3 } from './id3';
@@ -253,7 +254,7 @@ export class MediaLane {
       tracks = [packed.track];
       data = packed.data;
       init = new Uint8Array();
-      if (MediaSource.isTypeSupported('audio/mpeg')) mime = 'audio/mpeg';
+      if (supportsMediaType('audio/mpeg')) mime = 'audio/mpeg';
       else {
         init = initialization(tracks);
         data = fragment(
@@ -336,7 +337,7 @@ export class MediaLane {
       mime =
         prepared.mime ??
         `${prepared.tracks.some((t) => t.kind === 'video') ? 'video' : 'audio'}/mp4; codecs="${codec}"`;
-    if (!MediaSource.isTypeSupported(mime))
+    if (!supportsMediaType(mime))
       throw new Error('Unsupported browser codec: ' + codec);
     if (!this.buffer) {
       this.buffer = media.addSourceBuffer(mime);

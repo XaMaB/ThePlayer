@@ -91,14 +91,15 @@ async function openChannel(next: any) {
       'player-message',
       ['hls', 'dash'].includes(next.protocol)
         ? `Loading ${next.protocol.toUpperCase()} manifest…`
-        : 'Connecting over WebTransport…',
+        : 'Connecting to MoQ relay…',
     );
     if (
       !['hls', 'dash'].includes(next.protocol) &&
-      (!('WebTransport' in window) || !window.isSecureContext)
+      ((!('WebTransport' in window) && !('WebSocket' in window)) ||
+        !window.isSecureContext)
     )
       throw new Error(
-        'A browser with WebTransport and HTTPS (or localhost) is required.',
+        'MoQ requires HTTPS (or localhost) and WebTransport or WebSocket support.',
       );
     player = new ThePlayer(
       video,
@@ -271,7 +272,7 @@ $('source-form').addEventListener('submit', (e) => {
   };
   try {
     if (new URL(next.relayUrl).protocol !== 'https:')
-      throw new Error('WebTransport requires an https:// relay URL');
+      throw new Error('MoQ requires an https:// relay URL');
     if (next.certificateHash && !/^[a-fA-F0-9]{64}$/.test(next.certificateHash))
       throw new Error('SHA-256 fingerprint: 64 hexadecimal characters');
     sourceForm(next);

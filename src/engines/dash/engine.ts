@@ -1,3 +1,9 @@
+import {
+  createMediaSource,
+  mediaSourceConstructor,
+  supportsMediaType,
+  releaseMediaSource,
+} from '../../core/media-source';
 import { ChunkThroughput } from './chunk-throughput';
 import { PlaybackMetrics } from './qoe';
 import type { CmcdOptions } from './telemetry';
@@ -476,7 +482,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         (r) =>
           r.mimeType.endsWith('/mp4') &&
           !!r.codecs &&
-          MediaSource.isTypeSupported(`${r.mimeType}; codecs="${r.codecs}"`),
+          supportsMediaType(`${r.mimeType}; codecs="${r.codecs}"`),
       )
       .sort((a, b) => a.bandwidth - b.bandwidth);
   }
@@ -547,7 +553,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     if (!tracks.length || tracks.some((t) => t.kind !== adaptation.kind))
       throw new Error('DASH initialization does not match its AdaptationSet');
     const mime = `${adaptation.kind}/mp4; codecs="${tracks.map((t) => t.codec).join(',')}"`;
-    if (!MediaSource.isTypeSupported(mime))
+    if (!supportsMediaType(mime))
       throw new Error('DASH codec is unavailable in this browser');
     const lane: Lane = {
       adaptation,
@@ -786,7 +792,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   }
   async init() {
     this.state('loading');
-    if (!globalThis.MediaSource) throw new Error('DASH requires MediaSource');
+    mediaSourceConstructor();
     this.manifest = await this.readManifest(this.source.url);
     this.isLive = this.manifest.live;
     await this.syncClock();
@@ -809,7 +815,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         this.startPosition,
         Math.max(0, this.manifest.duration! - 0.001),
       );
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.mediaUrl = URL.createObjectURL(this.media);
     await mediaEvent(this.media, 'sourceopen', this.abort.signal, () => {
       this.video.src = this.mediaUrl;
@@ -857,7 +863,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     this.lanes = [];
     this.qualityTimeline = [];
     const previousUrl = this.mediaUrl;
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.mediaUrl = URL.createObjectURL(this.media);
     await mediaEvent(this.media, 'sourceopen', this.abort.signal, () => {
       this.video.src = this.mediaUrl;
@@ -1690,6 +1696,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       this.video.pause();
       this.video.removeAttribute('src');
       this.video.load();
+      releaseMediaSource(this.video);
       if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
       await this.eme?.destroy();
       if (this.video.playbackRate === this.controlledRate)

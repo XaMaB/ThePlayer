@@ -131,6 +131,9 @@ jobs:
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
       - run: npm run test:dash
         timeout-minutes: 25
+      - run: npm run fixtures:hls && npm run test:managed-media
+        if: matrix.browser == 'webkit'
+        timeout-minutes: 5
       - run: npm run test:dash:drm
         if: matrix.browser == 'chromium'
       - run: npm run test:dash:soak

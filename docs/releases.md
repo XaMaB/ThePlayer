@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.3.1
+
+- Select ManagedMediaSource when ordinary MediaSource is unavailable, including all HLS/DASH/MoQ codec probes and MediaSource replacement paths.
+- Enable inline playback and the remote-playback setting required by Safari; restore the original remote-playback policy on teardown.
+- Enable the moq-dev WebSocket fallback and report the selected transport in MediaInfo. WebKit transport eligibility remains controlled by moq-dev; WebSocket requires a compatible relay and trusted TLS.
+- Add real WebKit ManagedMediaSource playback, seek and teardown tests with ordinary MediaSource hidden, for DASH and HLS TS/fMP4 over Fetch/XHR. These tests do not replace physical iPhone validation.
+
 ## 1.3.0
 
 - Promote the documented browser fMP4/CMAF DASH profile to Implemented; keep optional-profile and physical-device limits explicit in the support matrix.

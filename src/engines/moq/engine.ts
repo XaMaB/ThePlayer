@@ -1,3 +1,9 @@
+import {
+  createMediaSource,
+  mediaSourceConstructor,
+  supportsMediaType,
+  releaseMediaSource,
+} from '../../core/media-source';
 import { Cea708Decoder } from '../../subtitles/cea708/decoder.mjs';
 import * as Moq from '@moq/net';
 import { cachedStartPlan } from './startup.mjs';
@@ -12,6 +18,8 @@ export interface PlayerSource {
   catalogTrack?: string;
   certificateHash?: string;
   versions?: string[];
+  websocket?: boolean;
+  websocketUrl?: string;
   captionServices?: Record<
     string,
     { language?: string; label?: string; encoding?: string }
@@ -24,6 +32,7 @@ export class MoqEngine extends EventTarget {
     objects: 0,
     bytes: 0,
     version: 'moq-lite-06',
+    transport: '',
     state: 'idle',
     startup: {
       mode: 'cache-first',
@@ -141,7 +150,7 @@ export class MoqEngine extends EventTarget {
     if (!t || !sb || !this.audioSession)
       throw new Error('Audio track is not ready');
     const mime = `audio/mp4; codecs="${t.codec}"`;
-    if (!MediaSource.isTypeSupported(mime))
+    if (!supportsMediaType(mime))
       throw new Error(`Unsupported audio codec: ${t.codec}`);
     const data = this.catalog.initDataList.find(
       (d: any) => d.id === t.initRef,
@@ -270,6 +279,7 @@ export class MoqEngine extends EventTarget {
     }
   }
   async init() {
+    mediaSourceConstructor();
     this.initAt = performance.now();
     this.video.requestVideoFrameCallback(() => {
       if (this.abort.signal.aborted) return;
@@ -282,7 +292,12 @@ export class MoqEngine extends EventTarget {
         url: new URL(this.source.relayUrl),
         consume: this.origin,
         versions: this.source.versions ?? ['moq-lite-06'],
-        websocket: { enabled: false },
+        websocket: {
+          enabled: this.source.websocket !== false,
+          url: this.source.websocketUrl
+            ? new URL(this.source.websocketUrl)
+            : undefined,
+        },
         webtransport: this.source.certificateHash
           ? {
               serverCertificateHashes: [{ value: this.source.certificateHash }],
@@ -295,6 +310,7 @@ export class MoqEngine extends EventTarget {
       return;
     }
     this.connection = connection;
+    this.diagnostics.transport = connection.transport;
     void this.connection.closed.then((e: any) => {
       if (!this.abort.signal.aborted)
         this.fail(e ?? new Error('Relay connection closed'));
@@ -331,7 +347,7 @@ export class MoqEngine extends EventTarget {
       (this.audioTracks.find((t: any) => t.default) ?? this.audioTracks[0])
         ?.name ?? '';
     this.emit('catalog', this.catalog);
-    this.media = new MediaSource();
+    this.media = createMediaSource(this.video);
     this.url = URL.createObjectURL(this.media);
     this.video.src = this.url;
     await this.wait(
@@ -350,7 +366,7 @@ export class MoqEngine extends EventTarget {
       )
         continue;
       const mime = `${t.role}/mp4; codecs="${t.codec}"`;
-      if (!MediaSource.isTypeSupported(mime))
+      if (!supportsMediaType(mime))
         throw new Error(`Unsupported codec: ${t.codec}`);
       const sb = this.media.addSourceBuffer(mime);
       sb.mode = 'segments';
@@ -646,6 +662,7 @@ export class MoqEngine extends EventTarget {
     this.video.playbackRate = 1;
     this.video.removeAttribute('src');
     this.video.load();
+    releaseMediaSource(this.video);
     if (this.url) URL.revokeObjectURL(this.url);
     const connection = this.connection;
     this.connection = null;

@@ -27,13 +27,13 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 
 ## Protocols
 
-| Protocol              | Status                    | Implemented scope                                                                                                  |
-| --------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| MoQ over WebTransport | Implemented               | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                                  |
-| HLS over HTTP(S)      | Implemented               | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                              |
-| LL-HLS                | Implemented fMP4 delivery | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache             |
-| MPEG-DASH             | Implemented               | fMP4 VOD/live, templates/Timeline/List/SIDX, quality and audio selection; [scope and limits](docs/dash-support.md) |
-| UDP/RTP multicast     | Origin input only         | The browser does not join multicast groups; use an Origin to ingest and publish media                              |
+| Protocol                          | Status                    | Implemented scope                                                                                                  |
+| --------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| MoQ over WebTransport / WebSocket | Implemented               | moq-dev/moq, `moq-lite-06`, `origin-cmaf-v1` catalog/media profile; live playback                                  |
+| HLS over HTTP(S)                  | Implemented               | Original engine; live, VOD and EVENT; MPEG-TS and fragmented MP4; Auto/manual quality                              |
+| LL-HLS                            | Implemented fMP4 delivery | Partial-only startup, dependent parts, blocking reload, delta merge/fallback and bounded preload cache             |
+| MPEG-DASH                         | Implemented               | fMP4 VOD/live, templates/Timeline/List/SIDX, quality and audio selection; [scope and limits](docs/dash-support.md) |
+| UDP/RTP multicast                 | Origin input only         | The browser does not join multicast groups; use an Origin to ingest and publish media                              |
 
 MoQ transport compatibility alone does not guarantee interoperability: the publisher and player must also agree on the catalog and media profile. HLS is a tested subset, not a claim of full support for every protocol version. See the [HLS support matrix](docs/hls-support.md).
 
@@ -111,7 +111,7 @@ See [architecture](docs/architecture.md), [research](docs/hls-research.md) and [
 
 ## Development
 
-Requires Node.js 24+, npm and Git. Playback requires Media Source Extensions and suitable browser codecs. MoQ additionally requires WebTransport in a secure context; HLS and DASH require HTTP(S) access and suitable CORS headers.
+Requires Node.js 24+, npm and Git. Playback requires MediaSource or ManagedMediaSource and suitable browser codecs. On iPhone the player uses ManagedMediaSource and disables remote playback while attached (no AirPlay alternative is provided). MoQ requires a secure context and WebTransport or a compatible WebSocket relay; HLS and DASH require HTTP(S) access and suitable CORS headers.
 
 ```sh
 git clone https://github.com/XaMaB/ThePlayer.git
@@ -125,7 +125,7 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:5173`. For HLS or DASH, select the protocol and supply an M3U8 or MPD URL. For MoQ, supply a relay URL, namespace and, for a self-signed development relay, its certificate fingerprint. WebTransport requires a secure context: localhost or HTTPS. The demo has no dependency on the Origin or Relay administration applications.
+Open `http://localhost:5173`. For HLS or DASH, select the protocol and supply an M3U8 or MPD URL. For MoQ, supply a relay URL, namespace and, for a self-signed development relay, its certificate fingerprint for WebTransport. WebSocket fallback requires a browser-trusted TLS certificate; a WebTransport fingerprint cannot authorize WSS. WebTransport requires a secure context: localhost or HTTPS. The demo has no dependency on the Origin or Relay administration applications.
 
 The bootstrap checks out moq-dev at `caf6ebc05d0b56a5689af1df431dd13804aaa1a2` into `.cache/moq`. Builds verify this revision. `MOQ_SOURCE` may point to an existing checkout at that revision. Do not replace it with an arbitrary npm version: the protocol and JS API are version sensitive.
 
@@ -153,6 +153,10 @@ await player.load({
 Deploy the entire `dist` directory, including `chunks`; HLS and DASH are loaded on demand. Bundles are generated by `npm run build` and are not checked into GitHub. See [DASH integration](docs/dash-integration.md) for MPD and DRM examples. LIVE appears only for live presentations; VOD has a seek bar and duration.
 
 ## Library
+
+MoQ uses WebTransport when permitted by moq-dev and can fall back to QMux over WebSocket on a compatible relay. Set `websocket: false` to disable fallback, or `websocketUrl` to select a separate endpoint. The pinned moq-dev version excludes WebKit WebTransport because of an upstream long-session issue; iPhone therefore needs the WebSocket relay endpoint. This fallback uses TCP and has different loss/latency behavior from QUIC.
+
+For local WSS testing, the device must trust the relay certificate. Accepting a warning for the demo page does not necessarily authorize a separate relay connection. Production should use a browser-trusted certificate and hostname. `certificateHash` only applies to WebTransport.
 
 ```js
 import { ThePlayer, SubtitleRenderer } from './dist/player.js';

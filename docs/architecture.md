@@ -1,6 +1,6 @@
 # Architecture
 
-The application supplies a source to `PlayerCore`. Its engine registry maps a protocol name to a factory. The core releases the previous engine before initializing a replacement, forwards events, and destroys subscriptions through the engine lifecycle. Only one engine owns the video element and MediaSource at a time.
+The application supplies a source to `PlayerCore`. Its engine registry maps a protocol name to a factory. The core releases the previous engine before initializing a replacement, forwards events, and destroys subscriptions through the engine lifecycle. Only one engine owns the video element and media source at a time. `core/media-source.ts` selects ordinary MediaSource when available, otherwise ManagedMediaSource, and shares this choice with codec probes and restart paths. Managed attachment disables remote playback because no AirPlay alternative is supplied; teardown restores the prior setting.
 
 `ThePlayer` registers MoQ and lazily imported original HLS and DASH engines. Import the separate `core.js` bundle to avoid the MoQ dependency entirely when supplying other engines. Unknown protocols fail explicitly, without stopping a currently loaded source. A supported source replacement releases the old engine before loading the new one; a failed load therefore does not retain the previous stream.
 
