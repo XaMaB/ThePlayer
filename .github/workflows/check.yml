@@ -137,6 +137,11 @@ jobs:
       - run: npm run fixtures:hls && npm run test:managed-media && npm run test:controls
         if: matrix.browser == 'webkit'
         timeout-minutes: 5
+      - run: npm run fixtures:hls && npm run test:abr:policy
+        if: matrix.browser == 'chromium' || matrix.browser == 'webkit'
+        timeout-minutes: 10
+        env:
+          ABR_TEST_BROWSER: ${{ matrix.browser }}
       - run: npm run test:dash:drm
         if: matrix.browser == 'chromium'
       - run: npm run test:dash:soak

@@ -1,5 +1,29 @@
+export interface AbrOptions {
+  /** Initial Auto quality within the compatible ladder. Default: lowest. */
+  startup?: 'lowest' | 'highest';
+  /** Step one level at a time or jump to the measured bandwidth budget. */
+  upswitch?: 'stepwise' | 'direct';
+}
+
 /** Original conservative throughput/buffer policy. All rates are bits per second. */
 export class AbrController {
+  readonly options: Readonly<Required<AbrOptions>>;
+  constructor(options: AbrOptions = {}) {
+    const startup = options.startup ?? 'lowest';
+    const upswitch = options.upswitch ?? 'stepwise';
+    if (
+      !['lowest', 'highest'].includes(startup) ||
+      !['stepwise', 'direct'].includes(upswitch)
+    )
+      throw new Error('Invalid ABR startup or upswitch policy');
+    this.options = Object.freeze({ startup, upswitch });
+  }
+  initialIndex(levels: { bandwidth: number }[]): number {
+    return this.options.startup === 'highest'
+      ? Math.max(0, levels.length - 1)
+      : 0;
+  }
+
   private blocked = new Map<
     number,
     { until: number; strikes: number; reason: string }
@@ -102,14 +126,16 @@ export class AbrController {
       if (levels[i].bandwidth <= budget && this.available(i, now))
         candidate = i;
     if (candidate < current) return candidate;
-    // Recover buffer first, then require headroom and a cooldown before stepping up.
+    // Both upgrade modes retain buffer headroom, quarantine and cooldown guards.
     if (
       candidate > current &&
       buffer >= Math.min(6, target / 2) &&
       now - this.lastSwitch >= 8000
-    )
+    ) {
+      if (this.options.upswitch === 'direct') return candidate;
       for (let i = current + 1; i <= candidate; i++)
         if (this.available(i, now)) return i;
+    }
     return current;
   }
 }

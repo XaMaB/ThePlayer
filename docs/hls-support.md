@@ -6,7 +6,7 @@ This engine is written for ThePlayer. No hls.js, Video.js/VHS or Shaka code is b
 
 | Area                             | Implementation                                                                                       | Validation                                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Media and multivariant playlists | Original parser; compatible low-bandwidth startup; Auto ABR and manual quality selection             | Unit tests and browser playback                              |
+| Media and multivariant playlists | Original parser; configurable compatible startup; Auto ABR and manual quality selection              | Unit tests and browser playback                              |
 | MPEG-TS                          | 188-byte packets, PAT/PMT, PES, AVC/H.264, HEVC/H.265 and ADTS AAC-LC / declared HE-AAC v1/v2 → fMP4 | Original synthetic fixtures; independent FFmpeg decode check |
 | Fragmented MP4                   | EXT-X-MAP, AVC/HEVC/AV1/AAC initialization, fragment timing and MSE appends                          | Browser playback and seeking                                 |
 | Live                             | Sliding playlist refresh, sequence alignment, hold-back and LIVE indicator                           | Local moving-window server                                   |
@@ -82,7 +82,7 @@ Run `npm run test:hls:public` after building for optional network-dependent play
 
 ## Automatic quality and rendition selection
 
-Quality defaults to Auto. An original throughput estimator uses fast/slow averages and a 25% safety margin. Upgrades require buffer headroom and an eight-second cooldown; downgrades do not wait for that cooldown. Manual selection disables adaptation until Auto is selected again. `selectQuality(-1)` enables Auto; `autoQuality`, `selectedQuality` (scheduled) and `currentQuality` (presentation timeline) expose the distinction. The menu and MediaInfo display the current quality, not a future buffered switch.
+Quality defaults to Auto with `abr: { startup: 'lowest', upswitch: 'stepwise' }`. `startup: 'highest'` starts at the top compatible profile; `upswitch: 'direct'` jumps directly to the highest measured bandwidth-supported profile. Numeric manual `quality` overrides startup policy. Starting high may take longer on a slow connection. An original throughput estimator uses fast/slow averages and a 25% safety margin. Upgrades require buffer headroom and an eight-second cooldown; downgrades do not wait for that cooldown. Manual selection disables adaptation until Auto is selected again. `selectQuality(-1)` enables Auto; `autoQuality`, `selectedQuality` (scheduled) and `currentQuality` (presentation timeline) expose the distinction. The menu and MediaInfo display the current quality, not a future buffered switch.
 
 This is a conservative ABR policy. Slow in-flight requests can trigger emergency downshifts, as described under recovery below. Viewport constraints and adaptation across different audio/subtitle groups remain outside this policy. A switch needs enough lead time to fetch its first segment. The browser test throttles actual segment responses, verifies automatic upgrades/downgrades and checks manual locking.
 

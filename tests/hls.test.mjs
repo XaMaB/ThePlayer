@@ -1443,3 +1443,52 @@ test('Live segment query renewal preserves the timeline and does not disguise a 
   ranged.segments[0].range = { offset: 100, length: 500 };
   assert.equal(reconcileLive(ranged, before, 13978405).restart, true);
 });
+
+test('ABR startup policy chooses a compatible ladder endpoint and snapshots configuration', () => {
+  const levels = [200000, 500000, 1000000, 2000000].map((bandwidth) => ({
+    bandwidth,
+  }));
+  const config = { startup: 'highest', upswitch: 'direct' };
+  const abr = new AbrController(config);
+  config.startup = 'lowest';
+  assert.equal(abr.initialIndex(levels), 3);
+  assert.equal(new AbrController().initialIndex(levels), 0);
+  assert.equal(abr.initialIndex([levels[0]]), 0);
+  assert.equal(Object.isFrozen(abr.options), true);
+});
+test('direct ABR skips intermediate levels but respects measured bandwidth and buffer', () => {
+  const levels = [200000, 500000, 1000000, 2000000].map((bandwidth) => ({
+    bandwidth,
+  }));
+  const abr = new AbrController({ upswitch: 'direct' });
+  abr.observe(500000, 1000);
+  assert.equal(abr.choose(levels, 0, 12, 12, 1000), 0);
+  abr.observe(500000, 1000);
+  assert.equal(abr.choose(levels, 0, 1, 12, 2000), 0);
+  assert.equal(abr.choose(levels, 0, 12, 12, 3000), 3);
+  const limited = new AbrController({ upswitch: 'direct' });
+  limited.observe(200000, 1000);
+  limited.observe(200000, 1000);
+  assert.equal(limited.choose(levels, 0, 12, 12, 1000), 2);
+});
+test('direct ABR retains cooldown/quarantine and drops quality without upgrade cooldown', () => {
+  const levels = [200000, 500000, 1000000, 2000000].map((bandwidth) => ({
+    bandwidth,
+  }));
+  const abr = new AbrController({ upswitch: 'direct' });
+  abr.observe(500000, 1000);
+  abr.observe(500000, 1000);
+  abr.quarantine(3, 0, 'failure');
+  assert.equal(abr.choose(levels, 0, 12, 12, 1000), 2);
+  abr.switched(1000);
+  abr.clear(3);
+  assert.equal(abr.choose(levels, 2, 12, 12, 3000), 2);
+  assert.equal(abr.choose(levels, 2, 12, 12, 9000), 3);
+  abr.switched(9000);
+  abr.observe(50000, 8000);
+  assert.equal(abr.choose(levels, 3, 1, 12, 10000), 0);
+});
+test('ABR rejects unknown startup and upgrade policies', () => {
+  assert.throws(() => new AbrController({ startup: 'middle' }), /Invalid ABR/);
+  assert.throws(() => new AbrController({ upswitch: 'random' }), /Invalid ABR/);
+});

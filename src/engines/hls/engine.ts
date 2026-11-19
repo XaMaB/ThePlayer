@@ -43,7 +43,7 @@ import { row608Text, cea608Styles } from './cea608';
 import type { Track } from './mp4';
 import { fragmentMetadata, fragmentSamples } from './fragment-samples';
 import { selectRendition } from './selection';
-import { AbrController, EmergencySwitch } from './abr';
+import { AbrController, EmergencySwitch, type AbrOptions } from './abr';
 import { bufferedAhead, nextGapPosition, declaredGapPosition } from './buffer';
 import { SubtitleCounters } from '../../subtitles/cues.mjs';
 import {
@@ -87,6 +87,7 @@ export interface HlsSource {
   liveRecoveryTimeoutMs?: number;
   autoplay?: boolean;
   quality?: 'auto' | number;
+  abr?: AbrOptions;
   media?: 'video' | 'audio';
   startTime?: number;
   audioLanguage?: string;
@@ -162,7 +163,7 @@ export class HlsEngine extends EventTarget {
   qualityLevels: any[] = [];
   selectedQuality = 0;
   autoQuality = true;
-  private abr = new AbrController();
+  private abr: AbrController;
   private qualityTimeline = [{ at: 0, id: 0 }];
   get currentQuality() {
     return (
@@ -308,6 +309,7 @@ export class HlsEngine extends EventTarget {
     prefetched?: (resource: Resource) => ResourceResponse | undefined,
   ) {
     super();
+    this.abr = new AbrController(source.abr);
     if (source.debug === true) this.diagnostics.live.resetHistory = [];
     for (const [service, encoding] of Object.entries(
       source.captionEncodings ?? {},
@@ -573,6 +575,11 @@ export class HlsEngine extends EventTarget {
           throw new Error('Unknown initial HLS quality');
         this.autoQuality = false;
         this.selectedQuality = this.source.quality;
+        this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
+        variant = this.qualityLevels[this.selectedQuality];
+      }
+      if (this.autoQuality) {
+        this.selectedQuality = this.abr.initialIndex(this.qualityLevels);
         this.qualityTimeline = [{ at: 0, id: this.selectedQuality }];
         variant = this.qualityLevels[this.selectedQuality];
       }
@@ -1022,6 +1029,7 @@ export class HlsEngine extends EventTarget {
                 ...this.source.network,
               },
               drm: this.source.drm,
+              abr: this.source.abr,
               autoplay: this.interstitialAutoplay,
               interstitials: false,
               interstitialAsset: true,
@@ -2366,6 +2374,7 @@ export class HlsEngine extends EventTarget {
       current: this.currentQuality,
       scheduled: this.selectedQuality,
       bandwidthEstimate: this.abr.estimate,
+      abr: this.abr.options,
     };
     this.diagnostics.abrRecovery.quarantined = this.abr.quarantined(
       performance.now(),

@@ -118,6 +118,24 @@
                     <option value="xhr">XMLHttpRequest</option>
                   </select></label
                 >
+                <label
+                  >Auto start quality<select id="abr-startup">
+                    <option value="lowest">Lowest</option>
+                    <option value="highest">Highest</option>
+                  </select></label
+                >
+                <label
+                  >Auto quality increases<select id="abr-upswitch">
+                    <option value="stepwise">Step by step</option>
+                    <option value="direct">
+                      Direct to bandwidth-supported quality
+                    </option>
+                  </select></label
+                >
+                <p class="notice">
+                  ABR settings apply on Connect. Manual quality selection
+                  overrides Auto.
+                </p>
                 <p class="notice">
                   HLS and DASH support live and on-demand playback with quality,
                   audio and subtitle selection. Codec and DRM availability

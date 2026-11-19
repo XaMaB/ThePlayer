@@ -60,6 +60,12 @@ Build with `npm run build` and deploy **all of `dist/`**, including `chunks/`. B
 
 `audioLanguage: 'en'` matches `eng`; `bg` matches `bul`. `audioRole` optionally prefers an MPD Role such as `description`. Inventories expose original language, roles, accessibility descriptors and channel configuration. Explicit track IDs come from the inventories, not display labels.
 
+## Auto quality policy
+
+Use `abr: { startup: 'highest', upswitch: 'direct' }` to start at the highest compatible profile and then adapt to measured bandwidth. Use `startup: 'lowest'` with `upswitch: 'direct'` for a low start followed by a direct jump to the highest sustainable profile. Defaults remain `lowest` and `stepwise`. Numeric manual `quality` takes precedence; choosing Auto later does not reapply startup policy.
+
+Both upgrade modes retain two measured samples, a 25% throughput reserve, buffer headroom, an eight-second post-switch cooldown and failed-profile quarantine. Downgrades do not wait for that cooldown. Starting high can delay startup on slow links; a direct upgrade is not a promise to switch on the second segment. Policies apply on load, not on subsequent Period/MediaSource recovery. The shared [ABR examples](../README.md#hls--dash-auto-quality-policy) also apply to HLS. Resolved settings are exposed in `diagnostics.quality.abr`.
+
 ## Quality, audio, views and subtitles
 
 ```js

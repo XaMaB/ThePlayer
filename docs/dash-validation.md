@@ -75,3 +75,9 @@ Expanded WebKit text/Period testing exposed a pending-seek problem after a nativ
 The extended suite verifies XLink, hierarchical SIDX, in-band producer time, ETag, steering, thumbnails, alternate views, CMCD/CMSD/QoE and in-Period encryption groups. AV1 decodes and seeks in Chromium, Firefox and WebKit. Linux WebKit also decodes the HEVC Main and AC-3/E-AC-3 fixtures; Chromium/Firefox explicitly reject these codecs on this host. This is not Main10/HDR, Atmos or physical-device certification.
 
 `test:dash:ll-soak` uses a continuously advancing timeline with producer-paced CMAF units, transfer delay, jitter and HTTP failures. `test:dash:drm-soak` repeatedly crosses in-Period key changes and seeks backward, checking decoded frames, session reuse and cleanup. Use `DASH_SOAK_SECONDS` to choose a duration. Release-specific measurements are recorded in the [1.3.0 release notes](https://github.com/XaMaB/ThePlayer/releases/tag/v1.3.0).
+
+## 1.4 ABR policy regression
+
+`test:abr:policy` exercises three-profile HLS/DASH ladders over Fetch/XHR: highest startup, lowest-to-highest direct upgrade, numeric manual override, and a throttled link that forces the highest start down to the lowest profile. It checks decoded resolution, initial resource selection, Auto state, diagnostics and demo settings/snippets in Chromium and WebKit.
+
+Slow DASH startup exposed a separate WebKit seek remaining pending at the initial position with decoded buffered A/V. Startup positioning now participates in the existing bounded one-millisecond retry, after at least one second and only with buffered decoded media and no pending append/preroll. Automatic DASH adaptation waits for seeking to finish. The test verifies continued decoded playback and at most one startup retry.

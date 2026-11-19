@@ -13,7 +13,7 @@ import type { PlaybackEngine } from '../../core/player';
 import { VERSION } from '../../version';
 import { delay, type NetworkOptions } from '../hls/network';
 import { HttpError, retryable } from '../hls/recovery';
-import { AbrController } from '../hls/abr';
+import { AbrController, type AbrOptions } from '../hls/abr';
 import { bufferedAhead, nextGapPosition } from '../hls/buffer';
 import { emsgMetadata, type TimedMetadata } from '../hls/metadata';
 import { inspectInit, decodeTime, type Track } from '../hls/mp4';
@@ -49,6 +49,7 @@ export interface DashSource {
   startTime?: number;
   targetBuffer?: number;
   quality?: 'auto' | number;
+  abr?: AbrOptions;
   audioLanguage?: string;
   audioRole?: string;
   cmcd?: CmcdOptions;
@@ -114,7 +115,12 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     buffer: { ahead: 0, target: 12, live: false, mode: 'dash-segment' },
     qoe: {} as Record<string, unknown>,
     steering: {} as Record<string, unknown>,
-    quality: { mode: 'auto', current: 0, bandwidthEstimate: 0 },
+    quality: {
+      mode: 'auto',
+      current: 0,
+      bandwidthEstimate: 0,
+      abr: undefined as Readonly<Required<AbrOptions>> | undefined,
+    },
     switches: [] as { kind: string; name: string; effectiveAt: number }[],
   };
   catalog: any = { profile: 'dash', tracks: [] };
@@ -147,7 +153,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
   private subtitles?: DashSubtitles;
   private captions: DashCaptions;
   private subtitleGeneration = 0;
-  private abr = new AbrController();
+  private abr: AbrController;
   private refreshedAt = 0;
   private manifestFailureSince?: number;
   private dvrJumpAt = -Infinity;
@@ -177,6 +183,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     readonly source: DashSource,
   ) {
     super();
+    this.abr = new AbrController(source.abr);
     if (!['http:', 'https:'].includes(new URL(source.url).protocol))
       throw new Error('DASH requires HTTP(S)');
     if (
@@ -738,7 +745,10 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       audio[0];
     const initialPrimary = video ? primary : selectedAudio!;
     const primaryReps = this.usable(initialPrimary);
-    index = Math.min(index, primaryReps.length - 1);
+    index =
+      initial && this.autoQuality
+        ? this.abr.initialIndex(primaryReps)
+        : Math.min(index, primaryReps.length - 1);
     const lanes = [
       await this.makeLane(initialPrimary, primaryReps[index], period, cursor),
     ];
@@ -1246,6 +1256,11 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         b.start(index) + 0.001,
         Math.min(this.startPosition, b.end(index) - 0.001),
       );
+      this.pendingSeek = {
+        position: this.startupSeek,
+        started: performance.now(),
+        retried: false,
+      };
       this.video.currentTime = this.startupSeek;
       this.initial = false;
       const resume = this.resumeAfterStart ?? this.source.autoplay !== false;
@@ -1380,6 +1395,7 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       mode: this.autoQuality ? 'auto' : 'manual',
       current: this.currentQuality,
       bandwidthEstimate: this.abr.estimate,
+      abr: this.abr.options,
     };
   }
   private recoverBufferedSeek() {
@@ -1400,8 +1416,8 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         seek.position + 0.05 >= ranges.end(i)
       )
         continue;
-      // WebKit can keep a completed MSE seek pending when a native TextTrack
-      // was created after a previous seek. Reissue once, only for buffered
+      // WebKit can keep an MSE seek pending during startup or after native
+      // TextTrack changes. Reissue once, only for buffered
       // decoded media. The 1 ms change makes it a distinct browser operation.
       seek.retried = true;
       this.retrySeekTarget = seek.position + 0.001;
@@ -1464,7 +1480,13 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
           edge,
         );
       }
-      if (this.autoQuality && !this.initial && !this.video.paused) {
+      // A new initialization segment must not race an unfinished startup/user seek.
+      if (
+        this.autoQuality &&
+        !this.initial &&
+        !this.video.paused &&
+        !this.video.seeking
+      ) {
         const index = this.abr.choose(
           this.qualityLevels,
           this.selectedQuality,

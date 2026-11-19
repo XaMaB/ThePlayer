@@ -109,6 +109,7 @@ async function openChannel(next: any) {
             url: next.url,
             network: { transport: next.transport ?? 'fetch' },
             quality: next.quality ?? 'auto',
+            abr: next.abr,
             media: next.media,
           }
         : {
@@ -203,11 +204,16 @@ function sourceForm(next: any) {
   updateSourceFields();
   if (['hls', 'dash'].includes(next.protocol)) {
     ($('hls-url') as HTMLInputElement).value = next.url;
+    ($('abr-startup') as HTMLSelectElement).value =
+      next.abr?.startup ?? 'lowest';
+    ($('abr-upswitch') as HTMLSelectElement).value =
+      next.abr?.upswitch ?? 'stepwise';
     connectedSource = {
       protocol: next.protocol,
       url: next.url,
       network: { transport: next.transport ?? 'fetch' },
       quality: next.quality ?? 'auto',
+      abr: next.abr,
       media: next.media,
     };
     text(
@@ -251,6 +257,7 @@ $('source-form').addEventListener('submit', (e) => {
         protocol,
         url: url.href,
         transport: value('hls-transport'),
+        abr: { startup: value('abr-startup'), upswitch: value('abr-upswitch') },
         source: true,
         status: 'live',
       };
@@ -383,6 +390,10 @@ if (query.has('src')) {
         : 'hls',
     url: query.get('src'),
     transport: query.get('transport') ?? 'fetch',
+    abr: {
+      startup: query.get('abrStartup') ?? 'lowest',
+      upswitch: query.get('abrUpswitch') ?? 'stepwise',
+    },
     media: query.get('media') ?? undefined,
     quality:
       query.has('quality') && query.get('quality') !== 'auto'

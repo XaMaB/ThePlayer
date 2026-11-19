@@ -55,3 +55,5 @@ export type { HlsSource } from './engines/hls/engine';
 export type { Thumbnail } from './core/thumbnail';
 
 export type { DashSource } from './engines/dash/engine';
+
+export type { AbrOptions } from './engines/hls/abr';

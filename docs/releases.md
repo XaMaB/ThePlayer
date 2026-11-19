@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.4.0
+
+- Add HLS/DASH Auto startup selection (`lowest` / `highest`) and upgrade policy (`stepwise` / `direct`). Preserve existing defaults, manual quality precedence and bandwidth/buffer safeguards.
+- Expose the two settings in the demo, embed URL parameters, integration snippets and quality diagnostics.
+- Recover a buffered WebKit startup seek once when it remains pending on slow delivery; defer automatic DASH switches until seeking completes.
+- Add policy unit tests and three-profile Fetch/XHR browser checks for high startup, direct low-to-high upgrades, manual overrides and slow-link downshifts.
+
 ## 1.3.2
 
 - Keep controls visible after touch/pen release. Pointer exit follows the idle timeout, including mouse input. Restart the timer on release and keep controls visible during held gestures.
