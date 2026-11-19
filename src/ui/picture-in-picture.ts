@@ -58,6 +58,12 @@ export class PictureInPictureController {
       'leavepictureinpicture',
       'webkitpresentationmodechanged',
       'loadedmetadata',
+      // MSE/WebKit can expose dimensions only after metadata has fired.
+      'loadeddata',
+      'canplay',
+      'playing',
+      'play',
+      'resize',
       'emptied',
     ])
       video.addEventListener(

@@ -9,6 +9,60 @@ try {
     try {
       const page = await browser.newPage();
       await page.goto(`http://127.0.0.1:${server.address().port}/harness.html`);
+      // Reproduce metadata arriving before decoded video dimensions.
+      const readiness = await page.evaluate(async () => {
+        const { mountControls } = await import('/player.js');
+        const video = document.createElement('video');
+        const screen = document.createElement('div');
+        document.body.append(screen);
+        screen.append(video);
+        let width = 0,
+          ready = 0;
+        Object.defineProperties(video, {
+          videoWidth: { get: () => width },
+          readyState: { get: () => ready },
+        });
+        Object.defineProperty(document, 'pictureInPictureEnabled', {
+          value: true,
+          configurable: true,
+        });
+        video.requestPictureInPicture = async () => {};
+        const controls = mountControls(
+          screen,
+          video,
+          () => null,
+          () => {},
+        );
+        const button = screen.querySelector('#pip-toggle');
+        ready = 1;
+        video.dispatchEvent(new Event('loadedmetadata'));
+        const before = button.disabled;
+        width = 320;
+        ready = 2;
+        video.dispatchEvent(new Event('resize'));
+        const afterResize = !button.disabled;
+        const events = ['loadeddata', 'canplay', 'playing', 'play'];
+        const recovered = events.every((event) => {
+          width = 0;
+          video.dispatchEvent(new Event('loadedmetadata'));
+          width = 320;
+          video.dispatchEvent(new Event(event));
+          return !button.disabled;
+        });
+        width = 0;
+        ready = 0;
+        video.dispatchEvent(new Event('emptied'));
+        const cleared = button.disabled;
+        controls.destroy();
+        screen.remove();
+        return { before, afterResize, recovered, cleared };
+      });
+      assert.deepEqual(readiness, {
+        before: true,
+        afterResize: true,
+        recovered: true,
+        cleared: true,
+      });
       const result = await page.evaluate(async () => {
         const { PictureInPictureController } = await import('/player.js');
         const video = document.querySelector('video');

@@ -1,5 +1,10 @@
 # Release versions
 
+## 1.5.1
+
+- Refresh PiP availability when decoded dimensions arrive after `loadedmetadata` (resize, loadeddata, canplay, play and playing). Prevent a disabled button from remaining stale during MSE/WebKit playback.
+- Add Chromium/WebKit regressions for delayed video dimensions and source reset.
+
 ## 1.5.0
 
 - Add an adaptive Picture-in-Picture module and shared control button for MoQ, HLS and DASH: Document PiP, standard video PiP and WebKit presentation-mode fallback.
