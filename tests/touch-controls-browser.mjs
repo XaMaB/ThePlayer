@@ -111,7 +111,7 @@ try {
     0,
     'reveal tap must not pause playback',
   );
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(700);
   assert.equal(
     await hidden(),
     false,
@@ -130,20 +130,20 @@ try {
     pointerId: 42,
     bubbles: true,
   });
-  await page.waitForTimeout(3200);
+  await page.waitForTimeout(1800);
   assert.equal(await hidden(), false, 'do not hide during a held gesture');
   await page.locator('body').dispatchEvent('pointerup', {
     pointerType: 'touch',
     pointerId: 42,
     bubbles: true,
   });
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(700);
   assert.equal(await hidden(), false, 'release restarts the idle timeout');
   await page.waitForFunction(
     () =>
       document.querySelector('.screen').classList.contains('controls-hidden'),
     null,
-    { timeout: 3000 },
+    { timeout: 1500 },
   );
   // Real mouse behavior on a hybrid device remains unchanged.
   await page.locator('video').click({ position: { x: 70, y: 70 } });
@@ -201,7 +201,7 @@ try {
   await page
     .locator('.screen')
     .dispatchEvent('pointerleave', { pointerType: 'mouse' });
-  await page.waitForTimeout(3200);
+  await page.waitForTimeout(1800);
   assert.equal(await hidden(), false, 'zero disables automatic hiding');
   for (const value of [-1, NaN, Infinity, 2147483648])
     assert.equal(

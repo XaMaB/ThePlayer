@@ -215,7 +215,7 @@ The optional shared controls accept a configurable inactivity timeout:
 ```js
 import { mountControls } from './dist/player.js';
 const controls = mountControls(container, video, () => player, console.error, {
-  autoHideDelayMs: 3000, // Default; 5000 = five seconds, 0 = always visible
+  autoHideDelayMs: 1500, // Default; 5000 = five seconds, 0 = always visible
 });
 // Later: controls.destroy();
 ```

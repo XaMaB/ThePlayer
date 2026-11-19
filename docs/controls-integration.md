@@ -7,7 +7,7 @@ import { ThePlayer, mountControls } from './player.js';
 
 const player = new ThePlayer(video);
 const controls = mountControls(screen, video, () => player, showError, {
-  autoHideDelayMs: 3000,
+  autoHideDelayMs: 1500,
   pictureInPicture: { mode: 'auto', automatic: false },
   layout: {
     toolbar: [

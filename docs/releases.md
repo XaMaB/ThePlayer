@@ -1,5 +1,9 @@
 # Release versions
 
+## 1.6.1
+
+- Reduce the default controls idle timeout to 1500 ms. Explicit `autoHideDelayMs` overrides and 0 (always visible) remain supported.
+
 ## 1.6.0
 
 - Add configurable toolbar/center layouts and grouped optional settings without expanding the main playback bar.

@@ -12,7 +12,7 @@ export interface ControlsOptions {
   extras?: false | ControlExtrasOptions;
   /** PiP defaults to adaptive manual activation; false removes the control. */
   pictureInPicture?: false | PictureInPictureOptions;
-  /** Idle delay in milliseconds; defaults to 3000. Zero keeps controls visible. */
+  /** Idle delay in milliseconds; defaults to 1500. Zero keeps controls visible. */
   autoHideDelayMs?: number;
   /** Application localization; keys are HLS X-SKIP-CONTROL-LABEL-ID values. */
   skipLabels?: Readonly<Record<string, string>>;
@@ -27,7 +27,7 @@ export function mountControls(
   report: (message: string) => void,
   config: ControlsOptions = {},
 ) {
-  const autoHideDelayMs = config.autoHideDelayMs ?? 3000;
+  const autoHideDelayMs = config.autoHideDelayMs ?? 1500;
   if (
     !Number.isFinite(autoHideDelayMs) ||
     autoHideDelayMs < 0 ||
