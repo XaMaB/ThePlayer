@@ -1,5 +1,6 @@
 import { chromium, firefox, webkit } from 'playwright';
 import assert from 'node:assert/strict';
+import { caseDeadline } from './helpers/case-deadline.mjs';
 import { dashServer } from './helpers/dash-server.mjs';
 const { server, requests } = dashServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -16,10 +17,14 @@ try {
     'timeline,number,list,redirect,pto,periods,audio,live,cdn'
   ).split(',')) {
     for (const transport of ['fetch', 'xhr']) {
+      const deadline = caseDeadline(`${name} ${transport} ${scenario}`);
+      console.log(name, transport, scenario, 'START');
       const page = await browser.newPage();
       const failures = [];
       page.on('pageerror', (e) => failures.push(e.message));
+      deadline.phase('navigate');
       await page.goto(base + '/harness.html');
+      deadline.phase('initialize player');
       await page.evaluate(
         async ({ scenario, transport }) => {
           const { ThePlayer } = await import('/player.js');
@@ -48,6 +53,7 @@ try {
         { scenario, transport },
       );
       try {
+        deadline.phase('startup playback');
         await page.waitForFunction(
           () =>
             window.errors.length ||
@@ -81,8 +87,10 @@ try {
             await page.evaluate(() => window.player.qualityLevels.length),
             2,
           );
+          deadline.phase('select quality');
           await page.evaluate(() => window.player.selectQuality(1));
         }
+        deadline.phase('select audio');
         await page.evaluate(() =>
           window.player.selectAudioTrack(window.player.audioTracks[1].name),
         );
@@ -90,6 +98,7 @@ try {
           await page.evaluate(() => window.player.selectedAudioTrack),
           '2',
         );
+        deadline.phase('seek and playback progress');
         if (scenario !== 'live') {
           await page.locator('video').evaluate((v) => {
             v.currentTime = 16;
@@ -156,6 +165,7 @@ try {
               () => window.player.diagnostics.delivery.switches > 0,
             ),
           );
+        deadline.phase('select Auto');
         await page.evaluate(() => window.player.selectQuality(-1));
         assert.equal(
           await page.evaluate(() => window.player.autoQuality),
@@ -163,10 +173,11 @@ try {
         );
         assert.deepEqual(await page.evaluate(() => window.errors), []);
         assert.deepEqual(failures, []);
+        deadline.phase('destroy player');
         await page.evaluate(() => window.player.destroy());
         assert.equal(await page.locator('video').getAttribute('src'), null);
-        console.log(name, transport, scenario, 'PASS');
       } catch (e) {
+        deadline.phase('collect failure diagnostics');
         console.log(
           name,
           transport,
@@ -187,9 +198,13 @@ try {
         );
         throw e;
       } finally {
+        deadline.phase('cleanup player');
         await page.evaluate(() => window.player.destroy());
+        deadline.phase('close page');
         await page.close();
+        deadline.finish();
       }
+      console.log(name, transport, scenario, 'PASS');
     }
   }
   assert.ok(

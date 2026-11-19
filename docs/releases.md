@@ -1,5 +1,11 @@
 # Release versions
 
+## CI follow-up to 1.2.0-alpha.1
+
+- Pin GitHub runners to the validated Ubuntu 24.04 environment instead of the moving ubuntu-latest label.
+- Bound DASH base-browser scenarios including evaluate/teardown calls, report the phase on timeout and print PASS only after page cleanup.
+- Playback algorithms and the deployed player version are unchanged by this CI correction.
+
 ## 1.2.0-alpha.1
 
 - Add DASH clear-video CEA-608/708 service discovery and rendering, including P16, positioning and seek history.

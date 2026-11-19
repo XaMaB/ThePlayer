@@ -19,7 +19,7 @@ Fixtures are generated locally with FFmpeg and the project's original caption, t
 | `dash-ui-browser.mjs`       | Demo source detection, quality/audio controls, live-state visibility and release version                                                                    |
 | `dash-drm-browser.mjs`      | ClearKey cenc/cbcs, constant IV, Period key rotation, seeking and mediaKeys cleanup                                                                         |
 
-Playback suites use Fetch and XHR. The CI matrix runs `test:dash` in Chromium, Firefox and WebKit; ClearKey is a separate Chromium step. Linux Firefox audio-frequency checks require an audio sink. Browser-engine results are not physical Safari/iOS, Android TV or hardware-CDM certification.
+Playback suites use Fetch and XHR. CI is pinned to Ubuntu 24.04 to match the validated system media libraries; Ubuntu 26.04 WebKit is not currently part of the verified matrix. Each base playback scenario has a two-minute watchdog covering browser RPCs and teardown, with its last phase reported on timeout. PASS is printed after cleanup. The CI matrix runs `test:dash` in Chromium, Firefox and WebKit; ClearKey is a separate Chromium step. Linux Firefox audio-frequency checks require an audio sink. Browser-engine results are not physical Safari/iOS, Android TV or hardware-CDM certification.
 
 ## Reproduce
 

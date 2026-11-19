@@ -5,7 +5,8 @@ permissions:
 jobs:
   check:
     timeout-minutes: 15
-    runs-on: ubuntu-latest
+    # Keep browser/system media libraries aligned with the validated host.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,7 +18,8 @@ jobs:
       - run: npm run check
   hls-browser:
     timeout-minutes: 60
-    runs-on: ubuntu-latest
+    # Keep browser/system media libraries aligned with the validated host.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,7 +37,8 @@ jobs:
       - run: npm run test:hls:soak
   hls-metadata-browsers:
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    # Keep browser/system media libraries aligned with the validated host.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -101,7 +104,8 @@ jobs:
 
   dash-browsers:
     timeout-minutes: 40
-    runs-on: ubuntu-latest
+    # Keep browser/system media libraries aligned with the validated host.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
