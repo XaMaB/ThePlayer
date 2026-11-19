@@ -36,6 +36,9 @@ jobs:
       - run: npm run build
       - run: npm run fixtures:hls
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
+      - run: npm run test:controls
+        env:
+          CONTROLS_TEST_BROWSER: chromium
       - run: npm run test:hls
       - run: npm run test:hls:soak
   hls-metadata-browsers:
@@ -131,7 +134,7 @@ jobs:
       - run: pulseaudio --start --exit-idle-time=-1 --load=module-null-sink
       - run: npm run test:dash
         timeout-minutes: 25
-      - run: npm run fixtures:hls && npm run test:managed-media
+      - run: npm run fixtures:hls && npm run test:managed-media && npm run test:controls
         if: matrix.browser == 'webkit'
         timeout-minutes: 5
       - run: npm run test:dash:drm

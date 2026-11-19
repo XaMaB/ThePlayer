@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.3.2
+
+- Keep controls visible after touch/pen release. Pointer exit follows the idle timeout, including mouse input. Restart the timer on release and keep controls visible during held gestures.
+- Add `mountControls` option `autoHideDelayMs`: 3000 ms by default, or 0 to disable automatic hiding.
+- A touch on the video reveals controls without toggling playback; explicit play/pause buttons and mouse click behavior remain available.
+- Add WebKit/Chromium touch regressions covering reveal, seeking, play/pause, idle hiding, held gestures and hybrid mouse input.
+
 ## 1.3.1
 
 - Select ManagedMediaSource when ordinary MediaSource is unavailable, including all HLS/DASH/MoQ codec probes and MediaSource replacement paths.

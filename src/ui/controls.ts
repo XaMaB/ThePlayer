@@ -2,6 +2,8 @@ import { VERSION } from '../version';
 
 let keyboardOwner: HTMLElement | undefined;
 export interface ControlsOptions {
+  /** Idle delay in milliseconds; defaults to 3000. Zero keeps controls visible. */
+  autoHideDelayMs?: number;
   /** Application localization; keys are HLS X-SKIP-CONTROL-LABEL-ID values. */
   skipLabels?: Readonly<Record<string, string>>;
   labels?: { skip?: string; insertedContent?: string };
@@ -15,6 +17,15 @@ export function mountControls(
   report: (message: string) => void,
   config: ControlsOptions = {},
 ) {
+  const autoHideDelayMs = config.autoHideDelayMs ?? 3000;
+  if (
+    !Number.isFinite(autoHideDelayMs) ||
+    autoHideDelayMs < 0 ||
+    autoHideDelayMs > 2147483647
+  )
+    throw new RangeError(
+      'autoHideDelayMs must be between 0 and 2147483647 milliseconds',
+    );
   // The existing ThePlayer mark, inline so embeds do not need an asset URL.
   const brand =
     '<span class="player-brand"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M42 48h148v32h-58v128H98V80H42zM150 100l70 44-70 44z" fill="currentColor"/><path d="M42 112h28m-28 32h18m-18 32h28" stroke="currentColor" stroke-width="8" stroke-linecap="round" opacity=".55"/></svg><strong>ThePlayer</strong></span>';
@@ -99,12 +110,19 @@ export function mountControls(
   const quality = el('quality-toggle'),
     qualityMenu = el('quality-menu');
   let hideTimer: ReturnType<typeof setTimeout>;
+  const touchPointers = new Set<number>();
+  let lastTouchAt = -Infinity;
   let previous: any = null;
   let feedbackTimer: ReturnType<typeof setTimeout>;
   keyboardOwner ??= screen;
   screen.tabIndex = 0;
   screen.setAttribute('aria-label', 'Video player');
   const closeMenus = () => {
+    const wasOpen =
+      !qualityMenu.hidden ||
+      !ccMenu.hidden ||
+      !audioMenu.hidden ||
+      !menu.hidden;
     qualityMenu.hidden = true;
     quality.setAttribute('aria-expanded', 'false');
     ccMenu.hidden = true;
@@ -113,13 +131,16 @@ export function mountControls(
     menu.hidden = true;
     cc.setAttribute('aria-expanded', 'false');
     options.setAttribute('aria-expanded', 'false');
+    if (wasOpen) showControls();
   };
   function showControls() {
     screen.classList.remove('controls-hidden');
     clearTimeout(hideTimer);
+    if (autoHideDelayMs === 0) return;
     hideTimer = setTimeout(() => {
       if (
         !video.paused &&
+        touchPointers.size === 0 &&
         ccMenu.hidden &&
         audioMenu.hidden &&
         qualityMenu.hidden &&
@@ -129,7 +150,7 @@ export function mountControls(
         )
       )
         screen.classList.add('controls-hidden');
-    }, 3000);
+    }, autoHideDelayMs);
   }
   async function togglePlay() {
     try {
@@ -162,6 +183,12 @@ export function mountControls(
   play.onclick = () => void togglePlay();
   el('center-play').onclick = () => void togglePlay();
   listen(video, 'click', () => {
+    // A tap reveals controls; explicit buttons own touch play/pause.
+    // Safari may deliver the compatibility click as a MouseEvent.
+    if (performance.now() - lastTouchAt < 1000) {
+      showControls();
+      return;
+    }
     screen.focus({ preventScroll: true });
     void togglePlay();
   });
@@ -565,24 +592,30 @@ export function mountControls(
     keyboardOwner = screen;
     showControls();
   });
-  listen(screen, 'pointerdown', () => {
+  listen(screen, 'pointerdown', (event: PointerEvent) => {
     keyboardOwner = screen;
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+      touchPointers.add(event.pointerId);
+      lastTouchAt = performance.now();
+    } else {
+      lastTouchAt = -Infinity;
+    }
+    showControls();
   });
+  const finishTouch = (event: PointerEvent) => {
+    if (!touchPointers.delete(event.pointerId)) return;
+    lastTouchAt = performance.now();
+    showControls();
+  };
+  listen(document, 'pointerup', finishTouch);
+  listen(document, 'pointercancel', finishTouch);
   listen(screen, 'pointermove', showControls);
   listen(screen, 'focusin', () => {
     keyboardOwner = screen;
     showControls();
   });
-  listen(screen, 'pointerleave', () => {
-    if (
-      !video.paused &&
-      ccMenu.hidden &&
-      audioMenu.hidden &&
-      qualityMenu.hidden &&
-      menu.hidden
-    )
-      screen.classList.add('controls-hidden');
-  });
+  listen(screen, 'focusout', showControls);
+  // Pointer exit does not bypass the idle delay (including touch finger lift).
   listen(document, 'keydown', (e) => {
     if (
       keyboardOwner !== screen ||

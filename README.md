@@ -183,6 +183,18 @@ await player.destroy();
 
 The application provides the video and overlay canvas; position the canvas absolutely over the video with `pointer-events: none`. Track names come from `audioTracks` and `subtitleTracks`, not display labels. Listen for `catalog` and `subtitletracks` to populate menus. Subtitle rendering is optional; the video engine does not require a canvas.
 
+The optional shared controls accept a configurable inactivity timeout:
+
+```js
+import { mountControls } from './dist/player.js';
+const controls = mountControls(container, video, () => player, console.error, {
+  autoHideDelayMs: 3000, // Default; 5000 = five seconds, 0 = always visible
+});
+// Later: controls.destroy();
+```
+
+`container` wraps the video and uses the shared control styles (`demo/style.css`, copied to `dist/style.css`). The delay is in milliseconds and must be finite and nonnegative (at most 2147483647). Interaction restarts the timer; paused playback, active touches, open menus and focused controls keep it visible. A touch on the video reveals controls; use the play/pause buttons to toggle playback.
+
 `new ThePlayer(video, source)` followed by `init()` is also supported. `MoqPlayer` remains a legacy low-level alias for `MoqEngine`; new integrations should use `ThePlayer`.
 
 ## Modules
