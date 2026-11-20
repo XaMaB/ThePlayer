@@ -117,6 +117,12 @@ try {
     false,
     'controls remain available after finger lift',
   );
+  // The idle-delay assertion above is complete. Start a fresh interaction for
+  // the button checks instead of racing the remainder of the 1500 ms timeout
+  // against Playwright's visibility/stability checks on a busy CI runner.
+  await page.touchscreen.tap(bounds.x + 70, bounds.y + 70);
+  assert.equal(await hidden(), false, 'a fresh touch reveals the controls');
+  assert.equal(await page.evaluate(() => pauseCalls), 0);
   await page.locator('#skip-forward').tap();
   assert.equal(await page.locator('video').evaluate((v) => v.currentTime), 40);
   await page.locator('#center-play').tap();
