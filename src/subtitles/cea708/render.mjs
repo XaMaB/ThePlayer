@@ -74,7 +74,7 @@ export function draw708(context, cue, width, height, appearance = {}) {
           ? box.left + box.width
           : box.left + box.width / 2;
     for (let i = 0; i < Math.min(box.rows, win.rows.length); i++) {
-      const line = win.rows[i].replace(/<\/?(?:i|u)>/g, '');
+      const line = win.rows[i];
       if (!line.trim()) continue;
       const y = box.top + i * box.lineHeight;
       const textWidth = context.measureText(line).width;

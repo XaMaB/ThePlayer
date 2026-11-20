@@ -23,7 +23,6 @@ const files = [
   'scripts',
   'tests',
   'docs',
-  'vendor',
   'package.json',
   'package-lock.json',
   'server.mjs',

@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "private": true,
   "description": "Modular MoQ, HLS and MPEG-DASH browser player",
   "type": "module",
@@ -86,10 +86,10 @@
     "test:buffering": "node tests/buffering-browser.mjs",
     "test:fullscreen": "node tests/fullscreen-browser.mjs",
     "test:hls:sample-entry": "node tests/hls-sample-entry-browser.mjs",
-    "test:seek-preview": "node tests/seek-preview-browser.mjs"
+    "test:seek-preview": "node tests/seek-preview-browser.mjs",
+    "test:moq:captions": "node tests/moq-captions-browser.mjs"
   },
   "dependencies": {
-    "mux.js": "6.3.0",
     "pako": "3.0.3"
   },
   "devDependencies": {

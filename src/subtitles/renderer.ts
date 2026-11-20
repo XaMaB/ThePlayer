@@ -36,7 +36,11 @@ export class SubtitleRenderer {
     player.addEventListener(
       'caption',
       (event: Event) => {
-        const cue = (event as CustomEvent).detail.cue;
+        const { cue, replaceFrom } = (event as CustomEvent).detail;
+        if (Number.isFinite(replaceFrom)) {
+          cues = cues.filter((previous) => previous.pts < replaceFrom);
+          drawn = null;
+        }
         const token = generation;
         subtitleCounters.receive();
         updateSubtitleCounters();

@@ -1,6 +1,6 @@
 # HLS architecture research and implementation boundaries
 
-Reviewed 2026-11-17. The HLS engine in `src/engines/hls` is original application code. It does not import, vendor or wrap hls.js, Video.js/VHS, Shaka, or mux.js. The existing MoQ engine and its caption decoder retain their previously documented dependencies; this is not a claim that the entire repository has no third-party code.
+Reviewed 2026-11-17. The HLS engine in `src/engines/hls` is original application code. It does not import, vendor or wrap hls.js, Video.js/VHS, Shaka. MoQ transport retains its documented dependencies; all three protocol modules use ThePlayer's own CEA caption decoding core.
 
 ## What we learned
 

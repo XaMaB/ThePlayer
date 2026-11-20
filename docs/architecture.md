@@ -42,25 +42,25 @@ flowchart TD
 
 Events forwarded by the core:
 
-| Event             | Detail                                           |
-| ----------------- | ------------------------------------------------ |
-| `statechange`     | State string                                     |
-| `streamchange`    | Live presentation state                          |
-| `qualitylevels`   | Available quality levels                         |
-| `qualitychange`   | Current engine quality selection/state           |
-| `subtitlemetrics` | Caption reception/display counters               |
-| `catalog`         | Media catalog                                    |
-| `error`           | Error object                                     |
-| `autoplayblocked` | No payload                                       |
-| `audiochange`     | Selected audio track                             |
-| `subtitletracks`  | Available subtitle tracks                        |
-| `subtitlechange`  | Selected track, or null for Off                  |
-| `caption`         | `{ track, cue }` for the selected subtitle track |
-| `captionwarning`  | Recoverable caption error                        |
+| Event             | Detail                                                         |
+| ----------------- | -------------------------------------------------------------- |
+| `statechange`     | State string                                                   |
+| `streamchange`    | Live presentation state                                        |
+| `qualitylevels`   | Available quality levels                                       |
+| `qualitychange`   | Current engine quality selection/state                         |
+| `subtitlemetrics` | Caption reception/display counters                             |
+| `catalog`         | Media catalog                                                  |
+| `error`           | Error object                                                   |
+| `autoplayblocked` | No payload                                                     |
+| `audiochange`     | Selected audio track                                           |
+| `subtitletracks`  | Available subtitle tracks                                      |
+| `subtitlechange`  | Selected track, or null for Off                                |
+| `caption`         | `{ track, cue, replaceFrom? }` for the selected subtitle track |
+| `captionwarning`  | Recoverable caption error                                      |
 
 Additional engine-specific events forwarded by the core include `metadata`, `metadatawarning`, `videochange`, `videotracks`, `pathwaychange`, the `daterange*` family and the `interstitial*` family. Metadata carries presentation timestamps; it is an availability/append notification, not a playback-time callback. HLS extension events do not imply equivalent DASH extension support.
 
-MoQ bitmap and CEA-708 cues share the media timestamp domain. `SubtitleRenderer` consumes caption events and owns canvas drawing, bitmap decoding and displayed-cue counters. Selection invalidates pending bitmap decodes. Destroying or reattaching the renderer clears listeners and its animation loop.
+MoQ bitmap and CEA-708 cues share the media timestamp domain. The CEA-708 adapter uses the original MP4/SEI, packet, service and timeline core shared with HLS/DASH; it maps decoded windows into canvas cues. See [MoQ captions](moq-captions.md) for P16 configuration, retractions and renderer limits. `SubtitleRenderer` consumes caption events and owns canvas drawing, bitmap decoding and displayed-cue counters. Selection invalidates pending bitmap decodes. Destroying or reattaching the renderer clears listeners and its animation loop.
 
 ## HLS media and caption pipeline
 

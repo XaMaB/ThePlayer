@@ -4,7 +4,7 @@ import {
   supportsMediaType,
   releaseMediaSource,
 } from '../../core/media-source';
-import { Cea708Decoder } from '../../subtitles/cea708/decoder.mjs';
+import { Cea708Decoder } from '../../subtitles/cea708/decoder';
 import * as Moq from '@moq/net';
 import { cachedStartPlan } from './startup.mjs';
 import { AdaptiveBuffer, fragmentTiming } from './buffer.mjs';
@@ -375,7 +375,7 @@ export class MoqEngine extends EventTarget {
       )?.data;
       if (typeof data !== 'string')
         throw new Error('Missing media initialization');
-      if (t.role === 'video' && t.codec.startsWith('avc1'))
+      if (t.role === 'video' && /^(avc[13]|hvc1|hev1)\./.test(t.codec))
         this.captions = new Cea708Decoder(
           Uint8Array.from(atob(data), (c) => c.charCodeAt(0)),
           this.source.captionServices ?? this.catalog.captionServices ?? {},
@@ -516,7 +516,10 @@ export class MoqEngine extends EventTarget {
           if (this.captions)
             try {
               const before = this.captions.tracks.size,
-                events = this.captions.push(frame.payload);
+                events = this.captions.push(
+                  frame.payload,
+                  this.video.currentTime,
+                );
               if (this.captions.tracks.size !== before)
                 this.emit('subtitletracks', this.subtitleTracks);
               for (const event of events)

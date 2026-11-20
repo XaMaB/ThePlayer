@@ -28,10 +28,6 @@ const alias = Object.fromEntries(
   ]),
 );
 await mkdir(output, { recursive: true });
-const license = await readFile(
-  path.join(root, 'vendor/mux.js/LICENSE'),
-  'utf8',
-);
 await build({
   absWorkingDir: root,
   entryPoints: {
@@ -52,15 +48,17 @@ await build({
   alias,
   nodePaths: [path.join(root, 'node_modules')],
   banner: {
-    js:
-      `/*! ThePlayer v${version} includes modified mux.js 6.3.0. Copyright Brightcove.\n` +
-      license +
-      '\n*/',
+    js: `/*! ThePlayer v${version} | Apache-2.0. Third-party notices: NOTICE */`,
   },
 });
 await Promise.all(
   ['index.html', 'style.css'].map((name) =>
     copyFile(path.join(root, 'demo', name), path.join(output, name)),
+  ),
+);
+await Promise.all(
+  ['NOTICE', 'LICENSE-APACHE', 'LICENSE-MIT', 'THIRD-PARTY-pako-LICENSE'].map(
+    (name) => copyFile(path.join(root, name), path.join(output, name)),
   ),
 );
 const embed = (await readFile(path.join(root, 'demo/index.html'), 'utf8'))

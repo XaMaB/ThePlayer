@@ -39,6 +39,7 @@ jobs:
       - run: npm run test:controls
         env:
           CONTROLS_TEST_BROWSER: chromium
+      - run: npm run test:moq:captions
       - run: npm run test:hls
       - run: npm run test:hls:soak
   hls-metadata-browsers:
@@ -64,6 +65,9 @@ jobs:
       - run: npm run bootstrap
       - run: npm run build
       - run: npm run fixtures:hls
+      - run: npm run test:moq:captions
+        env:
+          MOQ_CAPTION_BROWSER: ${{ matrix.browser }}
       - run: npm run test:hls:packed-audio
       - run: npm run test:hls:metadata
         timeout-minutes: 8

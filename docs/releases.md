@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.8.0
+
+- MoQ CEA-708 now uses the original MP4/SEI and caption decoding core shared with HLS/DASH, including AVC/HEVC extraction and configurable P16 encodings.
+- Preserve caption service selection, window geometry and absolute media timestamps; retract cancelled delayed displays and clear stale cues after a media-clock restart.
+- Remove the obsolete caption dependency and its vendored files and notices. Other third-party notices remain unchanged.
+- Add decoder and cross-browser canvas regressions for the MoQ caption adapter.
+
 ## 1.7.2
 
 - Show an immediate floating destination time above the VOD seek bar during hover, pointer dragging and keyboard adjustment, even without thumbnails. Keep it inside the player at both edges and preserve the time when thumbnail loading fails.

@@ -75,7 +75,7 @@ MoQ targets a four-second buffer reserve; HLS has its own segment-based buffer a
 
 **CEA-608:** parity checks and duplicate-control suppression are implemented. Caption history supports seeking and quality transitions. Field-2 CC3/CC4 and TS/fMP4 SEI carriage are implemented; field-2 XDS packets are skipped. Background/foreground attributes are implemented, including translucent and transparent backgrounds. Firefox uses a feature-detected cell renderer when native cue-class styling is unavailable. Multiple `c608` tracks, flashing and Text/XDS services remain unsupported. Native browser typography means placement is not a pixel-exact broadcast rendering. A live join or seek with insufficient history can wait for the next complete caption update.
 
-**CEA-708:** cues retain source window positions and synchronize to the media clock, including fullscreen letterboxing. P16 consumes both operands atomically: a zero high byte represents one character; other pairs use Unicode code-unit handling or a configured service encoding such as EUC-KR. Invalid surrogate values become replacement characters. HLS has its own original decoder with window/pen colors, print/scroll direction and media-time delays. Its snap display fallback and other limits are described in [HLS support](docs/hls-support.md). The separate MoQ implementation retains its [decoder notes](vendor/mux.js/README.md).
+**CEA-708:** cues retain source window positions and synchronize to the media clock, including fullscreen letterboxing. P16 consumes both operands atomically: a zero high byte represents one character; other pairs use Unicode code-unit handling or a configured service encoding such as EUC-KR. Invalid surrogate values become replacement characters. HLS has its own original decoder with window/pen colors, print/scroll direction and media-time delays. Its snap display fallback and other limits are described in [HLS support](docs/hls-support.md). MoQ shares the same decoding core and preserves its canvas cue API; its rendering scope is described in [MoQ captions](docs/moq-captions.md).
 
 **WebVTT:** scoped safe STYLE rules and cue/region placement are supported. Browsers without native VTTRegion use placement fallback; region scrolling/clipping is not emulated. DVB and teletext decoding belongs to the Origin; their availability here does not mean browser-side raw broadcast subtitle decoding.
 
@@ -236,7 +236,6 @@ const controls = mountControls(container, video, () => player, console.error, {
 - `demo`: source form, optional channel directory, embed page and styling.
 - `scripts`: reproducible build and pinned upstream checkout.
 - `tests`: unit and engine lifecycle tests, without live multicast requirements.
-- `vendor/mux.js`: locally patched caption decoder with its license and patch provenance.
 
 See [architecture](docs/architecture.md) for extension boundaries and events.
 
@@ -275,7 +274,7 @@ For playback bugs, include browser/version, codec and catalog details, reproduct
 
 Google Cast optionally loads Google’s Web Sender SDK only after explicit application/demo opt-in; it is not bundled with the player.
 
-Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE`, the included upstream notices and `vendor/mux.js/LICENSE` for bundled dependencies.
+Application code is Apache-2.0. See `NOTICE`, `LICENSE-APACHE` and the included upstream notices for bundled dependencies.
 
 ### Playback shortcuts
 
