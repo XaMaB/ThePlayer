@@ -189,6 +189,10 @@ DRM video with attached MediaKeys is rejected, and the UI also hides capture for
 
 ## Buffering indicator and seek feedback
 
+The VOD seek bar automatically shows a translucent destination-time bubble above the selected position on mouse hover, pointer/touch dragging and keyboard changes. It does not require thumbnail metadata or integration configuration. Optional thumbnails appear above the same timestamp when available; missing or failed images leave the time visible. The bubble stays within the player at the start/end of the bar and uses `H:MM:SS` for videos longer than an hour.
+
+Pointer dragging previews the destination while playback continues; releasing commits one seek. Pointer cancellation or losing capture cancels the pending seek. Keyboard range input seeks immediately and updates `aria-valuetext`. This overlay is part of ThePlayer's inline/container-fullscreen controls, not native iPhone fullscreen or native PiP. `npm run test:seek-preview` verifies interaction and fallback behavior in Chromium/WebKit (`CONTROLS_TEST_BROWSER`).
+
 Controls show three flowing blue/violet chevrons above the toolbar during playback starvation. The indicator is independent of controls auto-hide and never intercepts pointer input. It appears after 300 ms, fades away on recovery, and adds “Buffering…” after 2500 ms of continuous waiting. Short stalls do not flash it. User pause, ended playback, source reset, errors and teardown clear it. MoQ's intentional rebuffer pause is represented through its engine state; HLS/DASH use native media readiness/events. The indicator does not change buffering or ABR policy and does not represent download progress. A paused source or a source not yet requesting playback does not show a native waiting indicator.
 
 ```js

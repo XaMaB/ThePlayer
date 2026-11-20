@@ -1,5 +1,10 @@
 # Release versions
 
+## 1.7.2
+
+- Show an immediate floating destination time above the VOD seek bar during hover, pointer dragging and keyboard adjustment, even without thumbnails. Keep it inside the player at both edges and preserve the time when thumbnail loading fails.
+- Keep the dragged value stable while playback advances and commit pointer seeks once on release; cancelled gestures leave playback unchanged. Use tabular time labels with hours for long videos.
+
 ## 1.7.1
 
 - Accept the QuickTime four-byte zero terminator in video sample descriptions, including Apple HDR10+ HLS initialization segments. Keep ordinary MP4 boxes and malformed sample descriptions strict.

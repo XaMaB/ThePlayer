@@ -839,53 +839,89 @@ export function mountControls(
   el('skip-back').onclick = () => skipBy(-10);
   el('skip-forward').onclick = () => skipBy(10);
   const seek = el('seek-bar') as HTMLInputElement;
-  seek.oninput = () => {
-    video.currentTime = Number(seek.value);
-  };
   const preview = el('seek-preview');
+  const previewCanvas = preview.querySelector('canvas')!;
+  const previewLabel = preview.querySelector('span')!;
   let previewToken = 0;
   let previewTimer: ReturnType<typeof setTimeout>;
+  let previewHideTimer: ReturnType<typeof setTimeout>;
+  let scrubbing = false;
+  let scrubPointer: number | undefined;
+  let previewTime = 0;
+  const clock = (seconds: number) => {
+    const n = Math.max(0, Math.floor(seconds));
+    const minutes = Math.floor(n / 60);
+    return n >= 3600
+      ? `${Math.floor(n / 3600)}:${String(minutes % 60).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
+      : `${minutes}:${String(n % 60).padStart(2, '0')}`;
+  };
   const hidePreview = () => {
     previewToken++;
     clearTimeout(previewTimer);
+    clearTimeout(previewHideTimer);
     preview.hidden = true;
+    previewCanvas.hidden = true;
   };
-  listen(seek, 'pointerleave', hidePreview);
-  listen(seek, 'pointermove', (event: PointerEvent) => {
+  const positionPreview = () => {
+    const bounds = seek.getBoundingClientRect();
+    const screenBounds = screen.getBoundingClientRect();
+    const scale = screen.clientWidth / screenBounds.width;
+    // Match the range's thumb-center travel, including both end positions.
+    const fraction = Math.max(0, Math.min(1, previewTime / Number(seek.max)));
+    const x =
+      (bounds.left +
+        8 +
+        fraction * Math.max(0, bounds.width - 16) -
+        screenBounds.left) *
+      scale;
+    const width = preview.offsetWidth;
+    const left = Math.max(
+      8,
+      Math.min(screen.clientWidth - width - 8, x - width / 2),
+    );
+    preview.style.left = left + 'px';
+    preview.style.bottom =
+      (screenBounds.bottom - bounds.top) * scale + 10 + 'px';
+    preview.style.setProperty(
+      '--seek-tip-left',
+      Math.max(10, Math.min(width - 10, x - left)) + 'px',
+    );
+  };
+  const showPreview = (time: number) => {
     const p = getPlayer();
     if (
-      !p?.getThumbnail ||
+      !p ||
+      seek.hidden ||
       !Number.isFinite(video.duration) ||
-      p?.diagnostics?.interstitial?.active
+      video.duration <= 0 ||
+      p.diagnostics?.interstitial?.active
     )
       return hidePreview();
-    const bounds = seek.getBoundingClientRect();
-    const time = Math.max(
-      0,
-      Math.min(
-        video.duration - 0.001,
-        ((event.clientX - bounds.left) / bounds.width) * video.duration,
-      ),
-    );
+    previewTime = Math.max(0, Math.min(video.duration, time));
+    previewLabel.textContent = clock(previewTime);
+    previewCanvas.hidden = true;
+    preview.hidden = false;
+    positionPreview();
     const token = ++previewToken;
     clearTimeout(previewTimer);
+    clearTimeout(previewHideTimer);
+    // Time is immediate and independent of optional, asynchronous thumbnails.
+    if (!p.getThumbnail) return;
     previewTimer = setTimeout(async () => {
       try {
-        const thumbnail = await p.getThumbnail(time);
-        if (token !== previewToken || p !== getPlayer() || !thumbnail) {
-          if (token === previewToken) preview.hidden = true;
-          return;
-        }
+        const thumbnail = await p.getThumbnail(
+          Math.min(previewTime, video.duration - 0.001),
+        );
+        if (token !== previewToken || p !== getPlayer() || !thumbnail) return;
         const image = new Image();
         image.src = thumbnail.url;
         await image.decode();
         if (token !== previewToken || p !== getPlayer()) return;
-        const canvas = preview.querySelector('canvas')!;
-        canvas.width = Math.min(240, thumbnail.width);
-        canvas.height = Math.round(
-          (canvas.width * thumbnail.height) / thumbnail.width,
+        previewCanvas.width = Math.min(240, thumbnail.width);
+        previewCanvas.height = Math.round(
+          (previewCanvas.width * thumbnail.height) / thumbnail.width,
         );
-        canvas
+        previewCanvas
           .getContext('2d')!
           .drawImage(
             image,
@@ -895,30 +931,89 @@ export function mountControls(
             thumbnail.height,
             0,
             0,
-            canvas.width,
-            canvas.height,
+            previewCanvas.width,
+            previewCanvas.height,
           );
-        preview.querySelector('span')!.textContent = clock(time);
-        const screenBounds = screen.getBoundingClientRect();
-        preview.style.left =
-          Math.max(
-            8,
-            Math.min(
-              screenBounds.width - canvas.width - 16,
-              event.clientX - screenBounds.left - canvas.width / 2,
-            ),
-          ) + 'px';
-        preview.hidden = false;
+        previewCanvas.hidden = false;
+        positionPreview();
       } catch {
-        if (token === previewToken) preview.hidden = true;
+        // A missing or failed thumbnail must not remove the seek destination.
       }
     }, 100);
+  };
+  seek.oninput = () => {
+    showPreview(Number(seek.value));
+    seek.setAttribute('aria-valuetext', clock(Number(seek.value)));
+    if (!scrubbing) {
+      video.currentTime = Number(seek.value);
+      previewHideTimer = setTimeout(hidePreview, 1200);
+    }
+    showControls();
+  };
+  const pointerTime = (event: PointerEvent) => {
+    const bounds = seek.getBoundingClientRect();
+    return Math.max(
+      0,
+      Math.min(
+        video.duration,
+        ((event.clientX - bounds.left - 8) / Math.max(1, bounds.width - 16)) *
+          video.duration,
+      ),
+    );
+  };
+  const moveScrub = (event: PointerEvent) => {
+    seek.value = String(pointerTime(event));
+    seek.setAttribute('aria-valuetext', clock(Number(seek.value)));
+    showPreview(Number(seek.value));
+  };
+  listen(seek, 'pointerdown', (event: PointerEvent) => {
+    if (event.button !== 0 || scrubbing || !seekBounds()) return;
+    // Own captured pointer movement consistently across WebKit and Chromium;
+    // keyboard range behavior remains native.
+    event.preventDefault();
+    seek.focus({ preventScroll: true });
+    scrubbing = true;
+    scrubPointer = event.pointerId;
+    seek.setPointerCapture(event.pointerId);
+    moveScrub(event);
+  });
+  const finishScrub = (commit: boolean) => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    const pointer = scrubPointer;
+    scrubPointer = undefined;
+    if (commit) video.currentTime = Number(seek.value);
+    else seek.value = String(video.currentTime);
+    if (pointer !== undefined && seek.hasPointerCapture(pointer))
+      seek.releasePointerCapture(pointer);
+    hidePreview();
+    showControls();
+  };
+  listen(seek, 'pointerup', (event: PointerEvent) => {
+    if (event.pointerId === scrubPointer) finishScrub(true);
+  });
+  listen(seek, 'pointercancel', () => finishScrub(false));
+  listen(seek, 'lostpointercapture', () => finishScrub(false));
+  listen(seek, 'blur', () => {
+    finishScrub(false);
+    hidePreview();
+  });
+  listen(seek, 'pointerleave', () => {
+    if (!scrubbing) hidePreview();
+  });
+  for (const event of ['emptied', 'loadstart'])
+    listen(video, event, () => {
+      finishScrub(false);
+      hidePreview();
+    });
+  listen(seek, 'pointermove', (event: PointerEvent) => {
+    if (scrubbing) {
+      if (event.pointerId === scrubPointer) moveScrub(event);
+      return;
+    }
+    showPreview(pointerTime(event));
   });
 
-  const clock = (seconds: number) => {
-    const n = Math.max(0, Math.floor(seconds));
-    return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
-  };
   function syncQuality() {
     const p = getPlayer();
     el('audio-only-label').hidden = p?.mediaMode !== 'audio';
@@ -1011,9 +1106,14 @@ export function mountControls(
     seek.hidden = !p || p.isLive;
     el('playback-time').hidden = seek.hidden;
     el('control-spacer').hidden = !seek.hidden;
+    if (seek.hidden || inserted) {
+      finishScrub(false);
+      hidePreview();
+    }
     if (!seek.hidden) {
       seek.max = String(Number.isFinite(video.duration) ? video.duration : 0);
-      seek.value = String(video.currentTime);
+      if (!scrubbing) seek.value = String(video.currentTime);
+      seek.setAttribute('aria-valuetext', clock(Number(seek.value)));
       el('playback-time').textContent =
         `${clock(video.currentTime)} / ${clock(Number.isFinite(video.duration) ? video.duration : 0)}`;
     }
@@ -1132,7 +1232,9 @@ export function mountControls(
       clearTimeout(hideTimer);
       clearTimeout(feedbackTimer);
       for (const animation of seekAnimations) animation.cancel();
+      finishScrub(false);
       hidePreview();
+      clearTimeout(hideTimer);
       if (keyboardOwner === screen) keyboardOwner = undefined;
       clearInterval(statsTimer);
       for (const child of Array.from(screen.children))

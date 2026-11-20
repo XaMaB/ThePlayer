@@ -170,6 +170,9 @@ try {
             position: { x: bounds.width * 0.25, y: bounds.height / 2 },
           });
           await page.locator('#seek-preview').waitFor({ state: 'visible' });
+          await page
+            .locator('#seek-preview canvas')
+            .waitFor({ state: 'visible' });
           assert.ok(
             await page
               .locator('#seek-preview canvas')
