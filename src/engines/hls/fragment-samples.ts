@@ -1,4 +1,4 @@
-import { boxes } from './mp4';
+import { boxes, videoSampleEntryBoxes } from './mp4';
 export interface FragmentTrack {
   id: number;
   timescale: number;
@@ -53,7 +53,7 @@ export function fragmentMetadata(init: Uint8Array): FragmentTrack[] {
       let nalLength: number | undefined;
       if (['avc1', 'avc3', 'hvc1', 'hev1'].includes(entry.type)) {
         const hevc = entry.type === 'hvc1' || entry.type === 'hev1';
-        const config = boxes(entry.body.subarray(78)).find(
+        const config = videoSampleEntryBoxes(entry.body).find(
           (box) => box.type === (hevc ? 'hvcC' : 'avcC'),
         );
         if (config && config.body.length > (hevc ? 21 : 4))

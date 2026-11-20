@@ -1,4 +1,4 @@
-import { boxes, inspectInit, concat } from './mp4';
+import { boxes, inspectInit, concat, videoSampleEntryBoxes } from './mp4';
 import { fragmentMetadata, fragmentSamples } from './fragment-samples';
 import type { PreparedSegment } from './media-lane';
 
@@ -30,7 +30,10 @@ export function previewConfiguration(init: Uint8Array) {
         ? 'av1C'
         : '';
   if (!name) throw new Error('Unsupported preview codec');
-  const description = child(entry.body.subarray(78), name);
+  const description = videoSampleEntryBoxes(entry.body).find(
+    (box) => box.type === name,
+  )?.body;
+  if (!description) throw new Error('Missing preview ' + name);
   return {
     config: {
       codec: tracks[0].codec,

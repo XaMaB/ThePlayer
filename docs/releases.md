@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.7.1
+
+- Accept the QuickTime four-byte zero terminator in video sample descriptions, including Apple HDR10+ HLS initialization segments. Keep ordinary MP4 boxes and malformed sample descriptions strict.
+- Remove this optional terminator from HLS initialization data before MediaSource ingestion for Chromium compatibility, preserving codec configuration and media fragments.
+- Share the corrected parsing across playback, caption metadata and I-frame previews. Add deterministic parsing, quality-switch and seek regressions.
+
 ## 1.7.0
 
 - Add capability-based iPhone native-video fullscreen fallback, delayed-readiness button updates, prefixed Safari support and native exit-state tracking. Document system-control/overlay limitations.

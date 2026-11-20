@@ -1,4 +1,5 @@
 import { supportsMediaType } from '../../core/media-source';
+import { normalizeVideoSampleEntries } from './sample-entry';
 import { packedAc3 } from './packed-ac3';
 import { packedAudioKind, packedMp3 } from './packed-mp3';
 import { isId3 } from './id3';
@@ -150,7 +151,10 @@ export class MediaLane {
         }
         captionError = this.captionMetaError;
         this.ignoredCaptions = filtered.ignored;
-        this.initCache = { key, data: filtered.data };
+        this.initCache = {
+          key,
+          data: normalizeVideoSampleEntries(filtered.data),
+        };
       }
       init = this.initCache.data;
       try {

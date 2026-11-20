@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "private": true,
   "description": "Modular MoQ, HLS and MPEG-DASH browser player",
   "type": "module",
@@ -22,7 +22,7 @@
     "export": "node scripts/export.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "fixtures:hls": "node scripts/prepare-hls-fixtures.mjs",
-    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-open-gop.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery && npm run test:hls:ll && npm run test:hls:text && npm run test:hls:sei && npm run test:hls:708 && npm run test:hls:protection && npm run test:hls:sample-aes && npm run test:hls:eme && npm run test:hls:packed-audio && npm run test:hls:metadata && npm run test:hls:mp3 && npm run test:hls:dolby && npm run test:hls:steering && npm run test:hls:dateranges && npm run test:hls:interstitials && npm run test:hls:thumbnails && npm run test:hls:iframes && npm run test:hls:date-preload && npm run test:hls:video && npm run test:hls:he-aac && npm run test:hls:live-range && npm run test:hls:switch-wait && npm run test:hls:native-clock",
+    "test:hls": "node tests/hls-codecs.mjs && node tests/hls-open-gop.mjs && node tests/hls-browser.mjs && node tests/hls-abr-browser.mjs && npm run test:hls:recovery && npm run test:hls:abr-recovery && npm run test:hls:ll && npm run test:hls:text && npm run test:hls:sei && npm run test:hls:708 && npm run test:hls:protection && npm run test:hls:sample-aes && npm run test:hls:eme && npm run test:hls:packed-audio && npm run test:hls:metadata && npm run test:hls:mp3 && npm run test:hls:dolby && npm run test:hls:steering && npm run test:hls:dateranges && npm run test:hls:interstitials && npm run test:hls:thumbnails && npm run test:hls:iframes && npm run test:hls:date-preload && npm run test:hls:video && npm run test:hls:he-aac && npm run test:hls:live-range && npm run test:hls:switch-wait && npm run test:hls:native-clock && npm run test:hls:sample-entry",
     "test:hls:public": "node tests/hls-public.mjs",
     "test:hls:mux": "node tests/hls-mux-audit.mjs",
     "test:hls:recovery": "node tests/hls-recovery-browser.mjs",
@@ -84,7 +84,8 @@
     "test:pip:fallback": "node tests/pip-fallback-browser.mjs",
     "test:controls:extras": "node tests/control-extras-browser.mjs && node tests/remote-controls-browser.mjs",
     "test:buffering": "node tests/buffering-browser.mjs",
-    "test:fullscreen": "node tests/fullscreen-browser.mjs"
+    "test:fullscreen": "node tests/fullscreen-browser.mjs",
+    "test:hls:sample-entry": "node tests/hls-sample-entry-browser.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

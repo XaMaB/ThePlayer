@@ -77,10 +77,29 @@ export interface Mp4Box {
   size: number;
 }
 export function boxes(data: Uint8Array): Mp4Box[] {
+  return parseBoxes(data);
+}
+/** QuickTime permits exactly four zero bytes after video sample extensions.
+ * https://developer.apple.com/documentation/quicktime-file-format/video_sample_description
+ * Keep this exception local to visual sample entries, never general MP4 boxes.
+ */
+export function videoSampleEntryBoxes(body: Uint8Array): Mp4Box[] {
+  if (body.length < 78) throw new Error('Truncated video sample entry');
+  return parseBoxes(body.subarray(78), true);
+}
+function parseBoxes(data: Uint8Array, videoTerminator = false): Mp4Box[] {
   const out: Mp4Box[] = [];
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   for (let at = 0; at < data.length; ) {
+    if (videoTerminator && data.length - at === 4 && view.getUint32(at) === 0)
+      break;
     if (at + 8 > data.length) throw new Error('Truncated MP4 header');
+    if (
+      videoTerminator &&
+      view.getUint32(at) === 0 &&
+      view.getUint32(at + 4) === 0
+    )
+      throw new Error('Invalid MP4 video sample terminator');
     let size = view.getUint32(at),
       header = 8;
     if (size === 1) {
@@ -103,6 +122,11 @@ export function boxes(data: Uint8Array): Mp4Box[] {
 }
 const child = (data: Uint8Array, type: string) => {
   const found = boxes(data).find((b) => b.type === type);
+  if (!found) throw new Error(`Missing ${type}`);
+  return found.body;
+};
+const videoChild = (body: Uint8Array, type: string) => {
+  const found = videoSampleEntryBoxes(body).find((box) => box.type === type);
   if (!found) throw new Error(`Missing ${type}`);
   return found.body;
 };
@@ -172,10 +196,10 @@ export function inspectInit(data: Uint8Array): Track[] {
       const entry = boxes(stsd.subarray(8))[0];
       let encryption: Track['encryption'];
       if (entry.type === 'encv' || entry.type === 'enca') {
-        const sinf = child(
-          entry.body.subarray(entry.type === 'encv' ? 78 : 28),
-          'sinf',
-        );
+        const sinf =
+          entry.type === 'encv'
+            ? videoChild(entry.body, 'sinf')
+            : child(entry.body.subarray(28), 'sinf');
         const original = child(sinf, 'frma'),
           schm = child(sinf, 'schm');
         const scheme = String.fromCharCode(...schm.subarray(4, 8));
@@ -201,7 +225,7 @@ export function inspectInit(data: Uint8Array): Track[] {
       }
       let codec: string;
       if (entry.type === 'avc1' || entry.type === 'avc3') {
-        const avcc = child(entry.body.subarray(78), 'avcC');
+        const avcc = videoChild(entry.body, 'avcC');
         codec =
           entry.type +
           '.' +
@@ -209,9 +233,9 @@ export function inspectInit(data: Uint8Array): Track[] {
             n.toString(16).padStart(2, '0'),
           ).join('');
       } else if (entry.type === 'hvc1' || entry.type === 'hev1') {
-        codec = hevcCodec(child(entry.body.subarray(78), 'hvcC'), entry.type);
+        codec = hevcCodec(videoChild(entry.body, 'hvcC'), entry.type);
       } else if (entry.type === 'av01') {
-        const children = boxes(entry.body.subarray(78));
+        const children = videoSampleEntryBoxes(entry.body);
         const configs = children.filter((b) => b.type === 'av1C');
         if (configs.length !== 1)
           throw new Error('AV1 needs exactly one av1C box');
