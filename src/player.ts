@@ -78,3 +78,5 @@ export type {
   ToolbarControl,
   CenterControl,
 } from './ui/control-layout';
+
+export type { BufferingIndicatorOptions } from './ui/buffering-indicator';

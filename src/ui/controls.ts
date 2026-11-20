@@ -1,3 +1,7 @@
+import {
+  BufferingIndicator,
+  type BufferingIndicatorOptions,
+} from './buffering-indicator';
 import { ControlExtras, type ControlExtrasOptions } from './control-extras';
 import { applyControlLayout, type ControlLayout } from './control-layout';
 import {
@@ -8,6 +12,10 @@ import { VERSION } from '../version';
 
 let keyboardOwner: HTMLElement | undefined;
 export interface ControlsOptions {
+  /** Delayed chevrons during playback starvation; false disables the indicator. */
+  buffering?: false | BufferingIndicatorOptions;
+  /** Directional triangle wave on skip buttons; respects reduced motion. Default: true. */
+  seekAnimation?: boolean;
   layout?: ControlLayout;
   extras?: false | ControlExtrasOptions;
   /** PiP defaults to adaptive manual activation; false removes the control. */
@@ -41,6 +49,10 @@ export function mountControls(
     '<span class="player-brand"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M42 48h148v32h-58v128H98V80H42zM150 100l70 44-70 44z" fill="currentColor"/><path d="M42 112h28m-28 32h18m-18 32h28" stroke="currentColor" stroke-width="8" stroke-linecap="round" opacity=".55"/></svg><strong>ThePlayer</strong></span>';
   const version = `<small class="player-version">v${VERSION}</small>`;
   const originalChildren = new Set(screen.children);
+  const buffering =
+    config.buffering === false
+      ? undefined
+      : new BufferingIndicator(screen, video, config.buffering);
   const abort = new AbortController();
   let documentAbort = new AbortController();
   const documentBindings: [string, (event: any) => void][] = [];
@@ -174,6 +186,7 @@ export function mountControls(
   let lastTouchAt = -Infinity;
   let previous: any = null;
   let feedbackTimer: ReturnType<typeof setTimeout>;
+  let seekAnimations: Animation[] = [];
   keyboardOwner ??= screen;
   screen.tabIndex = 0;
   screen.setAttribute('aria-label', 'Video player');
@@ -217,7 +230,10 @@ export function mountControls(
       if (video.paused) {
         if (getPlayer()) await getPlayer().play();
         else await video.play();
-      } else video.pause();
+      } else {
+        buffering?.reset();
+        video.pause();
+      }
     } catch (e: any) {
       report(e.message);
     }
@@ -271,6 +287,15 @@ export function mountControls(
       playerEvents?.abort();
       boundPlayer = player;
       playerEvents = new AbortController();
+      player?.addEventListener(
+        'statechange',
+        (event: any) =>
+          buffering?.setEngineState(event.detail, player.protocol),
+        { signal: playerEvents.signal },
+      );
+      player?.addEventListener('error', () => buffering?.reset(), {
+        signal: playerEvents.signal,
+      });
       for (const event of ['catalog', 'subtitletracks', 'subtitlechange'])
         player?.addEventListener(event, syncSubtitles, {
           signal: playerEvents.signal,
@@ -763,6 +788,36 @@ export function mountControls(
       Math.min(bounds.end, video.currentTime + seconds),
     );
     const delta = target - video.currentTime;
+    for (const animation of seekAnimations) animation.cancel();
+    seekAnimations = [];
+    if (
+      delta &&
+      config.seekAnimation !== false &&
+      !screen.ownerDocument.defaultView?.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches
+    ) {
+      const button = el(seconds < 0 ? 'skip-back' : 'skip-forward');
+      // The back icon's SVG group mirrors both the shapes and their motion.
+      for (const [index, selector] of ['.skip-face', '.skip-trail'].entries()) {
+        const path = button.querySelector(selector)!;
+        seekAnimations.push(
+          path.animate(
+            [
+              { transform: 'translateX(0)', fill: '#69a6ff', opacity: 0.45 },
+              {
+                transform: 'translateX(3px)',
+                fill: '#b293ff',
+                opacity: 1,
+                offset: 0.45,
+              },
+              { transform: 'translateX(0)', opacity: 0.65 },
+            ],
+            { duration: 480, delay: index * 100, easing: 'ease-out' },
+          ),
+        );
+      }
+    }
     video.currentTime = target;
     el('seek-feedback').textContent =
       `${delta < 0 ? '−' : '+'}${Math.abs(delta).toFixed(Math.abs(delta) < 9.9 ? 1 : 0)} s`;
@@ -1058,6 +1113,7 @@ export function mountControls(
     configureLayout: (layout: ControlLayout) =>
       applyControlLayout(screen, layout),
     destroy() {
+      buffering?.destroy();
       pip?.destroy();
       extras?.destroy();
       documentAbort.abort();
@@ -1066,6 +1122,7 @@ export function mountControls(
       observer.disconnect();
       clearTimeout(hideTimer);
       clearTimeout(feedbackTimer);
+      for (const animation of seekAnimations) animation.cancel();
       hidePreview();
       if (keyboardOwner === screen) keyboardOwner = undefined;
       clearInterval(statsTimer);

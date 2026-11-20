@@ -1521,3 +1521,108 @@ button:not(:disabled):hover {
     max-height: calc(100% - 16px);
   }
 }
+
+/* ThePlayer buffering signature. Independent of controls auto-hide. */
+.theplayer-buffering {
+  --buffering-color: #69a6ff;
+  --buffering-accent: #b293ff;
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: 84px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid rgb(170 185 225 / 14%);
+  border-radius: 14px;
+  background: rgb(17 22 36 / 48%);
+  backdrop-filter: blur(10px);
+  color: var(--buffering-color);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+.theplayer-buffering[data-position='top'] {
+  bottom: auto;
+  top: 24px;
+}
+.theplayer-buffering[data-position='center'] {
+  bottom: auto;
+  top: 50%;
+  margin-top: -21px;
+}
+.theplayer-buffering.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.buffering-marks {
+  display: flex;
+  width: 64px;
+  height: 28px;
+}
+.buffering-marks svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.buffering-marks path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.25;
+  animation: theplayer-buffer-flow 1.2s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.buffering-marks path:nth-child(2) {
+  animation-delay: 150ms;
+}
+.buffering-marks path:nth-child(3) {
+  animation-delay: 300ms;
+}
+.theplayer-buffering.is-visible path {
+  animation-play-state: running;
+}
+.buffering-label {
+  display: none;
+  color: #eef2ff;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.theplayer-buffering.has-label .buffering-label {
+  display: inline;
+}
+@keyframes theplayer-buffer-flow {
+  0%,
+  75%,
+  100% {
+    opacity: 0.25;
+    stroke: var(--buffering-color);
+    transform: translateX(0);
+  }
+  35% {
+    opacity: 1;
+    stroke: var(--buffering-accent);
+    transform: translateX(2px);
+  }
+}
+@media (max-width: 600px) {
+  .theplayer-buffering {
+    bottom: 104px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .theplayer-buffering {
+    transition: none;
+  }
+  .buffering-marks path {
+    animation: none;
+    opacity: 0.85;
+  }
+}

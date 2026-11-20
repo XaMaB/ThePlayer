@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.7.0
+
+- Add a configurable delayed buffering indicator with flowing chevrons, prolonged-wait text, reduced-motion support and MoQ rebuffer-state integration.
+- Animate the skip-button triangles in the seek direction for pointer and keyboard input, with restartable waves and an opt-out.
+- Document integration options and test real network starvation, recovery, pause, teardown and seek feedback in Chromium and WebKit.
+
 ## 1.6.2
 
 - Avoid an unnecessary sub-frame startup seek when DASH playback is already within 50 ms of its intended starting position, including small audio/video timestamp offsets. This prevents flushing a decoder during its initial preroll; real start offsets and live positioning still seek normally.

@@ -186,3 +186,25 @@ DRM video with attached MediaKeys is rejected, and the UI also hides capture for
 ## Verification and scope
 
 `npm run test:controls:extras` runs real HLS/DASH queue playback, chapter seeking, playback-rate controls, PNG capture, caption reset and layout checks in Chromium and WebKit. It also runs simulated native-device/Cast SDK lifecycle tests and the DRM capture guard. Queue race/failure tests run in `npm test`. Real AirPlay/Chromecast hardware, third-party DRM receivers and provider-specific authentication remain integration acceptance tests, not claims established by browser mocks.
+
+## Buffering indicator and seek feedback
+
+Controls show three flowing blue/violet chevrons above the toolbar during playback starvation. The indicator is independent of controls auto-hide and never intercepts pointer input. It appears after 300 ms, fades away on recovery, and adds “Buffering…” after 2500 ms of continuous waiting. Short stalls do not flash it. User pause, ended playback, source reset, errors and teardown clear it. MoQ's intentional rebuffer pause is represented through its engine state; HLS/DASH use native media readiness/events. The indicator does not change buffering or ABR policy and does not represent download progress. A paused source or a source not yet requesting playback does not show a native waiting indicator.
+
+```js
+const controls = mountControls(screen, video, () => player, showError, {
+  buffering: {
+    delayMs: 300,
+    labelDelayMs: 2500, // measured from the start of waiting
+    position: 'bottom', // 'bottom', 'top' or 'center'
+    color: '#69a6ff',
+    accentColor: '#b293ff',
+    label: 'Buffering…', // application localization; empty string hides text
+  },
+  seekAnimation: true,
+});
+```
+
+Set `buffering: false` to omit the indicator. Delays accept finite values from 0 to 2147483647 milliseconds; the label never precedes the indicator. Colors are CSS colors. The component uses a polite status announcement for the delayed label. `prefers-reduced-motion` replaces the flowing animation with static chevrons and disables seek waves. The overlay follows the video into Document PiP; browser-owned native PiP cannot display custom DOM overlays.
+
+Clicking either 10-second skip button or using Left/Right sends a wave through that button's triangles in the seek direction. Rapid inputs restart the wave; the number remains readable. Seeking at a boundary does not animate a nonexistent move. `seekAnimation: false` disables this visual effect without disabling seeking or its numeric feedback. These are mount-time settings; destroy and remount controls to change them.
