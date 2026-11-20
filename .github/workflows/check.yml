@@ -142,6 +142,9 @@ jobs:
         timeout-minutes: 10
         env:
           ABR_TEST_BROWSER: ${{ matrix.browser }}
+      - run: npm run test:fullscreen
+        if: matrix.browser == 'webkit'
+        timeout-minutes: 4
       - run: npm run test:buffering
         if: matrix.browser == 'webkit'
         timeout-minutes: 4

@@ -208,3 +208,15 @@ const controls = mountControls(screen, video, () => player, showError, {
 Set `buffering: false` to omit the indicator. Delays accept finite values from 0 to 2147483647 milliseconds; the label never precedes the indicator. Colors are CSS colors. The component uses a polite status announcement for the delayed label. `prefers-reduced-motion` replaces the flowing animation with static chevrons and disables seek waves. The overlay follows the video into Document PiP; browser-owned native PiP cannot display custom DOM overlays.
 
 Clicking either 10-second skip button or using Left/Right sends a wave through that button's triangles in the seek direction. Rapid inputs restart the wave; the number remains readable. Seeking at a boundary does not animate a nonexistent move. `seekAnimation: false` disables this visual effect without disabling seeking or its numeric feedback. These are mount-time settings; destroy and remount controls to change them.
+
+## Fullscreen and iPhone
+
+The fullscreen button prefers the container Fullscreen API (including older prefixed Safari support), preserving ThePlayer's controls and DOM/canvas captions. Where only native video fullscreen is available, notably iPhone, it uses `webkitEnterFullscreen()` / `webkitExitFullscreen()` or the supported WebKit presentation-mode API. It detects capabilities rather than browser names, so the same behavior applies to iOS browsers exposing these APIs.
+
+On a native-video-only browser the button stays disabled until metadata, video dimensions and fullscreen support are available, and updates on later loaded-data/resize events. It never queues a fullscreen request for a future load event: entry must happen directly in a user gesture. A browser with no supported API hides the button. Permission denial is reported, not bypassed by trying another API; embedded applications must grant fullscreen permission (for example `allowfullscreen` / `allow="fullscreen"`).
+
+`controls.fullscreen` exposes `supported`, `available`, `active` and `toggle()`. Call `toggle()` directly from a user gesture. The controller tracks native enter/exit and presentation-mode events, source reset, Document PiP document changes and cleanup.
+
+**Native iPhone fullscreen uses system controls.** Custom DOM/canvas captions, ThePlayer menus, MediaInfo, buffering graphics and seek waves remain available inline or in container fullscreen; the browser's native video fullscreen cannot display those overlays. Native text tracks are browser-controlled. Video keeps its aspect ratio, so letterboxing is normal when the display and video shapes differ. Actual iPhone behavior requires device acceptance testing; the automated suite verifies real Chromium container fullscreen and simulated WebKit/iPhone API and readiness paths.
+
+References: [Apple fullscreen methods and readiness](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/Using_HTML5_Audio_Video/ControllingMediaWithJavaScript/ControllingMediaWithJavaScript.html), [Fullscreen API](https://developer.mozilla.org/en-US/docs/Web/API/Fullscreen_API).

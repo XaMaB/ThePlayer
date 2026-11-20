@@ -83,7 +83,8 @@
     "test:pip": "node tests/pip-browser.mjs",
     "test:pip:fallback": "node tests/pip-fallback-browser.mjs",
     "test:controls:extras": "node tests/control-extras-browser.mjs && node tests/remote-controls-browser.mjs",
-    "test:buffering": "node tests/buffering-browser.mjs"
+    "test:buffering": "node tests/buffering-browser.mjs",
+    "test:fullscreen": "node tests/fullscreen-browser.mjs"
   },
   "dependencies": {
     "mux.js": "6.3.0",

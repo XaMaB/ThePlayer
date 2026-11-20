@@ -1626,3 +1626,9 @@ button:not(:disabled):hover {
     opacity: 0.85;
   }
 }
+
+/* Legacy Safari container fullscreen; native iPhone video fullscreen owns its UI. */
+.screen:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+}

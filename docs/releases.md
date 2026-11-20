@@ -2,6 +2,8 @@
 
 ## 1.7.0
 
+- Add capability-based iPhone native-video fullscreen fallback, delayed-readiness button updates, prefixed Safari support and native exit-state tracking. Document system-control/overlay limitations.
+
 - Add a configurable delayed buffering indicator with flowing chevrons, prolonged-wait text, reduced-motion support and MoQ rebuffer-state integration.
 - Animate the skip-button triangles in the seek direction for pointer and keyboard input, with restartable waves and an opt-out.
 - Document integration options and test real network starvation, recovery, pause, teardown and seek feedback in Chromium and WebKit.

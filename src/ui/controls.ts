@@ -1,3 +1,4 @@
+import { FullscreenController } from './fullscreen';
 import {
   BufferingIndicator,
   type BufferingIndicatorOptions,
@@ -652,23 +653,29 @@ export function mountControls(
     closeMenus();
     options.focus();
   };
-  el('fullscreen').onclick = async () => {
-    try {
-      if (screen.ownerDocument.fullscreenElement === screen)
-        await screen.ownerDocument.exitFullscreen();
-      else await screen.requestFullscreen();
-    } catch (e: any) {
-      report(e.message);
-    }
-  };
-  listen(document, 'fullscreenchange', () => {
-    const full = screen.ownerDocument.fullscreenElement === screen;
-    el('fullscreen').setAttribute(
+  const fullscreen = new FullscreenController(screen, video);
+  const fullscreenButton = el('fullscreen') as HTMLButtonElement;
+  const syncFullscreen = () => {
+    fullscreenButton.hidden = !fullscreen.supported;
+    fullscreenButton.disabled = !fullscreen.available;
+    fullscreenButton.setAttribute('aria-pressed', String(fullscreen.active));
+    fullscreenButton.setAttribute(
       'aria-label',
-      full ? 'Exit fullscreen' : 'Fullscreen',
+      fullscreen.active ? 'Exit fullscreen' : 'Fullscreen',
     );
-    el('fullscreen').title = full ? 'Exit fullscreen (F)' : 'Fullscreen (F)';
-  });
+    fullscreenButton.title = fullscreen.active
+      ? 'Exit fullscreen (F)'
+      : fullscreen.available
+        ? 'Fullscreen (F)'
+        : 'Fullscreen unavailable until video is ready or allowed by the browser';
+  };
+  fullscreenButton.onclick = () => {
+    void fullscreen
+      .toggle()
+      .catch((error) => report(error?.message ?? String(error)));
+  };
+  listen(fullscreen, 'change', syncFullscreen);
+  syncFullscreen();
   listen(document, 'pointerdown', (e) => {
     if (
       !(e.target as HTMLElement).closest(
@@ -1109,10 +1116,12 @@ export function mountControls(
   sync();
   return {
     pictureInPicture: pip,
+    fullscreen,
     extras,
     configureLayout: (layout: ControlLayout) =>
       applyControlLayout(screen, layout),
     destroy() {
+      fullscreen.destroy();
       buffering?.destroy();
       pip?.destroy();
       extras?.destroy();
