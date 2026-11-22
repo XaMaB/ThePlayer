@@ -17,6 +17,7 @@ export async function serveFile(res, file) {
   res.writeHead(200, {
     'Content-Type':
       {
+        '': 'text/plain; charset=utf-8',
         '.js': 'text/javascript',
         '.css': 'text/css',
         '.html': 'text/html',

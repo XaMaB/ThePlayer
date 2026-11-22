@@ -1,5 +1,10 @@
 # Release versions
 
+## 1.9.2
+
+- Complete pako 3.0.3 third-party notices with its original MIT and Zlib license texts and copyright notices.
+- Expose the distributed license and NOTICE files through the standalone demo server as readable text.
+
 ## 1.9.1
 
 - Add ThePlayer logo favicons in SVG and multi-resolution ICO formats, plus an Apple touch icon, to the demo and embed pages.

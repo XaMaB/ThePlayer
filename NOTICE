@@ -7,6 +7,7 @@ licensed MIT OR Apache-2.0. Upstream LICENSE-MIT and LICENSE-APACHE included.
 https://github.com/moq-dev/moq
 
 Contains pako 3.0.3 (Vitaly Puzrin, Andrey Tupitsin and contributors),
-licensed MIT AND Zlib. Its license notices are in THIRD-PARTY-pako-LICENSE.
+licensed MIT AND Zlib. Both license texts and their copyright notices
+are reproduced in THIRD-PARTY-pako-LICENSE.
 
 ThePlayer (formerly MoQ Player).
