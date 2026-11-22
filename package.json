@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "description": "Modular MoQ, HLS and MPEG-DASH browser player",
   "type": "module",
@@ -56,7 +56,7 @@
     "test:hls:switch-wait": "node tests/hls-switch-wait-browser.mjs",
     "test:hls:native-clock": "node tests/hls-native-clock-browser.mjs",
     "fixtures:dash": "node scripts/prepare-dash-fixtures.mjs",
-    "test:dash": "node tests/dash-server.mjs && node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs && npm run test:dash:recovery && npm run test:dash:text && npm run test:dash:ll && npm run test:dash:captions && npm run test:dash:metadata && npm run test:dash:xlink && npm run test:dash:http && npm run test:dash:steering && npm run test:dash:thumbnails && npm run test:dash:views && npm run test:dash:telemetry && npm run test:dash:codecs",
+    "test:dash": "node tests/dash-server.mjs && node tests/dash-mpd-browser.mjs && node tests/dash-browser.mjs && node tests/dash-ui-browser.mjs && npm run test:dash:recovery && npm run test:dash:text && npm run test:dash:ll && npm run test:dash:captions && npm run test:dash:metadata && npm run test:dash:xlink && npm run test:dash:http && npm run test:dash:steering && npm run test:dash:thumbnails && npm run test:dash:views && npm run test:dash:telemetry && npm run test:dash:codecs && npm run test:dash:audio-switch",
     "test:dash:public": "node tests/dash-public.mjs",
     "test:dash:recovery": "node tests/dash-recovery-browser.mjs",
     "test:dash:text": "node tests/dash-text-browser.mjs",
@@ -87,7 +87,8 @@
     "test:fullscreen": "node tests/fullscreen-browser.mjs",
     "test:hls:sample-entry": "node tests/hls-sample-entry-browser.mjs",
     "test:seek-preview": "node tests/seek-preview-browser.mjs",
-    "test:moq:captions": "node tests/moq-captions-browser.mjs"
+    "test:moq:captions": "node tests/moq-captions-browser.mjs",
+    "test:dash:audio-switch": "node tests/dash-audio-switch-browser.mjs"
   },
   "dependencies": {
     "pako": "3.0.3"

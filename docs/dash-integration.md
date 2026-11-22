@@ -77,6 +77,10 @@ player.selectSubtitleTrack(player.subtitleTracks[0].name);
 player.selectSubtitleTrack(''); // Off
 ```
 
+Audio language changes prepare the new initialization/index and media before replacing queued audio near the playhead (with a 100 ms scheduling margin). They do not wait for the full forward buffer to drain, and do not require another segment after the old download cursor. The `audiochange` event includes `effectiveAt`, the scheduled media time; fetch, decoding and device output latency still affect when the change is heard. Paused playback stays paused. Quality/view changes keep their separate aligned-boundary policy.
+
+DASH timeline values in catalog/inventory metadata can be `BigInt`. For JSON debug output, preserve their precision with `JSON.stringify(value, (_, item) => typeof item === 'bigint' ? item.toString() : item)`. The demo applies this conversion only to its details panel; SDK metadata stays unchanged.
+
 Check inventories before indexing. Listen for `qualitylevels`, `audiochange`, `subtitletracks` and `subtitlechange`; live MPD updates can change them. `selectedQuality` is the requested selection, while `currentQuality` identifies the quality at the playhead after queued media has drained. The UI shows Auto together with current resolution.
 
 DASH text and CEA overlays are owned by the engine. Do not attach the MoQ bitmap `SubtitleRenderer` for these tracks. Text follows the playback Period and presentationTimeOffset. CEA-608/708 services appear when observed in clear video SEI; service numbers and configured P16 interpretation are retained. Encrypted video captions and separate DASH c608/c708 sample tracks are not currently decoded.

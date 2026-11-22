@@ -1,3 +1,4 @@
+import { diagnosticJson } from './diagnostics.mjs';
 import { readDrmForm, drmSnippet } from './drm.mjs';
 import { dashExamples } from './dash-examples.mjs';
 import { hlsExamples } from './hls-examples.mjs';
@@ -197,15 +198,11 @@ async function openChannel(next: any) {
       if (token !== operation) return;
       text(
         'details',
-        JSON.stringify(
-          {
-            profile: e.detail.profile,
-            tracks: e.detail.tracks,
-            subtitles: player.subtitleTracks,
-          },
-          null,
-          2,
-        ),
+        diagnosticJson({
+          profile: e.detail.profile,
+          tracks: e.detail.tracks,
+          subtitles: player.subtitleTracks,
+        }),
       );
     });
     player.addEventListener('subtitlechange', (e: any) => {

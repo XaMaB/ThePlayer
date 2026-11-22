@@ -1578,8 +1578,23 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
     if (!rep) throw new Error('Unknown DASH quality');
     if (rep.id === old.rep.id && adaptation.id === old.adaptation.id) return;
     const generation = this.generation;
-    const lane = await this.makeLane(adaptation, rep, this.period, old.cursor);
-    let reference = this.references(lane, old.cursor)[0];
+    // Audio is an explicit language choice: replace queued audio near the
+    // playhead instead of waiting for the download cursor (often 12s ahead).
+    const position = () =>
+      kind === 'audio'
+        ? Math.max(
+            this.period.start,
+            Math.min(
+              this.video.currentTime + 0.1,
+              this.period.duration === undefined
+                ? Infinity
+                : this.period.start + this.period.duration - 0.1,
+            ),
+          )
+        : old.cursor;
+    let switchAt = position();
+    const lane = await this.makeLane(adaptation, rep, this.period, switchAt);
+    let reference = this.references(lane, switchAt)[0];
     const deadline = performance.now() + 15000;
     while (!reference && this.isLive && performance.now() < deadline) {
       await delay(200, this.abort.signal);
@@ -1596,17 +1611,60 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
         .find((a) => a.id === adaptation.id)
         ?.representations.find((r) => r.id === rep.id);
       if (updated) lane.rep = updated;
-      reference = this.references(lane, old.cursor)[0];
+      switchAt = position();
+      reference = this.references(lane, switchAt)[0];
     }
-    if (!reference || reference.start > old.cursor + 0.05)
-      throw new Error('DASH rendition has no aligned switching segment');
-    const media = await this.client.get(reference);
+    if (!reference || reference.start > switchAt + 0.05)
+      throw new Error(
+        kind === 'audio'
+          ? 'DASH audio has no segment at playback position'
+          : 'DASH rendition has no aligned switching segment',
+      );
     await this.protect([lane, ...this.lanes.filter((l) => l !== old)]);
+    let media = await this.client.get(reference);
+    if (kind === 'audio') {
+      // A slow request can let playback pass the prepared segment. Fetch the
+      // one covering the new playhead before touching the existing buffer.
+      switchAt = position();
+      while (reference.end <= switchAt + 0.005) {
+        if (generation !== this.generation)
+          throw new Error('DASH seek interrupted switching');
+        if (performance.now() >= deadline)
+          throw new Error('DASH audio switch preparation timed out');
+        const next = this.references(lane, switchAt)[0];
+        if (!next || next.start > switchAt + 0.05)
+          throw new Error('DASH audio has no segment at playback position');
+        reference = next;
+        media = await this.client.get(reference);
+        switchAt = position();
+      }
+    }
     if (generation !== this.generation)
       throw new Error('DASH seek interrupted switching');
+    const reopenEndedAudio =
+      kind === 'audio' && this.media?.readyState === 'ended';
     await this.configure(lane, old);
-    await this.append(lane, reference, media.data);
+    if (kind === 'audio') {
+      await mediaEvent(lane.buffer!, 'updateend', this.abort.signal, () =>
+        lane.buffer!.remove(switchAt, Infinity),
+      );
+      lane.buffer!.appendWindowStart = switchAt;
+      this.ended = false;
+    }
+    try {
+      await this.append(lane, reference, media.data);
+    } finally {
+      if (kind === 'audio') lane.buffer!.appendWindowStart = lane.period.start;
+    }
     this.lanes[this.lanes.indexOf(old)] = lane;
+    // Reopening a fully buffered presentation replaces its audio decoder.
+    // Re-prime at the same position so Firefox releases the old decoder's EOS
+    // state; otherwise playback can reach duration without firing `ended`.
+    if (reopenEndedAudio) {
+      // This internal decoder flush must not cancel the next queued choice.
+      this.retrySeekTarget = this.video.currentTime;
+      this.video.currentTime = this.retrySeekTarget;
+    }
     if (kind === 'quality') {
       this.selectedQuality = index;
       this.qualityTimeline.push({ at: reference.start, index });
@@ -1628,12 +1686,15 @@ export class DashEngine extends EventTarget implements PlaybackEngine {
       });
     } else {
       this.selectedAudioTrack = adaptation.id;
-      this.emit('audiochange', this.audioTracks[index]);
+      this.emit('audiochange', {
+        ...this.audioTracks[index],
+        effectiveAt: switchAt,
+      });
     }
     this.diagnostics.switches.push({
       kind,
       name: kind === 'quality' ? String(index) : adaptation.id,
-      effectiveAt: reference.start,
+      effectiveAt: kind === 'audio' ? switchAt : reference.start,
     });
     this.diagnostics.switches = this.diagnostics.switches.slice(-20);
   }

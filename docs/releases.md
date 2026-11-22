@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.8.1
+
+- Switch DASH audio near the playhead instead of waiting for queued audio to drain. Prepare the target media before replacing buffered audio, including paused playback and the final segment.
+- Serialize exact BigInt DASH metadata as strings in the demo details panel without changing the engine model.
+- Add decoded-audio, pause, end-of-stream and rewind regressions for language switching.
+
 ## 1.8.0
 
 - MoQ CEA-708 now uses the original MP4/SEI and caption decoding core shared with HLS/DASH, including AVC/HEVC extraction and configurable P16 encodings.
