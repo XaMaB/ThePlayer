@@ -23,7 +23,7 @@ The `PlaybackEngine` TypeScript interface in `src/core/player.ts` defines initia
 
 ```mermaid
 flowchart TD
-  App[Application or demo] --> Core[PlayerCore]
+  App[Application] --> Core[PlayerCore]
   Core --> MoQ[MoQ engine]
   Core --> HLS[HLS engine]
   Core --> DASH[DASH engine]
