@@ -56,7 +56,7 @@ try {
           video,
           () => player,
           (error) => failures.push(error),
-          { extras: { queue, frameCapture: true } },
+          { revealMode: 'all', extras: { queue, frameCapture: true } },
         );
         await queue.select(0);
       }, urls);

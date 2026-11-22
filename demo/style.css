@@ -389,6 +389,7 @@ footer {
   gap: 24px;
 }
 .screen {
+  touch-action: manipulation;
   position: relative;
   aspect-ratio: 16/9;
   background: #060810;
@@ -608,9 +609,10 @@ footer {
   opacity: 0;
   pointer-events: none;
 }
-.controls-hidden .video-controls:focus-within,
-.controls-hidden:has(.video-controls:focus-within) .live-indicator,
-.controls-hidden .live-indicator:focus-visible {
+.controls-hidden.controls-keyboard-focus .video-controls:focus-within,
+.controls-hidden.controls-keyboard-focus:has(.video-controls:focus-within)
+  .live-indicator,
+.controls-hidden.controls-keyboard-focus .live-indicator:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1090,6 +1092,9 @@ body[data-embed] .screen {
     opacity 0.18s,
     visibility 0.18s;
 }
+.controls-keyboard-focus .center-controls {
+  transition: none;
+}
 .center-controls .center-button {
   width: 60px;
   height: 60px;
@@ -1194,11 +1199,12 @@ body[data-embed] .screen {
 .seek-feedback.visible {
   opacity: 1;
 }
-.controls-hidden .center-controls {
+.controls-hidden .center-controls,
+.controls-toolbar-only .center-controls {
   opacity: 0;
   visibility: hidden;
 }
-.controls-hidden .center-controls:focus-within {
+.controls-hidden.controls-keyboard-focus .center-controls:focus-within {
   opacity: 1;
   visibility: visible;
 }

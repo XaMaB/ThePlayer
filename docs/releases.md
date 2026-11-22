@@ -1,5 +1,12 @@
 # Release versions
 
+## 1.9.0
+
+- Reveal the toolbar on the first surface tap/click and center playback buttons on the second, without pausing playback. Progressive reveal is the default; integrators can select `revealMode: 'all'`.
+- Add `autoHideMode: 'center-first'` as an alternative to hiding all controls together. Keep the default 1500 ms idle delay per phase.
+- Preserve immediate button actions, keyboard access, open menus and held gestures. Pointer-focused buttons no longer pin the controls indefinitely.
+- Document configuration defaults, lifecycle and native browser-control limitations in the controls integration guide.
+
 ## 1.8.2
 
 - Restore main-video scrubbing while dragging the VOD timeline, enabled by default. Integrators can select release-only seeking with `scrubbing: false` in `mountControls`.

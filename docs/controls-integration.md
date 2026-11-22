@@ -8,6 +8,8 @@ import { ThePlayer, mountControls } from './player.js';
 const player = new ThePlayer(video);
 const controls = mountControls(screen, video, () => player, showError, {
   autoHideDelayMs: 1500,
+  revealMode: 'progressive',
+  autoHideMode: 'all',
   pictureInPicture: { mode: 'auto', automatic: false },
   layout: {
     toolbar: [
@@ -37,6 +39,31 @@ const controls = mountControls(screen, video, () => player, showError, {
 ```
 
 `video`, `screen` and `showError` are application-owned elements/callbacks. Settings apply to every supported transport where the source and browser expose the required capability. The `options` button and right-click menu contain the additional settings in collapsible groups. Live streams do not display the VOD speed selector. Unavailable chapter, queue, remote and capture groups are hidden.
+
+## Showing and hiding controls
+
+The default `revealMode: 'progressive'` uses two surface taps/clicks. The first shows the toolbar; the second adds the center Play/Pause and ±10-second buttons. Neither surface tap changes playback. A third tap keeps the controls visible and restarts the idle timer. Buttons that are already visible act immediately, without requiring another reveal gesture. The toolbar retains its compact Play/Pause button.
+
+Mouse hover/movement reveals the toolbar and refreshes the timer without counting as a surface tap. Touch pointer entry and the synthesized compatibility click do not advance two stages for a single tap. The center reveal happens on click, and a gesture that started on the video cannot activate a newly revealed toolbar button. Keyboard focus/navigation reveals all controls; Space/K and arrow shortcuts retain their playback behavior.
+
+| Option            | Default         | Behavior                                                                                                                                                                                   |
+| ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `revealMode`      | `'progressive'` | Two surface taps reveal toolbar, then center controls. `'all'` reveals both together on activity. Surface clicks never implicitly toggle playback in either mode.                          |
+| `autoHideDelayMs` | `1500`          | Idle milliseconds per hiding phase. `0` disables automatic hiding. Accepts finite values from 0 to 2147483647.                                                                             |
+| `autoHideMode`    | `'all'`         | Hide every visible group together. `'center-first'` hides the center after one idle interval, then the toolbar after another. If only the toolbar is visible, it hides after one interval. |
+
+Paused playback, open menus, held pointer gestures (including mouse/touch timeline dragging), and keyboard focus in controls prevent automatic hiding. Pointer release, menu closing and focus changes restart the timer. A pointer click does not permanently pin controls merely because its button retains focus. After everything hides, the next surface tap starts again with the toolbar. In `center-first` mode, tapping while the toolbar remains visible restores the center controls.
+
+```js
+const controls = mountControls(screen, video, () => player, showError, {
+  revealMode: 'progressive', // or 'all'
+  autoHideMode: 'center-first', // or 'all' (default)
+  autoHideDelayMs: 1500, // per phase; 0 keeps controls visible
+  scrubbing: true,
+});
+```
+
+These are mount-time settings: call `controls.destroy()` and remount to change them. They apply to the shared inline/container-fullscreen UI, including Document PiP. Native video PiP and iPhone native fullscreen use browser-owned controls and do not adopt these options. `npm run test:controls` covers staged mouse/touch reveal, a reveal at the center button's position without accidental pause, keyboard access, both hide modes, menus, dragging and scrubbing in Chromium/WebKit.
 
 ## Layout
 

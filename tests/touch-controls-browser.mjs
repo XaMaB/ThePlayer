@@ -5,7 +5,7 @@ const { server } = faultServer();
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const name = process.env.CONTROLS_TEST_BROWSER ?? 'webkit';
 const browser = await { chromium, webkit }[name].launch();
-const deadline = setTimeout(() => process.exit(1), 60000);
+const deadline = setTimeout(() => process.exit(1), 90000);
 try {
   const page = await browser.newPage({
     hasTouch: true,
@@ -101,7 +101,11 @@ try {
     .locator('.screen')
     .evaluate((s) => s.classList.add('controls-hidden'));
   const bounds = await page.locator('video').boundingBox();
-  await page.touchscreen.tap(bounds.x + 70, bounds.y + 70);
+  const hiddenPlay = await page.locator('#play-toggle').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await page.touchscreen.tap(hiddenPlay.x, hiddenPlay.y);
   await page
     .locator('.screen')
     .dispatchEvent('pointerleave', { pointerType: 'touch', pointerId: 1 });
@@ -117,11 +121,23 @@ try {
     false,
     'controls remain available after finger lift',
   );
+  assert.equal(
+    await page.locator('.center-controls').evaluate((el) => el.inert),
+    true,
+  );
+  await page.locator('#center-play').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#center-play').isVisible(), false);
   // The idle-delay assertion above is complete. Start a fresh interaction for
   // the button checks instead of racing the remainder of the 1500 ms timeout
   // against Playwright's visibility/stability checks on a busy CI runner.
-  await page.touchscreen.tap(bounds.x + 70, bounds.y + 70);
+  // Reveal at the exact play-button position without activating the new button.
+  await page.touchscreen.tap(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height * 0.46,
+  );
   assert.equal(await hidden(), false, 'a fresh touch reveals the controls');
+  await page.locator('#center-play').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#center-play').isVisible(), true);
   assert.equal(await page.evaluate(() => pauseCalls), 0);
   await page.locator('#skip-forward').tap();
   assert.equal(await page.locator('video').evaluate((v) => v.currentTime), 40);
@@ -151,11 +167,15 @@ try {
     null,
     { timeout: 1500 },
   );
-  // Real mouse behavior on a hybrid device remains unchanged.
+  // Mouse surface clicks use the same two stages, without implicit pause.
   await page.locator('video').click({ position: { x: 70, y: 70 } });
-  assert.equal(await page.evaluate(() => pauseCalls), 2);
+  assert.equal(await page.evaluate(() => pauseCalls), 1);
+  await page.locator('#center-play').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#center-play').isVisible(), false);
   await page.locator('video').click({ position: { x: 70, y: 70 } });
-  assert.equal(await page.evaluate(() => playCalls), 2);
+  assert.equal(await page.evaluate(() => playCalls), 1);
+  await page.locator('#center-play').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#center-play').isVisible(), true);
   await page
     .locator('.screen')
     .dispatchEvent('pointerleave', { pointerType: 'mouse' });
@@ -209,6 +229,100 @@ try {
     .dispatchEvent('pointerleave', { pointerType: 'mouse' });
   await page.waitForTimeout(1800);
   assert.equal(await hidden(), false, 'zero disables automatic hiding');
+  // Integrators can reveal everything at once and hide center controls first.
+  await page.evaluate(() => {
+    controls.destroy();
+    window.controls = remountControls({
+      revealMode: 'all',
+      autoHideDelayMs: 0,
+    });
+  });
+  await page.locator('#center-play').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#center-play').isVisible(), true);
+  await page.evaluate(() => {
+    controls.destroy();
+    window.controls = remountControls({
+      autoHideMode: 'center-first',
+      autoHideDelayMs: 600,
+    });
+  });
+  await page.locator('video').click({ position: { x: 70, y: 70 } });
+  await page.locator('#center-play').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#center-play').isVisible(), false);
+  await page.locator('video').click({ position: { x: 70, y: 70 } });
+  await page.locator('#center-play').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#center-play').isVisible(), true);
+  await page.waitForFunction(() =>
+    document
+      .querySelector('.screen')
+      .classList.contains('controls-toolbar-only'),
+  );
+  assert.equal(
+    await hidden(),
+    false,
+    'center-first retains the toolbar for another idle interval',
+  );
+  assert.equal(
+    await page.locator('.center-controls').evaluate((el) => el.inert),
+    true,
+  );
+  await page.waitForFunction(() =>
+    document.querySelector('.screen').classList.contains('controls-hidden'),
+  );
+  // Tab reveals all controls and preserves keyboard access past the idle delay.
+  await page.locator('.screen').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(
+    await page.locator('.center-controls').evaluate((el) => el.inert),
+    false,
+  );
+  assert.equal(
+    await page.evaluate(() => document.activeElement.id),
+    'skip-back',
+  );
+  await page.waitForTimeout(850);
+  assert.equal(await hidden(), false, 'keyboard focus pins the controls');
+  // Mouse interaction clears the keyboard pin, even when a button keeps focus.
+  await page.locator('#mute-toggle').click();
+  await page.waitForFunction(() =>
+    document.querySelector('.screen').classList.contains('controls-hidden'),
+  );
+  // A held mouse gesture pins visibility just like touch; cancellation releases it.
+  await page.locator('video').dispatchEvent('pointerdown', {
+    pointerType: 'mouse',
+    pointerId: 77,
+    bubbles: true,
+  });
+  await page.waitForTimeout(850);
+  assert.equal(
+    await hidden(),
+    false,
+    'held mouse gesture prevents idle hiding',
+  );
+  await page.locator('body').dispatchEvent('pointercancel', {
+    pointerType: 'mouse',
+    pointerId: 77,
+    bubbles: true,
+  });
+  await page.waitForFunction(() =>
+    document.querySelector('.screen').classList.contains('controls-hidden'),
+  );
+  for (const option of [
+    { revealMode: 'invalid' },
+    { autoHideMode: 'invalid' },
+  ]) {
+    assert.equal(
+      await page.evaluate((option) => {
+        try {
+          remountControls(option);
+          return false;
+        } catch (e) {
+          return e instanceof RangeError;
+        }
+      }, option),
+      true,
+    );
+  }
   for (const value of [-1, NaN, Infinity, 2147483648])
     assert.equal(
       await page.evaluate((value) => {
@@ -225,7 +339,7 @@ try {
   await page.evaluate(() => controls.destroy());
   console.log(
     name,
-    'touch reveal, delayed hide, seek/play buttons, held gesture, configurable timeout, menus and mouse compatibility PASS',
+    'touch reveal, delayed hide, seek/play buttons, held gesture, configurable timeout, menus, progressive mouse/touch reveal, keyboard focus and staged hiding PASS',
   );
 } finally {
   clearTimeout(deadline);

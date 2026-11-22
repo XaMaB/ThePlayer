@@ -25,6 +25,10 @@ export interface ControlsOptions {
   pictureInPicture?: false | PictureInPictureOptions;
   /** Idle delay in milliseconds; defaults to 1500. Zero keeps controls visible. */
   autoHideDelayMs?: number;
+  /** Progressive surface taps reveal toolbar, then center controls. Default: progressive. */
+  revealMode?: 'progressive' | 'all';
+  /** Hide together, or hide the center before the toolbar. Default: all. */
+  autoHideMode?: 'all' | 'center-first';
   /** Application localization; keys are HLS X-SKIP-CONTROL-LABEL-ID values. */
   skipLabels?: Readonly<Record<string, string>>;
   labels?: { skip?: string; insertedContent?: string };
@@ -47,6 +51,12 @@ export function mountControls(
     throw new RangeError(
       'autoHideDelayMs must be between 0 and 2147483647 milliseconds',
     );
+  const revealMode = config.revealMode ?? 'progressive';
+  const autoHideMode = config.autoHideMode ?? 'all';
+  if (!['progressive', 'all'].includes(revealMode))
+    throw new RangeError('revealMode must be progressive or all');
+  if (!['all', 'center-first'].includes(autoHideMode))
+    throw new RangeError('autoHideMode must be all or center-first');
   // The existing ThePlayer mark, inline so embeds do not need an asset URL.
   const brand =
     '<span class="player-brand"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M42 48h148v32h-58v128H98V80H42zM150 100l70 44-70 44z" fill="currentColor"/><path d="M42 112h28m-28 32h18m-18 32h28" stroke="currentColor" stroke-width="8" stroke-linecap="round" opacity=".55"/></svg><strong>ThePlayer</strong></span>';
@@ -185,8 +195,13 @@ export function mountControls(
   };
   updatePip();
   let hideTimer: ReturnType<typeof setTimeout>;
-  const touchPointers = new Set<number>();
-  let lastTouchAt = -Infinity;
+  const activePointers = new Set<number>();
+  const toolbar = screen.querySelector<HTMLElement>('.video-controls')!;
+  const center = screen.querySelector<HTMLElement>('.center-controls')!;
+  let visibility: 'hidden' | 'toolbar' | 'all' = 'hidden';
+  let surfaceStep = 0;
+  let keyboardFocus = false;
+  let surfacePointer: number | undefined;
   let previous: any = null;
   let feedbackTimer: ReturnType<typeof setTimeout>;
   let seekAnimations: Animation[] = [];
@@ -209,24 +224,53 @@ export function mountControls(
     options.setAttribute('aria-expanded', 'false');
     if (wasOpen) showControls();
   };
-  function showControls() {
-    screen.classList.remove('controls-hidden');
+  function setVisibility(next: 'hidden' | 'toolbar' | 'all') {
+    visibility = next;
+    screen.classList.toggle('controls-hidden', next === 'hidden');
+    screen.classList.toggle('controls-toolbar-only', next === 'toolbar');
+    toolbar.inert = next === 'hidden';
+    center.inert = next !== 'all';
+    center.setAttribute('aria-hidden', String(next !== 'all'));
+    if (next === 'hidden') surfaceStep = 0;
+  }
+  function scheduleHide() {
     clearTimeout(hideTimer);
     if (autoHideDelayMs === 0) return;
     hideTimer = setTimeout(() => {
       if (
-        !video.paused &&
-        touchPointers.size === 0 &&
-        ccMenu.hidden &&
-        audioMenu.hidden &&
-        qualityMenu.hidden &&
-        menu.hidden &&
-        !screen.querySelector(
-          '.video-controls:focus-within, .center-controls:focus-within, .live-indicator:focus-visible',
-        )
+        video.paused ||
+        activePointers.size > 0 ||
+        !ccMenu.hidden ||
+        !audioMenu.hidden ||
+        !qualityMenu.hidden ||
+        !menu.hidden ||
+        (keyboardFocus &&
+          screen.querySelector(
+            '.video-controls:focus-within, .center-controls:focus-within, .live-indicator:focus-visible',
+          ))
       )
-        screen.classList.add('controls-hidden');
+        return;
+      if (autoHideMode === 'center-first' && visibility === 'all') {
+        surfaceStep = 1;
+        setVisibility('toolbar');
+        scheduleHide();
+      } else setVisibility('hidden');
     }, autoHideDelayMs);
+  }
+  function showControls(expand = false) {
+    // Hover reveals the toolbar without counting as the first surface tap.
+    if (screen.classList.contains('controls-hidden')) {
+      visibility = 'hidden';
+      surfaceStep = 0;
+    }
+    const all = expand || revealMode === 'all' || visibility === 'all';
+    setVisibility(all ? 'all' : 'toolbar');
+    if (expand) surfaceStep = 2;
+    scheduleHide();
+  }
+  function revealSurface() {
+    surfaceStep = Math.min(2, surfaceStep + 1);
+    showControls(surfaceStep === 2);
   }
   async function togglePlay() {
     try {
@@ -261,15 +305,29 @@ export function mountControls(
   el('interstitial-skip').onclick = () => getPlayer()?.skipInterstitial();
   play.onclick = () => void togglePlay();
   el('center-play').onclick = () => void togglePlay();
-  listen(video, 'click', () => {
-    // A tap reveals controls; explicit buttons own touch play/pause.
-    // Safari may deliver the compatibility click as a MouseEvent.
-    if (performance.now() - lastTouchAt < 1000) {
-      showControls();
-      return;
-    }
+  const isSurface = (target: EventTarget | null) =>
+    !(target as Element)?.closest(
+      'button,input,select,textarea,a,.video-popup,.stats-overlay,.video-controls,.center-controls,[contenteditable="true"]',
+    );
+  screen.addEventListener(
+    'click',
+    (event: MouseEvent) => {
+      const revealGesture = surfacePointer !== undefined && event.detail > 0;
+      surfacePointer = undefined;
+      if (!revealGesture) return;
+      // Compatibility mouse events may hit a toolbar button that was hidden at
+      // pointerdown. Consume that click before it can activate the new target.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      screen.focus({ preventScroll: true });
+      revealSurface();
+    },
+    { capture: true, signal: abort.signal },
+  );
+  listen(screen, 'click', (event: MouseEvent) => {
+    if (!isSurface(event.target)) return;
     screen.focus({ preventScroll: true });
-    void togglePlay();
+    revealSurface();
   });
   mute.onclick = () => {
     video.muted = !video.muted;
@@ -686,33 +744,50 @@ export function mountControls(
     )
       closeMenus();
   });
-  listen(screen, 'pointerenter', () => {
+  listen(screen, 'pointerenter', (event: PointerEvent) => {
     keyboardOwner = screen;
-    showControls();
+    if (event.pointerType === 'mouse') showControls();
   });
   listen(screen, 'pointerdown', (event: PointerEvent) => {
     keyboardOwner = screen;
-    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-      touchPointers.add(event.pointerId);
-      lastTouchAt = performance.now();
-    } else {
-      lastTouchAt = -Infinity;
-    }
+    keyboardFocus = false;
+    screen.classList.remove('controls-keyboard-focus');
+    surfacePointer = isSurface(event.target) ? event.pointerId : undefined;
+    activePointers.add(event.pointerId);
     showControls();
   });
-  const finishTouch = (event: PointerEvent) => {
-    if (!touchPointers.delete(event.pointerId)) return;
-    lastTouchAt = performance.now();
-    showControls();
+  const finishPointer = (event: PointerEvent) => {
+    if (
+      event.type === 'pointercancel' ||
+      (event.type === 'pointerup' && !screen.contains(event.target as Node))
+    )
+      surfacePointer = undefined;
+    if (activePointers.delete(event.pointerId)) showControls();
   };
-  listen(document, 'pointerup', finishTouch);
-  listen(document, 'pointercancel', finishTouch);
-  listen(screen, 'pointermove', showControls);
+  listen(document, 'pointerup', finishPointer);
+  listen(document, 'pointercancel', finishPointer);
+  listen(screen, 'lostpointercapture', finishPointer);
+  listen(screen, 'pointermove', (event: PointerEvent) => {
+    if (event.pointerType === 'mouse' || activePointers.has(event.pointerId))
+      showControls();
+  });
   listen(screen, 'focusin', () => {
     keyboardOwner = screen;
-    showControls();
+    showControls(keyboardFocus);
   });
-  listen(screen, 'focusout', showControls);
+  listen(screen, 'focusout', () => {
+    if (visibility !== 'hidden') scheduleHide();
+  });
+  listen(document, 'keydown', (event: KeyboardEvent) => {
+    if (
+      event.key !== 'Tab' &&
+      !screen.contains(screen.ownerDocument.activeElement)
+    )
+      return;
+    keyboardFocus = true;
+    screen.classList.add('controls-keyboard-focus');
+    if (screen.contains(screen.ownerDocument.activeElement)) showControls(true);
+  });
   // Pointer exit does not bypass the idle delay (including touch finger lift).
   listen(document, 'keydown', (e) => {
     if (
@@ -1283,7 +1358,11 @@ export function mountControls(
       clearInterval(statsTimer);
       for (const child of Array.from(screen.children))
         if (!originalChildren.has(child)) child.remove();
-      screen.classList.remove('controls-hidden');
+      screen.classList.remove(
+        'controls-hidden',
+        'controls-toolbar-only',
+        'controls-keyboard-focus',
+      );
     },
   };
 }
