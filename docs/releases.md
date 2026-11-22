@@ -1,5 +1,10 @@
 # Release versions
 
+## 1.9.1
+
+- Add ThePlayer logo favicons in SVG and multi-resolution ICO formats, plus an Apple touch icon, to the demo and embed pages.
+- Include icon assets in builds and serve them with the correct content types from the standalone demo server.
+
 ## 1.9.0
 
 - Reveal the toolbar on the first surface tap/click and center playback buttons on the second, without pausing playback. Progressive reveal is the default; integrators can select `revealMode: 'all'`.

@@ -40,6 +40,9 @@ export const server = await tlsServer(config, async (req, res) => {
     '/core.js': 'core.js',
     '/style.css': 'style.css',
     '/version.json': 'version.json',
+    '/favicon.svg': 'favicon.svg',
+    '/favicon.ico': 'favicon.ico',
+    '/apple-touch-icon.png': 'apple-touch-icon.png',
   };
   if (/^\/(?:chunks\/[a-zA-Z0-9_-]+|hls|dash)\.js$/.test(u.pathname))
     return serveFile(res, path.join(dist, u.pathname.slice(1)));

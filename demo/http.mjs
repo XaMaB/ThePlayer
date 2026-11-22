@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 import {
   createServer as httpsServer,
   request as httpsRequest,
@@ -14,11 +15,16 @@ export function json(res, data, status = 200) {
 export async function serveFile(res, file) {
   const data = await readFile(file);
   res.writeHead(200, {
-    'Content-Type': file.endsWith('.js')
-      ? 'text/javascript'
-      : file.endsWith('.css')
-        ? 'text/css'
-        : 'text/html',
+    'Content-Type':
+      {
+        '.js': 'text/javascript',
+        '.css': 'text/css',
+        '.html': 'text/html',
+        '.json': 'application/json',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+        '.png': 'image/png',
+      }[extname(file)] ?? 'application/octet-stream',
     'Cache-Control': 'no-cache',
     'X-Content-Type-Options': 'nosniff',
   });

@@ -1,6 +1,6 @@
 {
   "name": "theplayer",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "private": true,
   "description": "Modular MoQ, HLS and MPEG-DASH browser player",
   "type": "module",

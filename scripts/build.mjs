@@ -61,6 +61,18 @@ await Promise.all(
     (name) => copyFile(path.join(root, name), path.join(output, name)),
   ),
 );
+await Promise.all(
+  [
+    ['logo.svg', 'favicon.svg'],
+    ['favicon.ico', 'favicon.ico'],
+    ['apple-touch-icon.png', 'apple-touch-icon.png'],
+  ].map(([source, destination]) =>
+    copyFile(
+      path.join(root, 'assets/brand', source),
+      path.join(output, destination),
+    ),
+  ),
+);
 const embed = (await readFile(path.join(root, 'demo/index.html'), 'utf8'))
   .replace('<body>', '<body data-embed>')
   .replace('ThePlayer · Demo', 'ThePlayer · Embed');
