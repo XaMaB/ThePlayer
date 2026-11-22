@@ -56,6 +56,7 @@ try {
       video,
       () => window.player,
       () => {},
+      { scrubbing: false },
     );
   });
   await page.waitForFunction(
@@ -202,6 +203,97 @@ try {
   assert.equal(await preview.isVisible(), false);
   await page.evaluate(() => window.controls.destroy());
   assert.equal(await preview.count(), 0);
+  // Default scrubbing follows the main video, coalesces movement and cleans up.
+  await page.evaluate(async () => {
+    const { mountControls } = await import('/player.js');
+    window.duration = 120;
+    window.seeks = [];
+    window.controls = mountControls(
+      document.querySelector('.screen'),
+      document.querySelector('video'),
+      () => window.player,
+      () => {},
+    );
+  });
+  await page.waitForFunction(
+    () => document.querySelector('#seek-bar').max === '120',
+  );
+  const active = page.locator('#seek-bar');
+  const ar = await active.boundingBox();
+  const ax = (f) => ar.x + 8 + f * (ar.width - 16);
+  const ay = ar.y + ar.height / 2;
+  await page.mouse.move(ax(0.2), ay);
+  await page.mouse.down();
+  await page.mouse.move(ax(0.6), ay);
+  await page.waitForTimeout(350);
+  const movingTarget = Number(await active.inputValue());
+  assert.equal(
+    await page.evaluate(() => document.querySelector('video').currentTime),
+    movingTarget,
+  );
+  assert.ok(
+    await page.evaluate(
+      () => window.seeks.length >= 1 && window.seeks.length <= 2,
+    ),
+  );
+  await page.mouse.move(ax(0.8), ay);
+  const finalTarget = Number(await active.inputValue());
+  await page.mouse.up();
+  assert.equal(
+    await page.evaluate(() => document.querySelector('video').currentTime),
+    finalTarget,
+  );
+  const finalCount = await page.evaluate(() => window.seeks.length);
+  await page.waitForTimeout(300);
+  assert.equal(
+    await page.evaluate(() => window.seeks.length),
+    finalCount,
+    'release clears trailing seeks',
+  );
+  // A busy decoder receives only the latest position after seeked.
+  await page.evaluate(() => {
+    window.busySeek = true;
+    Object.defineProperty(document.querySelector('video'), 'seeking', {
+      configurable: true,
+      get: () => window.busySeek,
+    });
+  });
+  const busyCount = await page.evaluate(() => window.seeks.length);
+  await page.mouse.move(ax(0.2), ay);
+  await page.mouse.down();
+  await page.mouse.move(ax(0.6), ay);
+  await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => window.seeks.length), busyCount);
+  const latestTarget = Number(await active.inputValue());
+  await page.evaluate(() => {
+    window.busySeek = false;
+    document.querySelector('video').dispatchEvent(new Event('seeked'));
+  });
+  assert.equal(await page.evaluate(() => window.seeks.at(-1)), latestTarget);
+  assert.equal(await page.evaluate(() => window.seeks.length), busyCount + 1);
+  await page.mouse.up();
+  for (const cancel of ['pointercancel', 'loadstart', 'destroy']) {
+    await page.mouse.move(ax(0.3), ay);
+    await page.mouse.down();
+    await page.mouse.move(ax(0.7), ay);
+    await page.evaluate((kind) => {
+      if (kind === 'destroy') window.controls.destroy();
+      else if (kind === 'loadstart')
+        document.querySelector('video').dispatchEvent(new Event(kind));
+      else
+        document
+          .querySelector('#seek-bar')
+          .dispatchEvent(new PointerEvent(kind));
+    }, cancel);
+    const count = await page.evaluate(() => window.seeks.length);
+    await page.waitForTimeout(300);
+    assert.equal(
+      await page.evaluate(() => window.seeks.length),
+      count,
+      cancel + ' clears pending seeks',
+    );
+    await page.mouse.up();
+  }
   // Verify the deferred pointer seek with a real MSE engine, not only a mock clock.
   const base = `http://127.0.0.1:${server.address().port}`;
   await page.goto(base + '/harness.html');
@@ -224,6 +316,7 @@ try {
       video,
       () => window.player,
       () => {},
+      { scrubbing: false },
     );
     window.loading = window.player.load({ protocol: 'hls', url, quality: 0 });
   }, base + '/fixture/fmp4/index.m3u8');
@@ -273,6 +366,50 @@ try {
         document.querySelector('video').getVideoPlaybackQuality()
           .totalVideoFrames > 40,
     ),
+  );
+  // Real paused playback must display a new decoded frame before release.
+  await page.evaluate(async () => {
+    window.controls.destroy();
+    const { mountControls } = await import('/player.js');
+    const video = document.querySelector('video');
+    video.pause();
+    window.controls = mountControls(
+      document.querySelector('.screen'),
+      video,
+      () => window.player,
+      () => {},
+    );
+    window.scrubFrame = -1;
+    const recordFrame = (_now, frame) => {
+      window.scrubFrame = frame.mediaTime;
+      video.requestVideoFrameCallback(recordFrame);
+    };
+    video.requestVideoFrameCallback(recordFrame);
+  });
+  await page.locator('.screen').hover();
+  await page.locator('#seek-bar').waitFor({ state: 'visible' });
+  const sr = await page.locator('#seek-bar').boundingBox();
+  await page.mouse.move(sr.x + 8 + 0.2 * (sr.width - 16), sr.y + sr.height / 2);
+  await page.mouse.down();
+  await page.waitForFunction(
+    () => window.scrubFrame >= 2 && window.scrubFrame < 5,
+    null,
+    { timeout: 15000 },
+  );
+  assert.equal(
+    await page.evaluate(() => document.querySelector('video').paused),
+    true,
+  );
+  await page.mouse.move(sr.x + 8 + 0.4 * (sr.width - 16), sr.y + sr.height / 2);
+  const released = Number(await page.locator('#seek-bar').inputValue());
+  await page.mouse.up();
+  await page.waitForFunction((t) => {
+    const video = document.querySelector('video');
+    return !video.seeking && Math.abs(video.currentTime - t) < 0.1;
+  }, released);
+  assert.equal(
+    await page.evaluate(() => document.querySelector('video').paused),
+    true,
   );
   assert.deepEqual(errors, []);
   console.log(

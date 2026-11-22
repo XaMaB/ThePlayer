@@ -1,5 +1,11 @@
 # Release versions
 
+## 1.8.2
+
+- Restore main-video scrubbing while dragging the VOD timeline, enabled by default. Integrators can select release-only seeking with `scrubbing: false` in `mountControls`.
+- Coalesce drag updates, wait for unfinished seeks, and commit the exact destination on release. Cancel pending updates on gesture cancellation, source load and teardown.
+- Preserve the destination-time bubble, thumbnails, keyboard seeking and the existing playing/paused state.
+
 ## 1.8.1
 
 - Switch DASH audio near the playhead instead of waiting for queued audio to drain. Prepare the target media before replacing buffered audio, including paused playback and the final segment.

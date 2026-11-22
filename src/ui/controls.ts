@@ -17,6 +17,8 @@ export interface ControlsOptions {
   buffering?: false | BufferingIndicatorOptions;
   /** Directional triangle wave on skip buttons; respects reduced motion. Default: true. */
   seekAnimation?: boolean;
+  /** Seek while dragging the timeline, at most every 200 ms. Default: true. */
+  scrubbing?: boolean;
   layout?: ControlLayout;
   extras?: false | ControlExtrasOptions;
   /** PiP defaults to adaptive manual activation; false removes the control. */
@@ -847,6 +849,34 @@ export function mountControls(
   let previewHideTimer: ReturnType<typeof setTimeout>;
   let scrubbing = false;
   let scrubPointer: number | undefined;
+  let scrubTimer: ReturnType<typeof setTimeout> | undefined;
+  let scrubLastSeek = -Infinity;
+  let scrubPending: number | undefined;
+  let scrubPlayer: any;
+  const applyScrub = () => {
+    clearTimeout(scrubTimer);
+    scrubTimer = undefined;
+    if (
+      !scrubbing ||
+      scrubPending === undefined ||
+      scrubPlayer !== getPlayer() ||
+      getPlayer()?.diagnostics?.interstitial?.active ||
+      !seekBounds()
+    )
+      return;
+    // Do not restart an unfinished seek: the newest target wins on seeked.
+    if (video.seeking) return;
+    const delay = 200 - (performance.now() - scrubLastSeek);
+    if (delay > 0) {
+      scrubTimer = setTimeout(applyScrub, delay);
+      return;
+    }
+    const target = scrubPending;
+    scrubPending = undefined;
+    scrubLastSeek = performance.now();
+    video.currentTime = target;
+  };
+  listen(video, 'seeked', applyScrub);
   let previewTime = 0;
   const clock = (seconds: number) => {
     const n = Math.max(0, Math.floor(seconds));
@@ -965,6 +995,10 @@ export function mountControls(
     seek.value = String(pointerTime(event));
     seek.setAttribute('aria-valuetext', clock(Number(seek.value)));
     showPreview(Number(seek.value));
+    if (config.scrubbing !== false) {
+      scrubPending = Number(seek.value);
+      applyScrub();
+    }
   };
   listen(seek, 'pointerdown', (event: PointerEvent) => {
     if (event.button !== 0 || scrubbing || !seekBounds()) return;
@@ -973,6 +1007,8 @@ export function mountControls(
     event.preventDefault();
     seek.focus({ preventScroll: true });
     scrubbing = true;
+    scrubPlayer = getPlayer();
+    scrubLastSeek = -Infinity;
     scrubPointer = event.pointerId;
     seek.setPointerCapture(event.pointerId);
     moveScrub(event);
@@ -980,9 +1016,17 @@ export function mountControls(
   const finishScrub = (commit: boolean) => {
     if (!scrubbing) return;
     scrubbing = false;
+    clearTimeout(scrubTimer);
+    scrubPending = undefined;
     const pointer = scrubPointer;
     scrubPointer = undefined;
-    if (commit) video.currentTime = Number(seek.value);
+    if (
+      commit &&
+      scrubPlayer === getPlayer() &&
+      !getPlayer()?.diagnostics?.interstitial?.active &&
+      seekBounds()
+    )
+      video.currentTime = Number(seek.value);
     else seek.value = String(video.currentTime);
     if (pointer !== undefined && seek.hasPointerCapture(pointer))
       seek.releasePointerCapture(pointer);

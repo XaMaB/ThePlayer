@@ -27,7 +27,7 @@ ThePlayer is a modular browser player for live television and on-demand video. I
 - **Adaptive Picture-in-Picture:** Document PiP with controls/captions where available, native video PiP fallback and configurable browser-driven Auto PiP. [Configuration and browser limits](docs/picture-in-picture.md).
 - **Configurable controls and extras:** toolbar layouts, VOD speed, subtitle appearance, chapters, queue navigation, optional frame capture and native/Cast sender adapters. [Integrator guide and limitations](docs/controls-integration.md).
 - **Buffering and seek feedback:** delayed flowing chevrons during buffering, configurable placement/colors/text, and directional skip-button waves with reduced-motion support. [Configuration](docs/controls-integration.md#buffering-indicator-and-seek-feedback).
-- **Shared controls:** current Auto quality, resolution badges, play/pause, ±10 s seeking, keyboard shortcuts, adaptive fullscreen (including iPhone native-video fallback) and MediaInfo. LIVE appears only for live presentations.
+- **Shared controls:** current Auto quality, resolution badges, play/pause, ±10 s seeking, configurable video scrubbing (`scrubbing: false` selects seek-on-release), keyboard shortcuts, adaptive fullscreen (including iPhone native-video fallback) and MediaInfo. LIVE appears only for live presentations.
 - **Independent integration:** explicit source configuration, separate engine modules and no Origin/Relay dashboard dependency.
 
 ## Protocols
